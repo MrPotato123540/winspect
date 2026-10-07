@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include "list.h"
 
 // Row count computed by the compiler from the table itself
 // No separate MAX_COMMANDS constant that we could forget to update
