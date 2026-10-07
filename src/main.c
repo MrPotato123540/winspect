@@ -10,7 +10,7 @@
 // for example: "winspect pe notepad.exe" -> cmd_pe gets argc=1, argv[0]="notepad.exe"
 // Return value becomes the process exit code: 0 = success, anything else = failure
 // CI relies on this, a non-zero exit code turns the GitHub Actions step red
-typedef int (*cmd_fn)(int argc, char **argv);
+typedef int (*cmd_fn)(int argc, char** argv);
 
 // Placeholder for Phase 1 (process/thread tree via Toolhelp)
 // static = internal linkage, only main.c can see this function
@@ -75,7 +75,7 @@ static int cmd_pe(int argc, char** argv)
  *      const size_t num_cmds = sizeof(commands) / sizeof(commands[0]);
  *      for (size_t i = 0; i < num_cmds; ++i) {
  *          if (strcmp(argv[1], commands[i].name) == 0) {
- *              return commands[i].fn(argc - 1, argv + 1);
+ *              return commands[i].fn(argc - 2, argv + 2);
  *          }
  *      }
  *
@@ -90,14 +90,13 @@ static int cmd_pe(int argc, char** argv)
  *      argv[2] = "--tree"
  *      argv[3] = "1024"
  *
- *   State inside cmd_list(argc - 1, argv + 1):
- *      argc    = 3                  (decremented by 1)
- *      argv[0] = "list"             (argv shifted forward: argv + 1)
- *      argv[1] = "--tree"
- *      argv[2] = "1024"
+ *   State inside cmd_list(argc - 2, argv + 2):
+ *      argc    = 2                  (decremented by 2)
+ *      argv[0] = "--tree"           (argv shifted forward: argv + 2)
+ *      argv[1] = "1024"
  *
- *   Result: cmd_list receives its own command name as argv[0] and its
- *   flags at argv[1..argc-1], completely decoupled from the root binary name.
+ *   Result: cmd_list receives only its own flags, starting at argv[0].
+ *   It never sees the root binary name or its own command name.
  *
  * 3. DESIGN PROPERTIES:
  * ----------------------------------------------------------------------------
@@ -111,21 +110,30 @@ static int cmd_pe(int argc, char** argv)
  * ----------------------------------------------------------------------------
  * - Immutability: Declared 'const', signaling to MSVC/GCC that this table
  *   and its embedded string literals must never be altered at runtime.
- * - PE Placement: The compiler emits this struct and its strings directly into
+ * - PE Placement: The compiler usually emits this struct and its strings into
  *   the .rdata (Read-Only Data) section of the generated winspect.exe binary.
- * - OS Loader Setup: During process creation, ntdll!LdrLoadDll / VirtualAlloc
- *   maps the .rdata section with memory page protection PAGE_READONLY.
- *   The underlying Page Table Entry (PTE) has its R/W flag cleared (R/W = 0).
- * - Hardware Enforcement:
- *   If faulty code attempts to write to this table:
+ * - OS Loader Setup: During process creation, the kernel maps the whole .exe
+ *   as an image section (ntdll!LdrLoadDll is only for DLLs loaded later).
+ *   .rdata pages end up PAGE_READONLY, their PTEs have the R/W flag cleared.
+ * - Relocation Nuance: The table holds pointers (name, fn, help). With ASLR the
+ *   image may load at a different base, so the ntdll loader patches these
+ *   pointers using the .reloc section. While doing so it makes the pages
+ *   temporarily writable, then restores PAGE_READONLY.
+ * - Compile-Time Enforcement:
+ *   A direct write never even compiles, because the table is const:
  *
- *      commands[0].name = "overwrite";  // Undefined Behavior / Fault
+ *      commands[0].name = "overwrite";  // MSVC C2166 / GCC: "assignment of member in read-only object"
+ *
+ * - Hardware Enforcement:
+ *   Only by casting const away does the write reach the CPU:
+ *
+ *      *(const char **)&commands[0].name = "overwrite";  // compiles, faults at runtime
  *
  *   The Memory Management Unit (MMU) catches the write attempt against a
- *   read-only PTE. Because the CPU's CR0.WP (Write Protect, Bit 16) flag is
- *   enabled, the processor immediately raises a Page Fault (#PF, Vector 14).
- *   The Windows kernel translates this hardware fault into an unhandled
- *   STATUS_ACCESS_VIOLATION (0xC0000005) and terminates the process.
+ *   read-only PTE and raises a Page Fault (#PF, Vector 14). A user-mode write
+ *   to a read-only page always faults (CR0.WP only matters for kernel-mode
+ *   writes). The Windows kernel translates this hardware fault into
+ *   STATUS_ACCESS_VIOLATION (0xC0000005) and, if unhandled, terminates the process.
  *
  * - Phase 2 Verification:
  *   When cmd_pe parses winspect.exe, inspect the Section Header table:
@@ -144,7 +152,7 @@ static const struct {
 
 static void usage(void) {
     puts("winspect - Windows internals inspector\n\ncommands:");
-    for (size_t = 0; i < COMMAND_COUNT, i++) {
+    for (size_t i = 0; i < COMMAND_COUNT; i++) {
         // %-8s pads the name to 8 chars so the help texts line up in a column
         printf("  %-8s %s\n", commands[i].name, commands[i].help);
     }
@@ -171,10 +179,12 @@ static void usage(void) {
  *      - Total cache lines required = ceil(240 / 64) = 4 cache lines.
  *
  *   B. Hardware Spatial Prefetching:
- *      - Accessing commands[0] immediately triggers the CPU's hardware prefetcher
- *        (L2 Streamer / Spatial Prefetcher) to pull all 4 contiguous cache lines
- *        from L2/L3 straight into the L1D cache (1-4 cycle latency).
- *      - Result: Zero DRAM bus transactions (0 LLC misses) throughout the scan.
+ *      - Accessing commands[0] can trigger the CPU's hardware prefetcher
+ *        (L2 Streamer / Spatial Prefetcher) to pull the neighbouring cache
+ *        lines of the table into cache ahead of the scan.
+ *      - Caveat: the rows only hold pointers. strcmp reads the name strings
+ *        themselves, which live elsewhere in .rdata, so those are separate
+ *        accesses. On a cold start everything comes from disk/RAM anyway.
  *
  *   C. Branch Prediction & Instruction Overhead:
  *      - Hash Table Overhead: Computing a string hash (e.g., FNV-1a or djb2)
@@ -184,20 +194,27 @@ static void usage(void) {
  *      - Binary Search Overhead: Non-linear indexing causes pipeline stalls and
  *        penalizes the CPU Branch Predictor on branch mispredictions (~15-20
  *        cycle penalty per mispredicted jump).
- *      - Linear strcmp Loop: A tight, unrolled sequential loop with predictable
- *        forward fall-through. For N <= 10, linear comparison is orders of
- *        magnitude faster and incurs virtually zero instruction bloat.
+ *      - Linear strcmp Loop: A short sequential loop with predictable forward
+ *        fall-through, and most strcmp calls stop at the first differing
+ *        character. For N <= 10 it is at least as fast in practice and far
+ *        simpler (not measured, and for a lookup that runs once per program
+ *        start it does not need to be).
  *
- * 2. ZERO-COPY STACK SLICING (argc - 2, argv + 2):
+ * 2. ZERO-COPY ARGUMENT SLICING (argc - 2, argv + 2):
  * ----------------------------------------------------------------------------
- * Avoids any heap allocation (malloc), buffer copying (strdup), or tokenization.
- * Instead, it relies purely on pointer arithmetic over the CRT-initialized
- * argument vector located on the process stack.
+ * The slicing itself does no heap allocation (malloc), buffer copying (strdup),
+ * or tokenization. It relies purely on pointer arithmetic over the argument
+ * vector the CRT already built.
+ *
+ * Where argv lives on Windows: NOT on the stack. Before main() runs, the MSVC
+ * CRT startup code calls GetCommandLineA/W, splits that single string into
+ * words and builds the argv array on the HEAP. The string itself comes from
+ * PEB->ProcessParameters->CommandLine (the field Phase 4 'inspect' reads).
  *
  *   CLI Invocation:
  *      $ winspect.exe pe --headers target.dll
  *
- *   Physical Memory Layout on Stack (char** argv array of pointers):
+ *   Memory Layout of argv (CRT heap, char** array of pointers):
  *   -------------------------------------------------------------------------
  *   Address Offset       Vector Slot     Pointer Target (String in Memory)
  *   -------------------------------------------------------------------------
@@ -205,7 +222,7 @@ static void usage(void) {
  *   argv + 1 (+8B)    -> argv[1]      -> "pe\0"            (Subcommand)
  *   argv + 2 (+16B)   -> argv[2]      -> "--headers\0"     (First Option)
  *   argv + 3 (+24B)   -> argv[3]      -> "target.dll\0"    (Operand)
- *   argv + 4 (+32B)   -> argv[4]      -> NULL              (POSIX/Win32 sentinel)
+ *   argv + 4 (+32B)   -> argv[4]      -> NULL              (argv[argc] == NULL, C standard)
  *   -------------------------------------------------------------------------
  *
  *   Pointer Arithmetic Mechanics:
@@ -244,7 +261,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    fprintf(strderr, "unknown command: %s\n\n", argv[1]);
+    fprintf(stderr, "unknown command: %s\n\n", argv[1]);
     usage();
     return 1;
 }
