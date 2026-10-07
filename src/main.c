@@ -13,6 +13,21 @@
 // CI relies on this, a non-zero exit code turns the GitHub Actions step red
 typedef int (*cmd_fn)(int argc, char** argv);
 
+// Placeholder for Phase 1 (process/thread tree via Toolhelp)
+// static = internal linkage, only main.c can see this function
+// When it moves to list.c it loses static and gets a prototype in a header
+static int cmd_list(int argc, char** argv)
+{
+    // list takes no arguments yet
+    // (void) cast tells the compiler "unused on purpose"
+    // Without it /W4 raises C4100 (unreferenced formal parameter)
+    (void)argc;
+    (void)argv;
+
+    puts("list: not implemented yet (Phase 1)");
+    return 0;
+}
+
 // Placeholder for Phase 2 (PE header parsing)
 static int cmd_pe(int argc, char** argv)
 {
