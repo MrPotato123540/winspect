@@ -1,0 +1,14 @@
+# Build outputs: build.bat writes to build/, VS writes to out/
+build/
+out/
+
+# VS per-user state (open tabs, IntelliSense cache), never shared
+.vs/
+*.user
+CMakeUserPresets.json
+
+# Compiler/linker artifacts in case something builds in the source tree
+*.obj
+*.exe
+*.pdb
+*.ilk
