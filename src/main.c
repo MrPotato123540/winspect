@@ -1,5 +1,8 @@
 #include <stdio.h>
 #include <string.h>
+
+// cmd_list now lives in list.c (Phase 1)
+// The header gives main.c the prototype, the linker connects the two .obj files
 #include "list.h"
 
 // Row count computed by the compiler from the table itself
@@ -12,21 +15,6 @@
 // Return value becomes the process exit code: 0 = success, anything else = failure
 // CI relies on this, a non-zero exit code turns the GitHub Actions step red
 typedef int (*cmd_fn)(int argc, char** argv);
-
-// Placeholder for Phase 1 (process/thread tree via Toolhelp)
-// static = internal linkage, only main.c can see this function
-// When it moves to list.c it loses static and gets a prototype in a header
-static int cmd_list(int argc, char** argv)
-{
-    // list takes no arguments yet
-    // (void) cast tells the compiler "unused on purpose"
-    // Without it /W4 raises C4100 (unreferenced formal parameter)
-    (void)argc;
-    (void)argv;
-
-    puts("list: not implemented yet (Phase 1)");
-    return 0;
-}
 
 // Placeholder for Phase 2 (PE header parsing)
 static int cmd_pe(int argc, char** argv)
