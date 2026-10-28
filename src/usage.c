@@ -61,6 +61,15 @@ static const struct { const char *name, *text; } usage_table[] = {
         "each item also shows its target, arguments and timestamps. Flags items that\n"
         "launch a script host or point into a user-writable dir. Read-only. Usage:\n"
         "  winspect jumplist [<file | folder>] [--json | --csv]\n" },
+    { "hive",
+        "winspect hive - browse an OFFLINE registry hive file (NTUSER.DAT, SYSTEM,\n"
+        "SOFTWARE, SAM, Amcache.hve ... copied off a machine): header facts (dirty\n"
+        "= transaction logs not replayed, checksum, embedded original path), then a\n"
+        "key with its last-write time, subkeys and decoded values (strings, numbers,\n"
+        "hex for binary). --recurse walks the subtree. Never touches the live\n"
+        "registry; the file is only read. The per-user / SYSTEM artifact commands\n"
+        "take the same files with --hive (userassist, mru, bam, shimcache). Usage:\n"
+        "  winspect hive <file> [<key\\\\path>] [--recurse] [--json]\n" },
     { "list",
         "winspect list - the live process tree from a Toolhelp snapshot: each process\n"
         "under its real parent (PID reuse is detected by creation time), with thread\n"
@@ -306,30 +315,35 @@ static const struct { const char *name, *text; } usage_table[] = {
         "winspect shimcache - list the Application Compatibility Cache (ShimCache):\n"
         "executable paths Windows has seen, newest first, with each file's\n"
         "last-modified time. Shows programs that existed (even if since deleted); on\n"
-        "Windows 10+ it does not by itself prove execution. Windows 10/11 layout\n"
-        "only; usually needs elevation. Read-only. Usage:\n"
-        "  winspect shimcache [--json | --csv]\n" },
+        "Windows 10+ it does not by itself prove execution. Windows 10/11 and\n"
+        "Windows 7 layouts (Windows 7 entries also carry an \"executed\" flag);\n"
+        "usually needs elevation. --hive reads an offline SYSTEM hive instead.\n"
+        "Read-only. Usage:\n"
+        "  winspect shimcache [--hive <SYSTEM>] [--json | --csv]\n" },
     { "bam",
         "winspect bam - Background Activity Moderator records: per user (SID), the\n"
-        "executables that ran and when each last ran. Windows 10 1709+; usually needs\n"
-        "elevation. Read-only. Usage:\n"
-        "  winspect bam [--json | --csv]\n" },
+        "executables that ran and when each last ran, from both the current\n"
+        "(bam\\State\\UserSettings) and the legacy 1709 (bam\\UserSettings) key.\n"
+        "Windows 10 1709+; usually needs elevation. --hive reads an offline SYSTEM\n"
+        "hive instead. Read-only. Usage:\n"
+        "  winspect bam [--hive <SYSTEM>] [--json | --csv]\n" },
     { "userassist",
         "winspect userassist - programs the current user started from the Explorer\n"
         "GUI (Start menu, desktop, Explorer windows), with run count and last run\n"
         "time, from the UserAssist registry key. Names are stored ROT13-encoded and\n"
         "often begin with a Known Folder GUID; both are decoded. Flags programs run\n"
-        "from user-writable dirs or script hosts. Covers the current user's hive\n"
-        "only. Read-only. Usage:\n"
-        "  winspect userassist [--json | --csv]\n" },
+        "from user-writable dirs or script hosts. Live mode covers the current user;\n"
+        "--hive reads another user's NTUSER.DAT (an offline copy). Read-only. Usage:\n"
+        "  winspect userassist [--hive <NTUSER.DAT>] [--json | --csv]\n" },
     { "mru",
         "winspect mru - what the current user recently typed or opened, in order:\n"
         "RunMRU (commands typed into Win+R), TypedPaths (paths typed into the\n"
         "Explorer address bar) and RecentDocs (recently opened documents). The newest\n"
         "entry of each list also gets its time (the key's last-write time). Flags\n"
         "Run-box commands that start a script host or carry an encoded PowerShell\n"
-        "command. Current user only. Read-only. Usage:\n"
-        "  winspect mru [--json | --csv]\n" },
+        "command. Live mode: current user; --hive reads another user's NTUSER.DAT.\n"
+        "Read-only. Usage:\n"
+        "  winspect mru [--hive <NTUSER.DAT>] [--json | --csv]\n" },
     { "firewall",
         "winspect firewall - Windows Defender Firewall rules read straight from the\n"
         "registry (local store + Group Policy store): direction, action, protocol,\n"

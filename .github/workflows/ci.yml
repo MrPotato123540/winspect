@@ -30,7 +30,7 @@ jobs:
           SRC="src/md5.c src/jsonutil.c src/ioc.c src/entropy.c src/pecksum.c src/imphash_ords.c src/pfparse.c src/artparse.c src/capa.c src/lnkparse.c src/rights.c src/destlist.c"
           cc -I inc -std=c11 $SAN $SRC tests/test_util.c -o test_util_san -lm
           ./test_util_san
-          cc -I inc -std=c11 $SAN src/ioc.c src/pfparse.c src/artparse.c src/lnkparse.c src/rights.c src/capa.c src/cfb.c src/destlist.c tests/fuzz_parsers.c -o fuzz_parsers
+          cc -I inc -std=c11 $SAN src/ioc.c src/pfparse.c src/artparse.c src/lnkparse.c src/rights.c src/capa.c src/cfb.c src/destlist.c src/regf.c tests/fuzz_parsers.c -o fuzz_parsers
           ./fuzz_parsers 300000
           # Compound-file reader: random files from tests/wine/cfbwrite.py must
           # read back byte-identical (sizes + MD5 per stream).
@@ -56,6 +56,21 @@ jobs:
           cc -I inc -std=c11 -g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all \
              src/cfb.c src/destlist.c src/jsonutil.c tests/destlist_dump.c -o destlist_dump
           python3 -I tests/destlist_check.py ./destlist_dump jlref/JumpList.Test/TestFiles
+      - name: Registry hive reader vs real hives (regipy test data)
+        # Real NTUSER.DAT / SYSTEM / SOFTWARE / Amcache.hve files from the
+        # regipy project (data only, pinned commit). Header fields, key/value
+        # totals, value-type histograms and specific values must match the
+        # facts regipy's tests assert; then the reader is mutation-fuzzed
+        # starting from a real hive.
+        run: |
+          git clone -q https://github.com/mkorman90/regipy regipy
+          git -C regipy checkout -q c6de929abc37d8315d1c31aba5e937db636f3303
+          SAN="-g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all"
+          cc -I inc -std=c11 $SAN src/regf.c src/jsonutil.c tests/regf_dump.c -o regf_dump
+          python3 -I tests/regf_check.py ./regf_dump regipy/regipy_tests/data
+          cc -I inc -std=c11 $SAN src/regf.c tests/fuzz_regf.c -o fuzz_regf
+          python3 -c "import lzma;open('ntuser.dat','wb').write(lzma.open('regipy/regipy_tests/data/NTUSER.DAT.xz').read())"
+          ./fuzz_regf ntuser.dat 2000
 
   # Functional tests on Linux: cross-compile with MinGW and run the real .exe
   # under wine. fixtures.py seeds a throw-away prefix with known-bad artifacts
@@ -83,6 +98,10 @@ jobs:
           python3 tests/wine/fixtures.py ./winspect.exe
           python3 tests/wine/wsmoke.py ./winspect.exe
           python3 tests/wine/fuzz.py ./winspect.exe 60 150
+          # Offline-hive mode (--hive / hive) on real Windows hives
+          git clone -q https://github.com/mkorman90/regipy regipy
+          git -C regipy checkout -q c6de929abc37d8315d1c31aba5e937db636f3303
+          python3 tests/wine/hives.py ./winspect.exe regipy/regipy_tests/data
 
   build:
     runs-on: windows-latest
@@ -129,7 +148,7 @@ jobs:
           foreach ($args in @(@("pe",$f), @("pe",$f,"--json"), @("sign",$f), @("hash",$f), @("strings",$f,"--ioc"))) { Smoke $args }
           foreach ($c in "list","services","drivers","autoruns","pipes","hosts","net","arp","routes","sessions","shares","certstore","tasks","objects","defender","usb","prefetch","shimcache","bam","firewall","taskcache","wmi","lnk","hunt","posture","events","hidden","sweep","userassist","mru","jumplist") { Smoke @($c); Smoke @($c,"--json") }
           foreach ($c in "inspect","threads","handles","regions","token","secinfo","modules","verify","triage") { Smoke @($c,"$p"); Smoke @($c,"$p","--json") }
-          foreach ($args in @(@("modules","$p","--unsigned"), @("firewall","--inbound","--allow","--active","--csv"), @("autoruns","--csv"), @("objects","--global","--type","Mutant"), @("drivers","--sig"), @("services","--flagged"), @("prefetch","--dir","C:\Windows\Prefetch","--csv"), @("streams","C:\Windows\System32\drivers\etc"), @("lnk","--json"), @("autoruns","--sig"), @("services","--sig","--flagged"), @("events","--summary"), @("prefetch","--flagged"), @("hunt","--all"), @("handles","--find","ntdll","--type","File"))) { Smoke $args }
+          foreach ($args in @(@("modules","$p","--unsigned"), @("firewall","--inbound","--allow","--active","--csv"), @("autoruns","--csv"), @("objects","--global","--type","Mutant"), @("drivers","--sig"), @("services","--flagged"), @("prefetch","--dir","C:\Windows\Prefetch","--csv"), @("streams","C:\Windows\System32\drivers\etc"), @("lnk","--json"), @("autoruns","--sig"), @("services","--sig","--flagged"), @("events","--summary"), @("prefetch","--flagged"), @("hunt","--all"), @("handles","--find","ntdll","--type","File"), @("hive","C:\Windows\System32\config\SYSTEM"))) { Smoke $args }
           Write-Host "all commands ran without crashing"
 
       # --- MinGW toolchain ----------------------------------------------------
@@ -213,6 +232,21 @@ jobs:
           $hl = Receive-Job $job | ConvertFrom-Json
           Stop-Process -Id $hp.Id -Force
           if (-not ($hl | Where-Object { $_.name -like "*wsfind_marker*" })) { throw "handles <pid>: read/write file handle not named" }
+          # Offline hive reader vs the live registry on the SAME data: save
+          # HKLM\SYSTEM to a real regf file, then the shimcache / bam records
+          # read through --hive must equal the ones read through the live API.
+          $hv = Join-Path $env:RUNNER_TEMP "system.hiv"
+          reg save HKLM\SYSTEM $hv /y | Out-Null
+          foreach ($c in "shimcache","bam") {
+            $live = (& $exe $c --json | ConvertFrom-Json)
+            $off  = (& $exe $c --hive $hv --json | ConvertFrom-Json)
+            $lk = ($live | ForEach-Object { "$($_.path)|$($_.file_modified)$($_.last_run)" }) -join "`n"
+            $ok = ($off  | ForEach-Object { "$($_.path)|$($_.file_modified)$($_.last_run)" }) -join "`n"
+            if ($lk -ne $ok) { throw "$c --hive differs from live: $(@($live).Count) live vs $(@($off).Count) offline" }
+            Write-Host "$c --hive matches live ($(@($live).Count) records)"
+          }
+          $hj = & $exe hive $hv "Select" --json | ConvertFrom-Json
+          if (-not $hj.checksum_ok) { throw "hive: checksum of a reg-saved hive must be valid" }
           Write-Host "streams + events (+summary) + net + handles functional checks passed"
 
       - name: Smoke test (MinGW)
@@ -227,5 +261,5 @@ jobs:
           smoke pe "$f"; smoke pe "$f" --json; smoke sign "$f"; smoke hash "$f"; smoke strings "$f" --ioc
           for c in list services drivers autoruns pipes hosts net arp routes sessions shares certstore tasks objects defender usb prefetch shimcache bam firewall taskcache wmi lnk hunt posture events hidden sweep userassist mru jumplist; do smoke $c; smoke $c --json; done
           for c in inspect threads handles regions token secinfo modules verify triage; do smoke $c "$p"; smoke $c "$p" --json; done
-          smoke modules "$p" --unsigned; smoke firewall --inbound --allow --active --csv; smoke autoruns --csv; smoke objects --global --type Mutant; smoke drivers --sig; smoke services --flagged; smoke streams /c/Windows/System32/drivers/etc; smoke lnk --json; smoke autoruns --sig; smoke services --sig --flagged; smoke events --summary; smoke prefetch --flagged; smoke hunt --all; smoke handles --find ntdll --type File
+          smoke modules "$p" --unsigned; smoke firewall --inbound --allow --active --csv; smoke autoruns --csv; smoke objects --global --type Mutant; smoke drivers --sig; smoke services --flagged; smoke streams /c/Windows/System32/drivers/etc; smoke lnk --json; smoke autoruns --sig; smoke services --sig --flagged; smoke events --summary; smoke prefetch --flagged; smoke hunt --all; smoke handles --find ntdll --type File; smoke hive /c/Windows/System32/config/SYSTEM
           echo "all commands ran without crashing"

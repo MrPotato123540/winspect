@@ -11,14 +11,21 @@
 #include <stdint.h>
 
 // ---- ShimCache -------------------------------------------------------------
-// Called once per entry: executable path (UTF-8) and the file's last-modified
-// FILETIME as recorded by the cache (NOT an execution time).
-typedef void (*shim_cb)(const char *path, uint64_t modified, void *ctx);
+// Called once per entry: executable path (UTF-8), the file's last-modified
+// FILETIME as recorded by the cache (NOT an execution time), and executed:
+// 1 / 0 from the Windows 7 InsertFlags "executed" bit (0x2), -1 where the
+// layout has no such flag (Windows 10/11).
+typedef void (*shim_cb)(const char *path, uint64_t modified, int executed, void *ctx);
 
-// Parse a Windows 10/11 AppCompatCache value. Returns the number of entries
-// reported, -1 if the blob is too short / not the Win10 layout, or -2 if an
-// entry was malformed (entries before it are still reported).
+// Parse an AppCompatCache value: Windows 10/11 ("10ts" entries after a 0x30 /
+// 0x34 header) or Windows 7 / Server 2008 R2 (magic 0xBADC0FEE, 128-byte
+// header, 48-byte x64 or 32-byte x86 entries pointing at their path; layout
+// from Mandiant's public ShimCache paper). Returns the number of entries
+// reported, -1 if the blob is too short / another layout (XP, 8.x), or -2 if
+// an entry was malformed (entries before it are still reported).
+// *format (may be NULL) receives "win10", "win7-x64" or "win7-x86".
 int shim_parse(const unsigned char *d, size_t n, shim_cb cb, void *ctx);
+int shim_parse_ex(const unsigned char *d, size_t n, shim_cb cb, void *ctx, const char **format);
 
 // ---- Firewall rules --------------------------------------------------------
 // Copy the value of field <key> ("Action", "Dir", "App", ...) out of a rule

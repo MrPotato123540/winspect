@@ -14,14 +14,19 @@
 //
 // For an investigator this answers "did THIS user start that program, how
 // often, and when last" - complementary to Prefetch (any user) and BAM.
-// Only the current user's hive is loaded by default, so only they are shown.
+// The live registry only has the current user's hive loaded; --hive reads
+// another user's NTUSER.DAT (copied off the machine or out of a triage
+// collection) through the offline reader (regsrc.c / regf.c). Known Folder
+// GUIDs are only resolved in live mode - in a foreign hive they would be
+// resolved against THIS machine's folders, so they are left as they are.
 //
-// Read-only: RegEnum/RegQuery only.
+// Read-only: RegEnum/RegQuery or an in-memory copy of the hive file.
 
 #include "userassist.h"
 #include "artparse.h"
 #include "ioc.h"
 #include "jsonutil.h"
+#include "regsrc.h"
 
 #include <windows.h>
 #include <objbase.h>
@@ -30,7 +35,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define UA_ROOT L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\UserAssist"
+#define UA_ROOT "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\UserAssist"
 
 typedef struct {
     char time[24];
@@ -82,80 +87,111 @@ static void ft_str(uint64_t t, char *out, size_t n)
              st.wHour, st.wMinute, st.wSecond);
 }
 
+typedef struct {
+    uarow *rows;
+    size_t n, cap;
+    const char *kind;
+    int resolve;            // resolve Known Folder GUIDs (live mode only)
+} uactx;
+
+static void on_value(const char *name, uint32_t type, const unsigned char *data, size_t len, void *vctx)
+{
+    uactx *c = (uactx *)vctx;
+    uint32_t runs = 0;
+    uint64_t last = 0;
+    if (type != REG_BINARY || data == NULL || !userassist_record(data, len, &runs, &last)) return;
+    if (c->n == c->cap) {
+        size_t nc = c->cap ? c->cap * 2 : 64;
+        uarow *nr = (uarow *)realloc(c->rows, nc * sizeof *nr);
+        if (nr == NULL) return;
+        c->rows = nr;
+        c->cap = nc;
+    }
+    uarow *r = &c->rows[c->n];
+    snprintf(r->program, sizeof r->program, "%s", name);
+    rot13_inplace(r->program);
+    if (strncmp(r->program, "UEME_", 5) == 0) return;    // session bookkeeping, not a program
+    if (c->resolve) resolve_known_folder(r->program, sizeof r->program);
+    r->runs = runs;
+    ft_str(last, r->time, sizeof r->time);
+    r->kind = c->kind;
+    r->reason = ioc_script_host(r->program) ? "script host / LOLBin started from the GUI"
+              : ioc_user_writable(r->program) ? "program in a user-writable dir"
+              : NULL;
+    c->n++;
+}
+
+typedef struct { char guids[32][64]; int n; } guidlist;
+static void on_guid(const char *name, void *vctx)
+{
+    guidlist *g = (guidlist *)vctx;
+    if (g->n < 32) snprintf(g->guids[g->n++], sizeof g->guids[0], "%s", name);
+}
+
 int cmd_userassist(int argc, char **argv)
 {
     int mode = 0;
+    const char *hive = NULL;
     for (int a = 0; a < argc; a++) {
         if (strcmp(argv[a], "--json") == 0)      mode = 1;
         else if (strcmp(argv[a], "--csv") == 0)  mode = 2;
+        else if (strcmp(argv[a], "--hive") == 0 && a + 1 < argc) hive = argv[++a];
         else {
             fprintf(stderr, "userassist: unexpected argument '%s'\n", argv[a]);
             return 1;
         }
     }
 
-    HKEY root;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, UA_ROOT, 0, KEY_READ, &root) != ERROR_SUCCESS) {
+    regsrc src;
+    if (hive != NULL) {
+        char err[512];
+        if (regsrc_open_hive(&src, hive, err, sizeof err) != 0) {
+            fprintf(stderr, "userassist: %s\n", err);
+            return 1;
+        }
+        if (regsrc_dirty(&src))
+            fprintf(stderr, "userassist: note: hive is dirty (transaction logs not replayed) - "
+                            "the newest changes may be missing\n");
+    } else {
+        regsrc_open_live(&src, HKEY_CURRENT_USER, NULL, "HKCU");
+    }
+    rkey root;
+    if (rk_open(&src, UA_ROOT, &root) != 0) {
         if (mode == 1)      puts("[]");
         else if (mode == 2) puts("last_run,runs,kind,program,reason");
-        else                puts("userassist: no UserAssist data for this user");
+        else                printf("userassist: no UserAssist data in %s\n", src.label);
+        regsrc_close(&src);
         return 0;
     }
-    CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);    // for SHGetKnownFolderPath
+    if (hive == NULL) CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);    // for SHGetKnownFolderPath
 
-    uarow *rows = NULL;
-    size_t nrows = 0, cap = 0;
-    for (DWORD g = 0;; g++) {
-        WCHAR guid[64];
-        DWORD gl = 64;
-        if (RegEnumKeyExW(root, g, guid, &gl, NULL, NULL, NULL, NULL) != ERROR_SUCCESS) break;
-        const char *kind = _wcsicmp(guid, L"{CEBFF5CD-ACE2-4F4F-9178-9926F41749EA}") == 0 ? "executable"
-                         : _wcsicmp(guid, L"{F4E57C4B-2036-45F0-A9AB-443BCFE33D9F}") == 0 ? "shortcut"
-                         : "other";
-        WCHAR sub[128];
-        _snwprintf(sub, 128, L"%ls\\Count", guid);
-        sub[127] = 0;
-        HKEY k;
-        if (RegOpenKeyExW(root, sub, 0, KEY_READ, &k) != ERROR_SUCCESS) continue;
-        for (DWORD i = 0;; i++) {
-            WCHAR wname[1024];
-            DWORD nl = 1024, dl = 128, type = 0;
-            BYTE data[128];
-            LONG rc = RegEnumValueW(k, i, wname, &nl, NULL, &type, data, &dl);
-            if (rc == ERROR_MORE_DATA) continue;
-            if (rc != ERROR_SUCCESS) break;
-            uint32_t runs = 0;
-            uint64_t last = 0;
-            if (type != REG_BINARY || !userassist_record(data, dl, &runs, &last)) continue;
-            if (nrows == cap) {
-                size_t nc = cap ? cap * 2 : 64;
-                uarow *nr = (uarow *)realloc(rows, nc * sizeof *nr);
-                if (nr == NULL) break;
-                rows = nr;
-                cap = nc;
-            }
-            uarow *r = &rows[nrows];
-            WideCharToMultiByte(CP_UTF8, 0, wname, -1, r->program, sizeof r->program, NULL, NULL);
-            rot13_inplace(r->program);
-            if (strncmp(r->program, "UEME_", 5) == 0) continue;    // session bookkeeping, not a program
-            resolve_known_folder(r->program, sizeof r->program);
-            r->runs = runs;
-            ft_str(last, r->time, sizeof r->time);
-            r->kind = kind;
-            r->reason = ioc_script_host(r->program) ? "script host / LOLBin started from the GUI"
-                      : ioc_user_writable(r->program) ? "program in a user-writable dir"
-                      : NULL;
-            nrows++;
-        }
-        RegCloseKey(k);
+    uactx c;
+    memset(&c, 0, sizeof c);
+    c.resolve = hive == NULL;
+    static guidlist gl;
+    gl.n = 0;
+    rk_subkeys(&src, &root, on_guid, &gl);
+    for (int g = 0; g < gl.n; g++) {
+        const char *guid = gl.guids[g];
+        c.kind = _stricmp(guid, "{CEBFF5CD-ACE2-4F4F-9178-9926F41749EA}") == 0 ? "executable"
+               : _stricmp(guid, "{F4E57C4B-2036-45F0-A9AB-443BCFE33D9F}") == 0 ? "shortcut"
+               : "other";
+        char sub[160];
+        snprintf(sub, sizeof sub, "%s\\%s\\Count", UA_ROOT, guid);
+        rkey k;
+        if (rk_open(&src, sub, &k) != 0) continue;
+        rk_values(&src, &k, on_value, &c);
+        rk_close(&k);
     }
-    RegCloseKey(root);
-    CoUninitialize();
+    rk_close(&root);
+    if (hive == NULL) CoUninitialize();
+    uarow *rows = c.rows;
+    size_t nrows = c.n;
     qsort(rows, nrows, sizeof *rows, by_time_desc);
 
     unsigned flagged = 0;
     if (mode == 0) {
-        puts("userassist  (GUI launches by the current user, newest first)\n");
+        printf("userassist  (GUI launches recorded in %s, newest first)\n\n", src.label);
         printf("      %-19s  %5s  %-10s %s\n", "last run (UTC)", "runs", "kind", "program");
     } else if (mode == 2) {
         puts("last_run,runs,kind,program,reason");
@@ -191,5 +227,6 @@ int cmd_userassist(int argc, char **argv)
         puts("]");
     }
     free(rows);
+    regsrc_close(&src);
     return 0;
 }

@@ -68,6 +68,9 @@ reg(HK + r'SYSTEM\CurrentControlSet\Services\bam\State\UserSettings\S-1-5-21-1-2
     '/v', r'\Device\HarddiskVolume3\Users\bob\AppData\Local\Temp\a.exe', '/t', 'REG_BINARY', '/d', ft.hex())
 reg(HK + r'SYSTEM\CurrentControlSet\Services\bam\State\UserSettings\S-1-5-21-1-2-3-1001',
     '/v', 'Version', '/t', 'REG_DWORD', '/d', '1')
+# legacy (1709) location, left behind after upgrades: must be read too
+reg(HK + r'SYSTEM\CurrentControlSet\Services\bam\UserSettings\S-1-5-21-1-2-3-1001',
+    '/v', r'\Device\HarddiskVolume3\Tools\oldtool.exe', '/t', 'REG_BINARY', '/d', ft.hex())
 # --- shimcache (Win10 layout, 2 entries) ---------------------------------------
 def shim_entry(path, t):
     p = path.encode('utf-16-le')
@@ -256,7 +259,8 @@ checks = [
     (['firewall', '--json'], [('Test Listener', 'true')], ['Benign Block"']),
     (['defender', '--json'], [('C:\\\\Temp\\\\drop', None), ('DisableRealtimeMonitoring', None)], []),
     (['usb', '--json'], [('SanDisk', None), ('"generated_serial":true', None)], []),
-    (['bam', '--json'], [('a.exe', None), ('"user_writable_dir":true', None)], ['"path":"Version"']),
+    (['bam', '--json'], [('a.exe', '"location":"State"'), ('"user_writable_dir":true', None),
+                          ('oldtool.exe', '"location":"legacy"')], ['"path":"Version"']),
     (['shimcache', '--json'], [('tool.exe', None), ('notepad.exe', None)], []),
     (['taskcache', '--json'], [('HiddenOne', 'no SD value'), ('GoodOne', None)], []),
     (['tasks', '--json'], [('GoodOne', 'hidden task outside')], []),

@@ -80,6 +80,7 @@
 #include "userassist.h"
 #include "mru.h"
 #include "jumplist.h"
+#include "hive.h"
 #include "tasks.h"
 
 // cmd_modules lives in modules.c: a live process's loaded modules
@@ -219,6 +220,7 @@ static const struct {
     { "lnk",      cmd_lnk,      "shortcut files (default: Recent folder)",  "file" },
     { "streams",  cmd_streams,  "alternate data streams + Mark-of-the-Web", "file" },
     { "jumplist", cmd_jumplist, "Jump Lists: recent items per application",  "file" },
+    { "hive",     cmd_hive,     "browse an offline registry hive file",      "file" },
 
     { "list",    cmd_list,    "process/thread tree via Toolhelp",           "process" },
     { "inspect", cmd_inspect, "dump a live process PEB (cmdline/modules)",  "process" },

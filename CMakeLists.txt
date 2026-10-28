@@ -53,6 +53,9 @@ add_executable(winspect
     src/mru.c
     src/cfb.c
     src/destlist.c
+    src/regf.c
+    src/regsrc.c
+    src/hive.c
     src/jumplist.c
     src/tasks.c
     src/modules.c

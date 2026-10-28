@@ -69,15 +69,56 @@ static void u16_to_u8(const unsigned char *s, size_t nchars, char *out, size_t n
     out[o] = '\0';
 }
 
-int shim_parse(const unsigned char *d, size_t n, shim_cb cb, void *ctx)
+// Windows 7: header 128 bytes (magic @0, entry count @4); entries describe
+// UTF-16 paths stored elsewhere in the blob (offset from the blob start).
+static int shim_parse_win7(const unsigned char *d, size_t n, shim_cb cb, void *ctx, const char **format)
 {
+    size_t count = rd32(d + 4);
+    if (count > (n - 128) / 32) return -2;
+    // x64 entries are 48 bytes with a 64-bit path offset @8; x86 entries are
+    // 32 bytes with a 32-bit path offset @4. Pick x64 when its first entry
+    // makes sense (path stored after the entry table, inside the blob).
+    int x64 = 0;
+    if (count == 0) {
+        x64 = 1;
+    } else if (128 + count * 48 <= n) {
+        uint64_t off = rd64(d + 128 + 8);
+        size_t len = (size_t)d[128] | ((size_t)d[129] << 8);
+        x64 = off >= 128 + count * 48 && off <= n && len <= n - off;
+    }
+    size_t esz = x64 ? 48 : 32;
+    if (128 + count * esz > n) return -2;
+    if (format) *format = x64 ? "win7-x64" : "win7-x86";
+    int reported = 0;
+    for (size_t i = 0; i < count; i++) {
+        const unsigned char *e = d + 128 + i * esz;
+        size_t len = (size_t)e[0] | ((size_t)e[1] << 8);
+        uint64_t off = x64 ? rd64(e + 8) : rd32(e + 4);
+        uint64_t mtime = rd64(e + (x64 ? 16 : 8));
+        uint32_t insert = rd32(e + (x64 ? 24 : 16));
+        if (off > n || len > n - off) return -2;
+        char path[1024];
+        u16_to_u8(d + off, len / 2, path, sizeof path);
+        cb(path, mtime, (insert & 0x2) ? 1 : 0, ctx);
+        reported++;
+    }
+    return reported;
+}
+
+int shim_parse_ex(const unsigned char *d, size_t n, shim_cb cb, void *ctx, const char **format)
+{
+    if (format) *format = "";
     if (n < 0x34) {
         return -1;
     }
+    if (rd32(d) == 0xBADC0FEEu) {
+        return n >= 128 ? shim_parse_win7(d, n, cb, ctx, format) : -1;
+    }
     size_t pos = rd32(d);
     if (pos != 0x30 && pos != 0x34) {
-        return -1;      // Windows 8.x / 7 / XP layouts are different - not handled
+        return -1;      // Windows 8.x / XP layouts are different - not handled
     }
+    if (format) *format = "win10";
     int count = 0;
     while (pos + 12 <= n && memcmp(d + pos, "10ts", 4) == 0) {
         size_t esize = rd32(d + pos + 8);
@@ -96,11 +137,16 @@ int shim_parse(const unsigned char *d, size_t n, shim_cb cb, void *ctx)
         }
         char path[1024];
         u16_to_u8(e + 2, psize / 2, path, sizeof path);
-        cb(path, mtime, ctx);
+        cb(path, mtime, -1, ctx);
         count++;
         pos += 12 + esize;
     }
     return count;
+}
+
+int shim_parse(const unsigned char *d, size_t n, shim_cb cb, void *ctx)
+{
+    return shim_parse_ex(d, n, cb, ctx, NULL);
 }
 
 int fw_field(const char *rule, const char *key, char *out, size_t n)

@@ -62,6 +62,9 @@ Sırayla oku. Her dosya bir öncekinin üstüne kurulu:
 19. **[18 — Kıyas turu](18-kiyas-turu.md)**
     Her komutun esin aldığı araçla yan yana karşılaştırılması: ne eksikti, ne
     eklendi, nasıl doğrulandı; karşılaştırmanın bulduğu üç gerçek hata.
+20. **[19 — Çevrimdışı hive](19-cevrimdisi-hive.md)**
+    Registry hive dosyalarını (NTUSER.DAT, SYSTEM, Amcache.hve) API olmadan
+    okumak; `hive` komutu ve `--hive` seçenekleri; gerçek hive'larla doğrulama.
 
 ## Aklında tut: tek cümlelik fikir
 

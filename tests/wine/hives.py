@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+# Offline-hive mode of winspect under wine, checked against real Windows hives
+# from the regipy project's test data (its .xz data files only; no regipy code
+# runs). Expected values are facts about those files that regipy's validation
+# cases assert, re-derived where regipy counts differently:
+#   * userassist: 29 programs (regipy reports 62 because it also counts the
+#     two UEME_CTLCUACount session counters and lists each value twice);
+#     EXCEL.EXE 4 runs 2012-04-04 15:43:14, RemoteDesktop 8 runs.
+#   * mru: TypedPaths exactly as regipy's exact_expected_result, key time.
+#   * bam: 55 records = 31 in bam\State\UserSettings + 24 in the legacy
+#     bam\UserSettings key (regipy reads both too); the dwm.exe record.
+#   * shimcache: Windows 7 x86 cache, 330 entries (regipy's 660 counts the
+#     identical ControlSet001 and ControlSet002 copies); the mfeann.exe entry
+#     with the executed flag.
+# Usage: python3 tests/wine/hives.py <winspect.exe> <regipy_tests/data dir>
+import json, lzma, os, shutil, subprocess, sys, tempfile
+exe, data = sys.argv[1:3]
+pfx = os.path.abspath(os.environ.get('WINEPREFIX', 'wpfx'))
+env = dict(os.environ, WINEPREFIX=pfx, WINEDEBUG='-all')
+WINE = os.environ.get('WINE') or shutil.which('wine64') or shutil.which('wine') or '/usr/lib/wine/wine64'
+hdir = os.path.join(pfx, 'drive_c', 'hives')
+os.makedirs(hdir, exist_ok=True)
+fails = 0
+
+def hive(name):
+    out = os.path.join(hdir, name)
+    if not os.path.exists(out):
+        with open(out, 'wb') as f:
+            f.write(lzma.open(os.path.join(data, name + '.xz')).read())
+    return 'C:\\hives\\' + name
+
+def run(*args):
+    with tempfile.TemporaryFile() as o:
+        rc = subprocess.run([WINE, exe] + list(args), env=env, stdout=o, stderr=subprocess.DEVNULL,
+                            stdin=subprocess.DEVNULL, timeout=300).returncode
+        o.seek(0)
+        return rc, o.read().decode('utf-8', 'replace')
+
+def check(cond, msg):
+    global fails
+    print(('ok   ' if cond else 'FAIL ') + msg)
+    fails += 0 if cond else 1
+
+rc, out = run('userassist', '--hive', hive('NTUSER.DAT'), '--json')
+ua = json.loads(out)
+check(len(ua) == 29, f'userassist --hive: {len(ua)} programs (29 expected)')
+xl = [r for r in ua if r['program'].endswith('Office14\\EXCEL.EXE')]
+check(xl and xl[0]['runs'] == 4 and xl[0]['last_run'] == '2012-04-04 15:43:14', 'userassist: EXCEL.EXE runs/time')
+rd = [r for r in ua if r['program'] == 'Microsoft.Windows.RemoteDesktop']
+check(rd and rd[0]['runs'] == 8 and rd[0]['last_run'] == '2012-04-03 22:06:58', 'userassist: RemoteDesktop runs/time')
+
+rc, out = run('mru', '--hive', hive('NTUSER_BAGMRU.DAT'), '--json')
+tp = [r for r in json.loads(out) if r['list'] == 'TypedPaths']
+want = ['cmd', 'C:\\Offline\\AD', 'git', 'powershell', 'C:\\Program Files', 'Network',
+        '\\\\wsl$\\Ubuntu\\projects\\CAD316_001\\partition_p1', '\\\\wsl$\\Ubuntu\\projects', '\\\\wsl$\\Ubuntu',
+        'C:\\Users\\tony\\Github', 'C:\\Users\\tony\\Github\\velocity-client-master', 'C:\\Users\\tony\\Github\\cogz',
+        'C:\\Users\\tony\\Github\\cogz\\cogz', 'Quick access', 'C:\\ProgramData\\chocolatey\\lib\\yara\\tools',
+        'C:\\Training\\MT01\\exercise']
+check([r['value'] for r in tp] == want, 'mru --hive: TypedPaths url1..url16 in order')
+check(tp and tp[0]['time'] == '2022-02-06 13:46:04', 'mru: TypedPaths key last-write time')
+
+rc, out = run('bam', '--hive', hive('SYSTEM_WIN_10_1709'), '--json')
+bam = json.loads(out)
+check(len(bam) == 55, f'bam --hive: {len(bam)} records (55 expected)')
+check(sum(r['location'] == 'legacy' for r in bam) == 24, 'bam: 24 records only in the legacy key')
+dwm = [r for r in bam if r['path'] == '\\Device\\HarddiskVolume2\\Windows\\System32\\dwm.exe' and r['location'] == 'State']
+check(dwm and dwm[0]['sid'] == 'S-1-5-90-0-1' and dwm[0]['last_run'] == '2020-04-19 09:09:35', 'bam: dwm.exe record')
+
+rc, out = run('shimcache', '--hive', hive('SYSTEM'), '--json')
+sc = json.loads(out)
+check(len(sc) == 330, f'shimcache --hive (Windows 7): {len(sc)} entries (330 expected)')
+mf = [r for r in sc if r['path'] == '\\??\\C:\\Program Files\\McAfee\\VirusScan Enterprise\\mfeann.exe']
+check(mf and mf[0]['file_modified'] == '2011-01-12 12:08:00' and mf[0]['executed'] is True, 'shimcache: mfeann.exe + executed flag')
+
+rc, out = run('hive', hive('NTUSER.DAT'), 'Software\\Microsoft\\Windows\\CurrentVersion\\Run', '--json')
+h = json.loads(out)
+check(h['checksum_ok'] and not h['dirty'] and h['keys'][0]['values'][0]['name'] == 'Sidebar', 'hive: Run key browse')
+rc, out = run('hive', hive('NTUSER.DAT'), '--recurse', '--json')
+check(len(json.loads(out)['keys']) == 1812, 'hive --recurse: 1812 keys')
+rc, out = run('hive', hive('SYSTEM_WIN_10_1709'), 'Select', '--json')
+check(json.loads(out)['dirty'] is True, 'hive: dirty hive reported')
+rc, out = run('userassist', '--hive', 'C:\\nonexistent.dat')
+check(rc == 1, 'missing hive file -> rc 1')
+
+print(f'\n{fails} failure(s)')
+sys.exit(1 if fails else 0)

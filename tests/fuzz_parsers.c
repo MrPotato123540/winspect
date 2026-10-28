@@ -9,13 +9,14 @@
 //
 // Build: cc -std=c11 -g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all \
 //          -I inc src/ioc.c src/pfparse.c src/artparse.c src/lnkparse.c src/rights.c \
-//          src/capa.c src/cfb.c src/destlist.c tests/fuzz_parsers.c -o fuzz_parsers
+//          src/capa.c src/cfb.c src/destlist.c src/regf.c tests/fuzz_parsers.c -o fuzz_parsers
 // Run:   ./fuzz_parsers [iterations]      (exit 0 = no sanitizer findings)
 
 #include "pfparse.h"
 #include "artparse.h"
 #include "lnkparse.h"
 #include "destlist.h"
+#include "regf.h"
 #include "ioc.h"
 #include "rights.h"
 #include "capa.h"
@@ -71,7 +72,7 @@ static size_t mutate(const unsigned char *src, size_t n, unsigned char *dst, siz
 
 static void nop_name(const char *s, void *c) { (void)s; (void)c; }
 static void nop_vol(const char *d, uint32_t s, uint64_t t, void *c) { (void)d; (void)s; (void)t; (void)c; }
-static void nop_shim(const char *p, uint64_t t, void *c) { (void)p; (void)t; (void)c; }
+static void nop_shim(const char *p, uint64_t t, int x, void *c) { (void)p; (void)t; (void)x; (void)c; }
 static void nop_stream(const char *nm, const unsigned char *d, size_t n, void *c)
 {
     // Touch every byte so ASan sees any out-of-bounds stream buffer.
@@ -157,10 +158,47 @@ static size_t seed_destlist(unsigned char *d)
 }
 static void nop_dl(const dl_entry *e, void *ctx) { (void)e; (void)ctx; }
 
+// Minimal hive: base block + one bin holding a root key (compressed name)
+// with one subkey (lf list) and two values: an inline DWORD and a 16400-byte
+// "big data" value (db record, two segments).
+static void put32(unsigned char *p, uint32_t v) { p[0] = (unsigned char)v; p[1] = (unsigned char)(v >> 8); p[2] = (unsigned char)(v >> 16); p[3] = (unsigned char)(v >> 24); }
+static size_t seed_regf(unsigned char *d)
+{
+    memset(d, 0, 4096 + 20480);
+    memcpy(d, "regf", 4); put32(d + 4, 1); put32(d + 8, 1); put32(d + 20, 1); put32(d + 24, 5);
+    put32(d + 36, 0x20); put32(d + 40, 20480);
+    unsigned char *b = d + 4096;
+    memcpy(b, "hbin", 4); put32(b + 8, 20480);
+    // root nk @0x20 (size 88)
+    unsigned char *c = b + 0x20; put32(c, (uint32_t)-88);
+    memcpy(c + 4, "nk", 2); c[6] = 0x2C; put32(c + 4 + 20, 1); put32(c + 4 + 28, 0x78);
+    put32(c + 4 + 36, 2); put32(c + 4 + 40, 0xE0); c[4 + 72] = 4; memcpy(c + 4 + 76, "ROOT", 4);
+    // lf @0x78 (size 16) -> child @0x88
+    c = b + 0x78; put32(c, (uint32_t)-16); memcpy(c + 4, "lf", 2); c[6] = 1; put32(c + 8, 0x88);
+    // child nk @0x88 (size 88), name "Sub"
+    c = b + 0x88; put32(c, (uint32_t)-88); memcpy(c + 4, "nk", 2); c[6] = 0x20;
+    c[4 + 72] = 3; memcpy(c + 4 + 76, "Sub", 3);
+    // value list @0xE0 (size 16): vk @0xF0, vk @0x110
+    c = b + 0xE0; put32(c, (uint32_t)-16); put32(c + 4, 0xF0); put32(c + 8, 0x110);
+    c = b + 0xF0; put32(c, (uint32_t)-32); memcpy(c + 4, "vk", 2); c[6] = 1;
+    put32(c + 8, 0x80000004u); put32(c + 12, 7); put32(c + 16, 4); c[20] = 1; c[24] = 'a';
+    c = b + 0x110; put32(c, (uint32_t)-32); memcpy(c + 4, "vk", 2); c[6] = 3;
+    put32(c + 8, 16400); put32(c + 12, 0x130); put32(c + 16, 3); c[20] = 1; memcpy(c + 24, "big", 3);
+    // db @0x130 -> segment list @0x140 -> data cells @0x150, @0x190
+    c = b + 0x130; put32(c, (uint32_t)-16); memcpy(c + 4, "db", 2); c[6] = 2; put32(c + 8, 0x140);
+    c = b + 0x140; put32(c, (uint32_t)-16); put32(c + 4, 0x150); put32(c + 8, 0x190);
+    c = b + 0x150; put32(c, (uint32_t)-16352);         // first segment: 16344 bytes
+    c = b + 0x150 + 16352; put32(c, (uint32_t)-64);    // second: the remaining 56
+    put32(b + 0x140 + 8, 0x150 + 16352);
+    return 4096 + 20480;
+}
+static void nop_key(uint32_t k, void *ctx) { (void)k; (void)ctx; }
+static void nop_val(const regf_value *v, void *ctx) { (void)v; (void)ctx; }
+
 int main(int argc, char **argv)
 {
     long iters = argc > 1 ? atol(argv[1]) : 20000;
-    static unsigned char seed[4096], buf[8192];
+    static unsigned char seed[32768], buf[65536];
     char text[8192];
     pf_info pi;
     lnk_info li;
@@ -202,6 +240,18 @@ int main(int argc, char **argv)
                     uint32_t dv, dp;
                     n = seed_destlist(seed); n = mutate(seed, n, buf, sizeof buf);
                     destlist_parse(buf, n, &dv, &dp, nop_dl, NULL);
+                }
+                {
+                    regf_hive rh;
+                    uint32_t k;
+                    n = seed_regf(seed); n = mutate(seed, n, buf, sizeof buf);
+                    if (regf_open(&rh, buf, n) == 0) {
+                        regf_subkeys(&rh, rh.root, nop_key, NULL);
+                        regf_values(&rh, rh.root, nop_val, NULL);
+                        regf_find(&rh, "Sub", &k);
+                        unsigned char tmp16[16];
+                        regf_get(&rh, rh.root, "big", NULL, tmp16, sizeof tmp16);
+                    }
                 }
                 break;
         case 3: n = seed_lnk(seed); n = mutate(seed, n, buf, sizeof buf);

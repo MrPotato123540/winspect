@@ -44,9 +44,11 @@ static void pf_test_name_cb(const char *name, void *ctx)
 static int shim_test_n;
 static char shim_test_path[64];
 static unsigned long long shim_test_time;
-static void shim_test_cb(const char *path, uint64_t modified, void *ctx)
+static int shim_test_exec;
+static void shim_test_cb(const char *path, uint64_t modified, int executed, void *ctx)
 {
     (void)ctx;
+    shim_test_exec = executed;
     if (shim_test_n++ == 0) {
         snprintf(shim_test_path, sizeof shim_test_path, "%s", path);
         shim_test_time = modified;
@@ -299,6 +301,44 @@ int main(void)
         check_int("shim malformed", shim_parse(sc, 0x34 + 72, shim_test_cb, NULL), -2);
         sc[0] = 0x80;                                  // Windows 8 header: not handled
         check_int("shim old layout", shim_parse(sc, sizeof sc, shim_test_cb, NULL), -1);
+    }
+
+    // --- ShimCache, Windows 7 x64 / x86 layouts ---------------------------------
+    {
+        static unsigned char w7[512];
+        memset(w7, 0, sizeof w7);
+        w7[0] = 0xEE; w7[1] = 0x0F; w7[2] = 0xDC; w7[3] = 0xBA;   // 0xBADC0FEE
+        w7[4] = 2;                                                // 2 entries
+        // x64 entries at 128 and 176; paths at 300 ("A.EXE") and 320 ("B")
+        unsigned char *e = w7 + 128;
+        e[0] = 10; e[2] = 10; e[8] = 0x2C; e[9] = 0x01;          // len 10, off 300
+        e[16] = 0x55;                                             // FILETIME
+        e[24] = 0x02;                                             // InsertFlags: executed
+        e = w7 + 176;
+        e[0] = 2; e[2] = 2; e[8] = 0x40; e[9] = 0x01;            // len 2, off 320
+        const char *p1 = "A.EXE";
+        for (int i = 0; i < 5; i++) w7[300 + 2 * i] = (unsigned char)p1[i];
+        w7[320] = 'B';
+        const char *fmt = NULL;
+        shim_test_n = 0;
+        check_int("shim7 count", shim_parse_ex(w7, sizeof w7, shim_test_cb, NULL, &fmt), 2);
+        check_str("shim7 fmt", fmt, "win7-x64");
+        check_str("shim7 path", shim_test_path, "A.EXE");
+        check_int("shim7 time", (int)shim_test_time, 0x55);
+        check_int("shim7 last exec flag", shim_test_exec, 0);       // second entry: not executed
+        w7[176 + 8] = 0xF0; w7[176 + 9] = 0x7F;                     // second path out of range
+        shim_test_n = 0;
+        check_int("shim7 bad offset", shim_parse(w7, sizeof w7, shim_test_cb, NULL), -2);
+        // x86: 32-byte entries, 32-bit path offset @4, FILETIME @8, flags @16
+        memset(w7 + 128, 0, 100);
+        w7[4] = 1;
+        e = w7 + 128;
+        e[0] = 10; e[2] = 10; e[4] = 0x2C; e[5] = 0x01; e[8] = 0x66; e[16] = 0x02;
+        shim_test_n = 0;
+        check_int("shim7 x86 count", shim_parse_ex(w7, sizeof w7, shim_test_cb, NULL, &fmt), 1);
+        check_str("shim7 x86 fmt", fmt, "win7-x86");
+        check_int("shim7 x86 exec", shim_test_exec, 1);
+        check_int("shim7 x86 time", (int)shim_test_time, 0x66);
     }
 
     // --- firewall rule fields + user-writable path hint ---------------------------

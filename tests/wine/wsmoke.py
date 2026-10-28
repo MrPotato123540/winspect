@@ -74,7 +74,10 @@ cases += [['ssn','NtOpenProcess'], ['ssn','NtOpenProcess','--json'], ['modules',
           ['handles','--find','ntdll','--json'], ['handles','--find','x','--type','Key','--csv'], ['handles'],
           ['handles','4','--find','x'], ['prefetch','--flagged','--json'], ['hunt','--all','--csv'],
           ['events','--summary','--json'], ['events','--since','24'], ['events','--since','0'],
-          ['autoruns','--sig','--flagged','--json'], ['lnk','--csv'], ['jumplist','--csv']]
+          ['autoruns','--sig','--flagged','--json'], ['lnk','--csv'], ['jumplist','--csv'],
+          ['hive'], ['hive','C:\\nonexistent.dat'], ['hive','C:\\windows\\system32\\notepad.exe'],
+          ['userassist','--hive','C:\\nonexistent.dat'], ['bam','--hive','C:\\windows\\win.ini'],
+          ['shimcache','--hive','C:\\nonexistent.dat'], ['mru','--hive','C:\\nonexistent.dat','--json']]
 
 bad = 0
 for args in cases:

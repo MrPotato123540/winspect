@@ -143,10 +143,10 @@ boruda senkron okumada bekler.
 
 - **jumplist:** AppID → program adı tablosu yok; doğrulanmış bir kaynak
   gerekiyor. (DestList bu turdan sonra eklendi: 16. belge, "jumplist".)
-- **shimcache:** Windows 8/8.1 biçimi ve "executed" bayrağı yok; güvenilir
-  kaynak olmadan eklenmiyor.
-- **userassist / mru / bam:** diğer kullanıcılar ve çevrimdışı hive desteği
-  yok; bunun için bir NTUSER.DAT okuyucusu gerekiyor.
+- **shimcache:** Windows 8/8.1 biçimi yok (gerçek örnek bulunamadı). Windows 7
+  biçimi ve "executed" bayrağı sonradan eklendi (19. belge).
+- **userassist / mru / bam / shimcache:** çevrimdışı hive desteği sonradan
+  eklendi (`--hive`, 19. belge). Bu sırada bam'in eski konumu da bulundu.
 - **certstore:** Microsoft güvenilir kök listesiyle (AuthRoot CTL)
   karşılaştırma yok (sigcheck `-tv` fikri). Bunu yalnızca gerçek Windows
   doğrulayabilir.

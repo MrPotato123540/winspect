@@ -42,17 +42,18 @@ that shows it.
 | `winspect hash <path> [--json]` | MD5, SHA1 and SHA256 of a file |
 | `winspect lnk [<file.lnk>\|<folder>] [--json\|--csv]` | parse shortcut files: target, arguments, working dir, target timestamps, volume (type/serial/label), network share, creating machine's name + MAC (default: your Recent folder); flags script-host / user-writable targets and links crafted to hide their command line |
 | `winspect streams <file\|folder> [--recurse] [--json\|--csv]` | NTFS alternate data streams; decodes Mark-of-the-Web (zone + download URL), flags internet-downloaded executables and unusual streams |
-| `winspect jumplist [<file\|folder>] [--json\|--csv]` | Jump Lists: recently opened items per application (AppID), from AutomaticDestinations (compound files) and CustomDestinations; target, arguments, target timestamps |
+| `winspect jumplist [<file\|folder>] [--json\|--csv]` | Jump Lists: recently opened items per application (AppID), from AutomaticDestinations (compound files, in DestList MRU order with last-used time, pinned state, interaction count, machine name/MAC) and CustomDestinations; target, arguments, target timestamps |
 | `winspect modules <pid> [--sig\|--unsigned] [--json\|--csv]` | loaded modules of a process, flagging missing-from-disk and user-writable paths; `--unsigned` lists DLLs without a trusted signature |
 | `winspect hosts [--json\|--csv]` | active hosts-file entries, each classified as block (loopback/0.0.0.0) or redirect (flagged) |
 | `winspect certstore [--store <name>] [--user] [--json\|--csv]` | certificates in a system store (Root by default); flags roots whose private key is on this machine (locally generated - TLS interception, cf. Superfish) and non-self-signed "roots"; shows expired ones |
 | `winspect objects [<\\dir> \| --global] [--type <T>] [--json\|--csv]` | named kernel objects (mutex/event/section...) in an Object Manager directory |
 | `winspect usb [--json\|--csv]` | USB mass-storage devices seen by this machine (vendor/product/serial/friendly name) |
 | `winspect prefetch [<file.pf> [--files] \| --dir <path>] [--flagged] [--json\|--csv]` | execution evidence from Prefetch: exe, full path it ran from, run count, last run times; flags runs from user-writable dirs (Win10+ MAM decompressed via ntdll; usually needs elevation) |
-| `winspect shimcache [--json\|--csv]` | AppCompatCache (ShimCache): programs Windows has seen, newest first (Win10/11 layout; needs elevation) |
-| `winspect bam [--json\|--csv]` | Background Activity Moderator: last run time of each program, per user (needs elevation) |
-| `winspect userassist [--json\|--csv]` | programs the current user started from the Explorer GUI: run count + last run (ROT13 names and Known Folder GUIDs decoded); flags user-writable / script-host programs |
-| `winspect mru [--json\|--csv]` | what the current user typed / opened, newest first: Run-box commands (RunMRU), Explorer typed paths, recent documents; flags encoded PowerShell and script hosts typed into Run |
+| `winspect shimcache [--hive <SYSTEM>] [--json\|--csv]` | AppCompatCache (ShimCache): programs Windows has seen, newest first (Win10/11 layout; needs elevation) |
+| `winspect hive <file> [<key>] [--recurse] [--json]` | browse an **offline registry hive** (NTUSER.DAT, SYSTEM, SOFTWARE, Amcache.hve ...) with its own regf reader: header (dirty / checksum / original path), keys, decoded values; the `--hive` options above use the same reader for other users' and other machines' hives |
+| `winspect bam [--hive <SYSTEM>] [--json\|--csv]` | Background Activity Moderator: last run time of each program, per user (needs elevation) |
+| `winspect userassist [--hive <NTUSER.DAT>] [--json\|--csv]` | programs the current user started from the Explorer GUI: run count + last run (ROT13 names and Known Folder GUIDs decoded); flags user-writable / script-host programs |
+| `winspect mru [--hive <NTUSER.DAT>] [--json\|--csv]` | what the current user typed / opened, newest first: Run-box commands (RunMRU), Explorer typed paths, recent documents; flags encoded PowerShell and script hosts typed into Run |
 | `winspect firewall [--inbound] [--allow] [--active] [--flagged] [--json\|--csv]` | firewall rules from the registry; flags active inbound ALLOW rules for programs in user-writable dirs |
 | `winspect taskcache [--flagged] [--json\|--csv]` | scheduled tasks from TaskCache\\Tree, flagging hidden ones: no SD value (Tarrask), deny-ACE SD, or no XML file (needs elevation) |
 | `winspect wmi [--json\|--csv]` | WMI permanent event subscriptions (filters, consumers, bindings); flags consumers that run commands/scripts |

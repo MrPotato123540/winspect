@@ -20,23 +20,26 @@
 #include "artparse.h"
 #include "ioc.h"
 #include "jsonutil.h"
+#include "regsrc.h"
 
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define EXPLORER L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\"
+#define EXPLORER "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\"
 
-typedef struct { int mode, first; unsigned count, flagged; } mctx;
+typedef struct { int mode, first; unsigned count, flagged; regsrc *src; } mctx;
 
-static void key_time(HKEY k, char *out, size_t n)
+static void key_time(mctx *c, const rkey *k, char *out, size_t n)
 {
+    uint64_t t = rk_lastwrite(c->src, k);
     FILETIME ft;
     SYSTEMTIME st;
+    ft.dwLowDateTime = (DWORD)t;
+    ft.dwHighDateTime = (DWORD)(t >> 32);
     out[0] = '\0';
-    if (RegQueryInfoKeyW(k, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &ft) ==
-            ERROR_SUCCESS && FileTimeToSystemTime(&ft, &st)) {
+    if (t != 0 && FileTimeToSystemTime(&ft, &st)) {
         snprintf(out, n, "%04u-%02u-%02u %02u:%02u:%02u", st.wYear, st.wMonth, st.wDay,
                  st.wHour, st.wMinute, st.wSecond);
     }
@@ -75,85 +78,89 @@ static void emit(mctx *c, const char *list, unsigned pos, const char *value, con
 
 static void run_mru(mctx *c)
 {
-    HKEY k;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, EXPLORER L"RunMRU", 0, KEY_READ, &k) != ERROR_SUCCESS) return;
-    char when[32];
-    key_time(k, when, sizeof when);
-    WCHAR order[64];
-    DWORD ol = sizeof order;
-    if (RegGetValueW(k, NULL, L"MRUList", RRF_RT_REG_SZ, NULL, order, &ol) == ERROR_SUCCESS) {
-        for (unsigned i = 0; order[i] != 0 && i < 26; i++) {
-            WCHAR name[2] = { order[i], 0 };
-            WCHAR val[2048];
-            DWORD vl = sizeof val;
-            if (RegGetValueW(k, NULL, name, RRF_RT_REG_SZ, NULL, val, &vl) != ERROR_SUCCESS) continue;
-            char u8[4096];
-            WideCharToMultiByte(CP_UTF8, 0, val, -1, u8, sizeof u8, NULL, NULL);
+    rkey k;
+    if (rk_open(c->src, EXPLORER "RunMRU", &k) != 0) return;
+    char when[32], order[64];
+    key_time(c, &k, when, sizeof when);
+    if (rk_get_str(c->src, &k, "MRUList", order, sizeof order)) {
+        for (unsigned i = 0; order[i] != '\0' && i < 26; i++) {
+            char name[2] = { order[i], 0 }, u8[4096];
+            if (!rk_get_str(c->src, &k, name, u8, sizeof u8)) continue;
             runmru_clean(u8);
             emit(c, "RunMRU", i, u8, i == 0 ? when : "");
         }
     }
-    RegCloseKey(k);
+    rk_close(&k);
 }
 
 static void typed_paths(mctx *c)
 {
-    HKEY k;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, EXPLORER L"TypedPaths", 0, KEY_READ, &k) != ERROR_SUCCESS) return;
+    rkey k;
+    if (rk_open(c->src, EXPLORER "TypedPaths", &k) != 0) return;
     char when[32];
-    key_time(k, when, sizeof when);
+    key_time(c, &k, when, sizeof when);
     for (unsigned i = 1; i <= 50; i++) {
-        WCHAR name[16], val[2048];
-        _snwprintf(name, 16, L"url%u", i);
-        name[15] = 0;
-        DWORD vl = sizeof val;
-        if (RegGetValueW(k, NULL, name, RRF_RT_REG_SZ, NULL, val, &vl) != ERROR_SUCCESS) continue;
-        char u8[4096];
-        WideCharToMultiByte(CP_UTF8, 0, val, -1, u8, sizeof u8, NULL, NULL);
+        char name[16], u8[4096];
+        snprintf(name, sizeof name, "url%u", i);
+        if (!rk_get_str(c->src, &k, name, u8, sizeof u8)) continue;
         emit(c, "TypedPaths", i - 1, u8, i == 1 ? when : "");
     }
-    RegCloseKey(k);
+    rk_close(&k);
 }
 
 static void recent_docs(mctx *c)
 {
-    HKEY k;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, EXPLORER L"RecentDocs", 0, KEY_READ, &k) != ERROR_SUCCESS) return;
+    rkey k;
+    if (rk_open(c->src, EXPLORER "RecentDocs", &k) != 0) return;
     char when[32];
-    key_time(k, when, sizeof when);
-    BYTE ex[4096];
-    DWORD el = sizeof ex;
-    if (RegGetValueW(k, NULL, L"MRUListEx", RRF_RT_REG_BINARY, NULL, ex, &el) == ERROR_SUCCESS) {
+    key_time(c, &k, when, sizeof when);
+    unsigned char ex[4096];
+    uint32_t type = 0;
+    long el = rk_get(c->src, &k, "MRUListEx", &type, ex, sizeof ex);
+    if (el > 0 && type == REG_BINARY) {
         uint32_t order[1024];
-        size_t n = mrulistex_order(ex, el, order, 1024);
+        size_t n = mrulistex_order(ex, (size_t)el < sizeof ex ? (size_t)el : sizeof ex, order, 1024);
         for (size_t i = 0; i < n; i++) {
-            WCHAR name[16];
-            _snwprintf(name, 16, L"%lu", (unsigned long)order[i]);
-            name[15] = 0;
-            BYTE data[4096];
-            DWORD dl = sizeof data;
-            if (RegGetValueW(k, NULL, name, RRF_RT_REG_BINARY, NULL, data, &dl) != ERROR_SUCCESS) continue;
-            char doc[2048];
-            if (!recentdocs_name(data, dl, doc, sizeof doc)) continue;
+            char name[16], doc[2048];
+            snprintf(name, sizeof name, "%lu", (unsigned long)order[i]);
+            unsigned char data[4096];
+            long dl = rk_get(c->src, &k, name, &type, data, sizeof data);
+            if (dl <= 0 || type != REG_BINARY) continue;
+            if (!recentdocs_name(data, (size_t)dl < sizeof data ? (size_t)dl : sizeof data, doc, sizeof doc)) continue;
             emit(c, "RecentDocs", (unsigned)i, doc, i == 0 ? when : "");
         }
     }
-    RegCloseKey(k);
+    rk_close(&k);
 }
 
 int cmd_mru(int argc, char **argv)
 {
-    mctx c = { 0, 1, 0, 0 };
+    mctx c = { 0, 1, 0, 0, NULL };
+    const char *hive = NULL;
     for (int a = 0; a < argc; a++) {
         if (strcmp(argv[a], "--json") == 0)      c.mode = 1;
         else if (strcmp(argv[a], "--csv") == 0)  c.mode = 2;
+        else if (strcmp(argv[a], "--hive") == 0 && a + 1 < argc) hive = argv[++a];
         else {
             fprintf(stderr, "mru: unexpected argument '%s'\n", argv[a]);
             return 1;
         }
     }
+    regsrc src;
+    if (hive != NULL) {
+        char err[512];
+        if (regsrc_open_hive(&src, hive, err, sizeof err) != 0) {
+            fprintf(stderr, "mru: %s\n", err);
+            return 1;
+        }
+        if (regsrc_dirty(&src))
+            fputs("mru: note: hive is dirty (transaction logs not replayed)\n", stderr);
+    } else {
+        regsrc_open_live(&src, HKEY_CURRENT_USER, NULL, "HKCU");
+    }
+    c.src = &src;
     if (c.mode == 0) {
-        puts("mru  (current user, newest first; time = when the newest entry was added)\n");
+        printf("mru  (%s, newest first; time = when the newest entry was added)\n\n", src.label);
         printf("      %-11s %3s  %-19s  %s\n", "list", "pos", "time (UTC)", "value");
     } else if (c.mode == 2) {
         puts("list,position,time,value,reason");
@@ -168,5 +175,6 @@ int cmd_mru(int argc, char **argv)
     } else if (c.mode == 1) {
         puts("]");
     }
+    regsrc_close(&src);
     return 0;
 }
