@@ -239,6 +239,13 @@ reg(E + r'\RecentDocs', '/v', '0', '/t', 'REG_BINARY', '/d', rdoc('old.docx'))
 reg(E + r'\RecentDocs', '/v', '1', '/t', 'REG_BINARY', '/d', rdoc('new.xlsx'))
 reg(E + r'\RecentDocs', '/v', 'MRUListEx', '/t', 'REG_BINARY', '/d', '0100000000000000ffffffff')
 
+# --- rdp: outgoing Remote Desktop history ---------------------------------------
+T = r'HKCU\Software\Microsoft\Terminal Server Client'
+reg(T + r'\Default', '/v', 'MRU0', '/t', 'REG_SZ', '/d', '10.10.5.21')
+reg(T + r'\Default', '/v', 'MRU1', '/t', 'REG_SZ', '/d', 'fileserver01.corp.example')
+reg(T + r'\Servers\10.10.5.21', '/v', 'UsernameHint', '/t', 'REG_SZ', '/d', r'CORP\svc_backup')
+reg(T + r'\Servers\10.10.5.21', '/v', 'CertHash', '/t', 'REG_BINARY', '/d', 'a1b2c3d4')
+
 # --- service with an unquoted path ---------------------------------------------
 svc = HK + r'SYSTEM\CurrentControlSet\Services\WsTestSvc'
 reg(svc, '/v', 'ImagePath', '/t', 'REG_EXPAND_SZ', '/d', r'C:\Program Files\My App\svc.exe -k test')
@@ -257,6 +264,9 @@ checks = [
                                ('certx.dll', 'rarely legitimate location'), ('tp.dll', 'non-default value'),
                                ('as.exe', 'user-writable path')], ['w32time.dll', '%1']),
     (['firewall', '--json'], [('Test Listener', 'true')], ['Benign Block"']),
+    (['rdp', '--json'], [('"source":"Default","position":0', '"host":"10.10.5.21"'),
+                         ('fileserver01.corp.example', '"position":1'),
+                         ('"source":"Servers"', 'CORP\\\\svc_backup'), ('"certificate_accepted":true', None)], []),
     (['defender', '--json'], [('C:\\\\Temp\\\\drop', None), ('DisableRealtimeMonitoring', None)], []),
     (['usb', '--json'], [('SanDisk', None), ('"generated_serial":true', None)], []),
     (['bam', '--json'], [('a.exe', '"location":"State"'), ('"user_writable_dir":true', None),

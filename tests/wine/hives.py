@@ -63,6 +63,12 @@ want = ['cmd', 'C:\\Offline\\AD', 'git', 'powershell', 'C:\\Program Files', 'Net
 check([r['value'] for r in tp] == want, 'mru --hive: TypedPaths url1..url16 in order')
 check(tp and tp[0]['time'] == '2022-02-06 13:46:04', 'mru: TypedPaths key last-write time')
 
+ww = [r for r in json.loads(run('mru', '--hive', hive('NTUSER.DAT'), '--json')[1]) if r['list'] == 'WordWheel']
+check(len(ww) == 6 and ww[0]['value'] == 'alloy' and ww[0]['time'] == '2012-04-04 15:45:18',
+      'mru: WordWheelQuery 6 terms, newest "alloy" + key time')
+rc, out = run('rdp', '--hive', hive('NTUSER.DAT'), '--json')
+check(rc == 0 and json.loads(out) == [], 'rdp --hive: no RDP history in this hive -> []')
+
 rc, out = run('bam', '--hive', hive('SYSTEM_WIN_10_1709'), '--json')
 bam = json.loads(out)
 check(len(bam) == 55, f'bam --hive: {len(bam)} records (55 expected)')

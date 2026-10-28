@@ -82,6 +82,7 @@
 #include "jumplist.h"
 #include "hive.h"
 #include "amcache.h"
+#include "rdp.h"
 #include "tasks.h"
 
 // cmd_modules lives in modules.c: a live process's loaded modules
@@ -223,6 +224,7 @@ static const struct {
     { "jumplist", cmd_jumplist, "Jump Lists: recent items per application",  "file" },
     { "hive",     cmd_hive,     "browse an offline registry hive file",      "file" },
     { "amcache",  cmd_amcache,  "Amcache.hve: file inventory with SHA-1",    "file" },
+    { "rdp",      cmd_rdp,      "outgoing Remote Desktop history (mstsc)",   "system" },
 
     { "list",    cmd_list,    "process/thread tree via Toolhelp",           "process" },
     { "inspect", cmd_inspect, "dump a live process PEB (cmdline/modules)",  "process" },

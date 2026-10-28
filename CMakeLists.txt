@@ -57,6 +57,7 @@ add_executable(winspect
     src/regsrc.c
     src/hive.c
     src/amcache.c
+    src/rdp.c
     src/jumplist.c
     src/tasks.c
     src/modules.c

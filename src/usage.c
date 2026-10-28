@@ -79,6 +79,15 @@ static const struct { const char *name, *text; } usage_table[] = {
         "(%SystemRoot%\\AppCompat\\Programs\\Amcache.hve) is locked by Windows: copy it\n"
         "first (backup / VSS tool) and pass the copy. Read-only. Usage:\n"
         "  winspect amcache [<Amcache.hve>] [--sha1 <hash>] [--find <text>] [--flagged] [--json | --csv]\n" },
+    { "rdp",
+        "winspect rdp - OUTGOING Remote Desktop history of a user, from the client's\n"
+        "registry: Terminal Server Client\\Default (MRU0..MRU9: the last hosts typed\n"
+        "into mstsc, newest first) and Terminal Server Client\\Servers\\<host> (every\n"
+        "host connected to, the user name used - UsernameHint - and whether a server\n"
+        "certificate was accepted). Classic evidence of lateral movement FROM this\n"
+        "account. Live mode: current user; --hive reads another user's NTUSER.DAT.\n"
+        "(Incoming RDP logons are in \"events\".) Read-only. Usage:\n"
+        "  winspect rdp [--hive <NTUSER.DAT>] [--json | --csv]\n" },
     { "list",
         "winspect list - the live process tree from a Toolhelp snapshot: each process\n"
         "under its real parent (PID reuse is detected by creation time), with thread\n"
@@ -350,7 +359,8 @@ static const struct { const char *name, *text; } usage_table[] = {
     { "mru",
         "winspect mru - what the current user recently typed or opened, in order:\n"
         "RunMRU (commands typed into Win+R), TypedPaths (paths typed into the\n"
-        "Explorer address bar) and RecentDocs (recently opened documents). The newest\n"
+        "Explorer address bar), RecentDocs (recently opened documents) and\n"
+        "WordWheelQuery (terms typed into the Explorer search box). The newest\n"
         "entry of each list also gets its time (the key's last-write time). Flags\n"
         "Run-box commands that start a script host or carry an encoded PowerShell\n"
         "command. Live mode: current user; --hive reads another user's NTUSER.DAT.\n"

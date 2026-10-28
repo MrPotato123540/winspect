@@ -1,6 +1,6 @@
 // winspect mru - "most recently used" lists Explorer keeps per user
 //
-// Three small registry lists show what a person did by hand:
+// Four small registry lists show what a person did by hand:
 //   Explorer\RunMRU      commands typed into the Run box (Win+R). Values a..z
 //                        hold the text (ending in "\1"), MRUList is the order
 //                        as a string of value letters, newest first.
@@ -9,6 +9,8 @@
 //   Explorer\RecentDocs  recently opened documents. Values "0".."N" are binary:
 //                        the name as UTF-16 followed by a shell item; the
 //                        order is MRUListEx, a u32 array ending in 0xFFFFFFFF.
+//   Explorer\WordWheelQuery  terms typed into the Explorer search box; values
+//                        "0".."N" hold UTF-16 text, ordered by MRUListEx.
 // An intruder at the keyboard (or a remote-desktop session) often leaves a
 // Run-box trace such as "powershell -nop -w hidden -enc ...". The key's
 // last-write time is when its NEWEST entry was added, so that one entry per
@@ -133,6 +135,33 @@ static void recent_docs(mctx *c)
     rk_close(&k);
 }
 
+// WordWheelQuery: terms typed into the Explorer search box. Values "0", "1",
+// ... hold the UTF-16 term; MRUListEx gives the order, newest first.
+static void word_wheel(mctx *c)
+{
+    rkey k;
+    if (rk_open(c->src, EXPLORER "WordWheelQuery", &k) != 0) return;
+    char when[32];
+    key_time(c, &k, when, sizeof when);
+    unsigned char ex[4096];
+    uint32_t type = 0;
+    long el = rk_get(c->src, &k, "MRUListEx", &type, ex, sizeof ex);
+    if (el > 0 && type == REG_BINARY) {
+        uint32_t order[1024];
+        size_t n = mrulistex_order(ex, (size_t)el < sizeof ex ? (size_t)el : sizeof ex, order, 1024);
+        for (size_t i = 0; i < n; i++) {
+            char name[16], term[2048];
+            snprintf(name, sizeof name, "%lu", (unsigned long)order[i]);
+            unsigned char data[4096];
+            long dl = rk_get(c->src, &k, name, &type, data, sizeof data);
+            if (dl <= 0 || type != REG_BINARY) continue;
+            regsrc_u16(data, (size_t)dl < sizeof data ? (size_t)dl : sizeof data, term, sizeof term);
+            if (term[0]) emit(c, "WordWheel", (unsigned)i, term, i == 0 ? when : "");
+        }
+    }
+    rk_close(&k);
+}
+
 int cmd_mru(int argc, char **argv)
 {
     mctx c = { 0, 1, 0, 0, NULL };
@@ -170,6 +199,7 @@ int cmd_mru(int argc, char **argv)
     run_mru(&c);
     typed_paths(&c);
     recent_docs(&c);
+    word_wheel(&c);
     if (c.mode == 0) {
         printf("\n%u entr%s, %u flagged\n", c.count, c.count == 1 ? "y" : "ies", c.flagged);
     } else if (c.mode == 1) {
