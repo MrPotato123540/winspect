@@ -26,7 +26,9 @@
 typedef struct {
     const char *kind;           // "Root Folder", "Volume", "Directory", "File", ...
     unsigned type;              // the raw type byte
-    char name[512];             // display name (UTF-8)
+    char name[512];             // display name (UTF-8): long name when known
+    char short_name[260];       // file entries: the 8.3 / primary name stored in the item
+    char guid[40];              // root / shell-folder items: the raw "{GUID}"
     char created[20], accessed[20], modified[20];   // "YYYY-MM-DD hh:mm:ss" or ""
     uint64_t mft_entry;         // NTFS file reference (entry part) from the ext block, 0 if none
 } shellitem;

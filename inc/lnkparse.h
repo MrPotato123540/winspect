@@ -5,7 +5,8 @@
 // [MS-SHLLINK] specification. Kept free of Windows headers so it can be
 // unit-tested on any OS. Extracts what an analyst asks first: where does the
 // shortcut point, with which arguments, from which working directory, and the
-// target's timestamps as recorded when the link was made - plus, like LECmd
+// target's timestamps as recorded when the link was made; links without
+// LinkInfo get their target from the IDList shell items - plus, like LECmd
 // shows, the volume it lived on (type, serial, label), the network share and
 // the TrackerDataBlock: the NetBIOS name and MAC address of the machine where
 // the link was created, which can tie a shortcut to a specific computer.
@@ -35,7 +36,16 @@ typedef struct {
     char machine_id[17];        // TrackerDataBlock: NetBIOS name of the machine the link was made on
     char mac[18];               // MAC from the file droid (UUID v1 node), "aa:bb:cc:dd:ee:ff"
     uint32_t anomalies;         // LNK_ANOM_* bits: tricks used to hide what a link runs
+    char idlist_path[1024];     // path rebuilt from the LinkTargetIDList shell items
+    int idlist_items;           // number of shell items in the IDList
 } lnk_info;
+
+// Walk the LinkTargetIDList at d (its u16 size already skipped: d points at
+// the first item, n = list size) and call cb for every shell item. Returns
+// the item count, or -1 if an item is malformed (items before it are kept).
+#include "shellitem.h"
+typedef void (*lnk_item_cb)(const shellitem *it, void *ctx);
+int lnk_idlist_items(const unsigned char *d, size_t n, lnk_item_cb cb, void *ctx);
 
 // A NAME / RELATIVE_PATH / WORKING_DIR count above 260 characters: the shell
 // reads only 260 and continues from there, so an inflated count hides the next

@@ -25,6 +25,7 @@
 
 #include "lnkparse.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #define LF_HAS_IDLIST   0x00000001u
@@ -266,6 +267,48 @@ static void extra_data(const unsigned char *d, size_t n, size_t pos, lnk_info *o
     }
 }
 
+int lnk_idlist_items(const unsigned char *d, size_t n, lnk_item_cb cb, void *ctx)
+{
+    size_t pos = 0;
+    int count = 0;
+    while (pos + 2 <= n) {
+        shellitem it;
+        int sz = shellitem_parse(d + pos, n - pos, &it);
+        if (sz == 0) break;                 // terminating empty item
+        if (sz < 0) return count ? count : -1;
+        if (cb) cb(&it, ctx);
+        count++;
+        pos += (size_t)sz;
+        if (count > 64) break;
+    }
+    return count;
+}
+
+// Path from the IDList: names joined with "\"; a root folder directly followed
+// by a volume ("My Computer" then "C:\") is dropped so the result reads
+// "C:\dir\file". Long names are used where the item carries one.
+struct idpath { char *out; size_t n; int pending_root; char root[512]; int items; };
+static void idpath_cb(const shellitem *it, void *vctx)
+{
+    struct idpath *p = (struct idpath *)vctx;
+    p->items++;
+    if (p->items == 1 && it->type == 0x1F) {
+        p->pending_root = 1;
+        snprintf(p->root, sizeof p->root, "%s", it->name);
+        return;
+    }
+    if (p->pending_root) {
+        p->pending_root = 0;
+        if (strcmp(it->kind ? it->kind : "", "Volume") != 0) {
+            size_t L = strlen(p->out);
+            snprintf(p->out + L, p->n - L, "%s", p->root);
+        }
+    }
+    size_t L = strlen(p->out);
+    int sep = L > 0 && p->out[L - 1] != '\\';
+    snprintf(p->out + L, p->n - L, "%s%s", sep ? "\\" : "", it->name);
+}
+
 int lnk_parse(const unsigned char *d, size_t n, lnk_info *out)
 {
     memset(out, 0, sizeof *out);
@@ -285,7 +328,10 @@ int lnk_parse(const unsigned char *d, size_t n, lnk_info *out)
         size_t idsize = rd16(d + pos);
         pos += 2;
         if (idsize > n - pos) return -2;
-        pos += idsize;          // shell item IDs: skipped (LinkInfo has the path)
+        struct idpath ip = { out->idlist_path, sizeof out->idlist_path, 0, "", 0 };
+        out->idlist_items = lnk_idlist_items(d + pos, idsize, idpath_cb, &ip);
+        if (ip.pending_root) snprintf(out->idlist_path, sizeof out->idlist_path, "%s", ip.root);
+        pos += idsize;
     }
     if (out->flags & LF_HAS_LINKINFO) {
         if (pos + 4 > n) return -2;
@@ -307,7 +353,8 @@ int lnk_parse(const unsigned char *d, size_t n, lnk_info *out)
     // No LinkInfo path (e.g. links to shell namespaces or relative-only links):
     // fall back to the environment-variable target, then the relative path,
     // so callers still have something to show.
-    const char *fb = out->env_target[0] ? out->env_target : out->relative;
+    const char *fb = out->env_target[0] ? out->env_target
+                   : out->idlist_path[0] ? out->idlist_path : out->relative;
     if (out->target[0] == '\0' && fb[0] != '\0') {
         size_t L = strlen(fb);
         if (L < sizeof out->target) memcpy(out->target, fb, L + 1);

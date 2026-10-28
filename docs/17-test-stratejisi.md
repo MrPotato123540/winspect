@@ -160,6 +160,18 @@ karakter okuyup sonraki alana geçiyor. Gizlenen komut satırı tam o noktada
 başlıyor. Sayıya güvenen ayrıştırıcımız argümanları hiç görmüyordu. Artık
 260'ta kesip devam ediyor ve bu hileyi ayrıca işaretliyor; 34/34 eşleşiyor.
 
+Shell öğesi ayrıştırıcısı (`src/shellitem.c`) bağlandıktan sonra
+karşılaştırma, LinkTargetIDList'in öğelerini de **öğe öğe** kapsıyor:
+
+- kök GUID'leri,
+- birim adları ve kabuk klasörü GUID'leri,
+- dosya girdilerinin kısa adları ve DOS değişiklik zamanları.
+
+İlk çalıştırmada beş örnek uyuşmadı. Fark bizim hatamız değil, adlandırmadan
+geliyordu: LnkParse3 `0x2E` öğelerini GUID ile gösteriyor, biz bilinen adıyla.
+Ham GUID alanı eklendi ve 34/34 öğe düzeyinde de eşleşiyor. LinkInfo taşımayan
+kısayolların hedefi artık IDList'ten kuruluyor (LECmd'in yaptığı gibi).
+
 ## CI'da hepsi
 
 `.github/workflows/ci.yml` üç işi paralel koşar:

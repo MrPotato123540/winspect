@@ -169,6 +169,7 @@ int shellitem_parse(const unsigned char *d, size_t n, shellitem *out)
             snprintf(out->name, sizeof out->name, "Search Folder");
         } else if (size >= 20) {
             guid_str(d + 4, g, sizeof g);
+            snprintf(out->guid, sizeof out->guid, "%s", g);
             const char *k = known_folder(g);
             snprintf(out->name, sizeof out->name, "%s", k ? k : g);
             if (k == NULL && d[3] == 0x00) {
@@ -187,6 +188,7 @@ int shellitem_parse(const unsigned char *d, size_t n, shellitem *out)
         out->kind = "Shell Folder";
         if (size >= 20) {
             guid_str(d + 4, g, sizeof g);
+            snprintf(out->guid, sizeof out->guid, "%s", g);
             const char *k = known_folder(g);
             snprintf(out->name, sizeof out->name, "%s", k ? k : g);
         }
@@ -207,6 +209,7 @@ int shellitem_parse(const unsigned char *d, size_t n, shellitem *out)
                 if (p & 1) p++;                              // padded to 16 bits
             }
         }
+        snprintf(out->short_name, sizeof out->short_name, "%.259s", out->name);
         if (p < size) beef0004(d, size, p, out);
     } else if ((t & 0x70) == 0x40) {
         out->kind = "Network Location";

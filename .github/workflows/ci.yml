@@ -44,7 +44,7 @@ jobs:
           git clone -q https://github.com/Matmaus/LnkParse3 lnkref
           git -C lnkref checkout -q ad4230280b4ee1ceb3cdf5f274e6d92fb12e7abb
           cc -I inc -std=c11 -g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all \
-             src/lnkparse.c src/jsonutil.c tests/lnk_dump.c -o lnk_dump
+             src/lnkparse.c src/shellitem.c src/jsonutil.c tests/lnk_dump.c -o lnk_dump
           python3 -I tests/lnk_diff.py ./lnk_dump lnkref/tests/samples lnkref/tests/json
       - name: Jump List DestList vs real Win7/8/8.1/10 jump lists
         # Sample files from Eric Zimmerman's JumpList project (data only, no

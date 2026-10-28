@@ -1,11 +1,26 @@
 // Differential-test helper: parses one .lnk with winspect's own parser
 // (src/lnkparse.c) and prints the fields as one JSON object, so a script can
 // compare them with the output of an independent parser.
-// Build: cc -I inc src/lnkparse.c src/jsonutil.c tests/lnk_dump.c -o lnk_dump
+// Build: cc -I inc src/lnkparse.c src/shellitem.c src/jsonutil.c tests/lnk_dump.c -o lnk_dump
 #include "lnkparse.h"
 #include "jsonutil.h"
 #include <stdio.h>
 #include <stdlib.h>
+
+static int first_item = 1;
+static void dump_item(const shellitem *it, void *ctx)
+{
+    (void)ctx;
+    printf("%s{\"kind\":", first_item ? "" : ",");
+    json_str(it->kind ? it->kind : "");
+    printf(",\"type\":%u,\"name\":", it->type);
+    json_str(it->name);
+    fputs(",\"short_name\":", stdout); json_str(it->short_name);
+    fputs(",\"modified\":", stdout);   json_str(it->modified);
+    fputs(",\"guid\":", stdout);       json_str(it->guid);
+    putchar('}');
+    first_item = 0;
+}
 
 int main(int argc, char **argv)
 {
@@ -31,7 +46,14 @@ int main(int argc, char **argv)
     fputs(",\"env_target\":", stdout);         json_str(li.env_target);
     fputs(",\"machine_id\":", stdout);         json_str(li.machine_id);
     fputs(",\"mac\":", stdout);                json_str(li.mac);
-    printf(",\"anomalies\":%u}\n", (unsigned)li.anomalies);
+    printf(",\"anomalies\":%u,\"idlist_path\":", (unsigned)li.anomalies);
+    json_str(li.idlist_path);
+    fputs(",\"items\":[", stdout);
+    if (li.flags & 1) {
+        size_t idsize = (size_t)d[0x4C] | ((size_t)d[0x4D] << 8);
+        if (0x4E + idsize <= (size_t)n) lnk_idlist_items(d + 0x4E, idsize, dump_item, NULL);
+    }
+    puts("]}");
     free(d);
     return 0;
 }

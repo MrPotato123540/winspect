@@ -65,8 +65,28 @@ for name in sorted(os.listdir(sdir)):
     e = ex.get('ENVIRONMENTAL_VARIABLES_LOCATION_BLOCK')
     if e:
         cmp.append(('env_target', e.get('target_unicode') or e.get('target_ansi') or ''))
+    # LinkTargetIDList shell items, item by item (classes we decode).
+    titems = (exp.get('target') or {}).get('items') or [] if isinstance(exp.get('target'), dict) else []
+    gitems = got.get('items', [])
+    if titems and len(gitems) == len(titems):
+        for i, (t, g) in enumerate(zip(titems, gitems)):
+            cls = t.get('class')
+            if cls == 'Root Folder' and t.get('guid'):
+                cmp.append((f'item{i}.root', g['kind'] == 'Root Folder' and g['guid'].strip('{}').upper() == t['guid'].upper()))
+            elif cls == 'Volume Item' and t.get('volume_identifier'):
+                cmp.append((f'item{i}.shellfolder', g['guid'].strip('{}').upper() == t['volume_identifier'].upper()))
+            elif cls == 'Volume Item':
+                cmp.append((f'item{i}.volume', g['name'] == t.get('volume_name')))
+            elif cls == 'File entry':
+                ok = same(g['short_name'], t.get('primary_name') or '')
+                mt = (t.get('modification_time') or '')[:19].replace('T', ' ')
+                if mt and g['modified']:
+                    ok = ok and g['modified'] == mt
+                cmp.append((f'item{i}.file', ok))
+    elif titems:
+        cmp.append(('item_count', len(gitems) == len(titems)))
     bad = [(k, got.get(k), v) for k, v in cmp
-           if not (same(got.get(k), v) if isinstance(v, str) else got.get(k) == v)]
+           if not (v is True or (same(got.get(k), v) if isinstance(v, str) else got.get(k) == v))]
     checked += 1
     if bad:
         fails += 1
