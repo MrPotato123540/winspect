@@ -61,6 +61,16 @@ static const struct { const char *name, *text; } usage_table[] = {
         "each item also shows its target, arguments and timestamps. Flags items that\n"
         "launch a script host or point into a user-writable dir. Read-only. Usage:\n"
         "  winspect jumplist [<file | folder>] [--json | --csv]\n" },
+    { "pshistory",
+        "winspect pshistory - PowerShell command history kept by PSReadLine\n"
+        "(%APPDATA%\\Microsoft\\Windows\\PowerShell\\PSReadLine\\ConsoleHost_history.txt):\n"
+        "every command a user typed into an interactive console, oldest first, kept\n"
+        "even after the window is closed. Lines matching well-known attacker patterns\n"
+        "(encoded commands, download cradles, AMSI / Defender tampering, credential\n"
+        "dumping, log clearing, persistence) are flagged with a reason. --all-users\n"
+        "reads every profile under C:\\Users (needs admin); a file or folder argument\n"
+        "reads a copy (e.g. from a disk image). Read-only. Usage:\n"
+        "  winspect pshistory [<file | folder> | --all-users] [--flagged] [--json | --csv]\n" },
     { "shellbags",
         "winspect shellbags - folders a user browsed in Explorer, from the ShellBags\n"
         "(BagMRU tree in NTUSER.DAT and UsrClass.dat): full path rebuilt from the\n"

@@ -58,4 +58,14 @@ int ioc_command_image(const char *cmd, char *out, size_t n);
 // 1 if needle occurs in s, ignoring ASCII case.
 int ioc_contains_ci(const char *s, const char *needle);
 
+// Why a PowerShell command line (e.g. a PSReadLine history entry) deserves a
+// look, or NULL. Patterns are the ones public detection guidance (Sigma-style
+// rules, vendor write-ups) describes; the first match wins:
+//   encoded command, download cradle (DownloadString / WebClient / iwr|iex),
+//   AMSI or Defender tampering (Set-MpPreference -Disable*, exclusions),
+//   execution-policy bypass, credential dumping (mimikatz, sekurlsa,
+//   comsvcs MiniDump), log clearing, persistence (scheduled task, service,
+//   Run key). A match is a lead for an analyst, not a verdict.
+const char *ioc_ps_reason(const char *line);
+
 #endif

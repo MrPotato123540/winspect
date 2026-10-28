@@ -346,3 +346,38 @@ int ioc_command_image(const char *cmd, char *out, size_t n)
     }
     return out[0] != '\0';
 }
+
+const char *ioc_ps_reason(const char *l)
+{
+    if (contains_ci(l, "-encodedcommand") || contains_ci(l, " -enc ") || contains_ci(l, " -ec ") ||
+        ((contains_ci(l, "powershell") || contains_ci(l, "pwsh")) && contains_ci(l, " -e ")))
+        return "encoded PowerShell command";
+    if (contains_ci(l, "DownloadString") || contains_ci(l, "DownloadFile") || contains_ci(l, "DownloadData") ||
+        contains_ci(l, "Net.WebClient") || contains_ci(l, "Start-BitsTransfer") ||
+        ((contains_ci(l, "Invoke-WebRequest") || contains_ci(l, "iwr ") || contains_ci(l, "curl ") ||
+          contains_ci(l, "wget ") || contains_ci(l, "Invoke-RestMethod") || contains_ci(l, "irm ")) &&
+         (contains_ci(l, "iex") || contains_ci(l, "Invoke-Expression"))))
+        return "download cradle (fetches code from the network)";
+    if (contains_ci(l, "AmsiUtils") || contains_ci(l, "amsiInitFailed") || contains_ci(l, "AmsiScanBuffer"))
+        return "AMSI tampering";
+    if ((contains_ci(l, "Set-MpPreference") && contains_ci(l, "-Disable")) ||
+        (contains_ci(l, "Add-MpPreference") && contains_ci(l, "-Exclusion")))
+        return "Microsoft Defender settings weakened";
+    if (contains_ci(l, "mimikatz") || contains_ci(l, "sekurlsa") || contains_ci(l, "Invoke-Mimikatz") ||
+        (contains_ci(l, "comsvcs") && contains_ci(l, "MiniDump")) || contains_ci(l, "lsass.dmp"))
+        return "credential dumping";
+    if (contains_ci(l, "Clear-EventLog") || contains_ci(l, "wevtutil cl") || contains_ci(l, "wevtutil.exe cl") ||
+        contains_ci(l, "Remove-EventLog") || contains_ci(l, "ConsoleHost_history"))
+        return "log / history clearing";
+    if (contains_ci(l, "-ExecutionPolicy Bypass") || contains_ci(l, "-ep bypass") || contains_ci(l, "-exec bypass") ||
+        contains_ci(l, "Set-ExecutionPolicy Unrestricted") || contains_ci(l, "Set-ExecutionPolicy Bypass"))
+        return "execution policy bypass";
+    if (contains_ci(l, "Invoke-Expression") || contains_ci(l, "iex(") || contains_ci(l, "iex (") || contains_ci(l, "| iex"))
+        return "runs a string as code (Invoke-Expression)";
+    if (contains_ci(l, "Register-ScheduledTask") || contains_ci(l, "New-ScheduledTask") || contains_ci(l, "schtasks /create") ||
+        contains_ci(l, "New-Service") || contains_ci(l, "sc.exe create") || contains_ci(l, "sc create") ||
+        (contains_ci(l, "CurrentVersion\\Run") && (contains_ci(l, "Set-ItemProperty") || contains_ci(l, "New-ItemProperty") ||
+                                                    contains_ci(l, "reg add"))))
+        return "persistence (task / service / Run key)";
+    return NULL;
+}
