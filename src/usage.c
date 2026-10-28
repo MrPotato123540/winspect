@@ -305,10 +305,13 @@ static const struct { const char *name, *text; } usage_table[] = {
     { "usb",
         "winspect usb - USB mass-storage devices this machine has seen, from the\n"
         "Plug-and-Play record under HKLM\\SYSTEM\\CurrentControlSet\\Enum\\USBSTOR:\n"
-        "vendor, product, revision, serial (instance id) and friendly name, plus the\n"
-        "instance key's last-write time as a rough \"last seen/changed\" hint. A\n"
-        "standard DFIR question (\"which USB sticks were plugged in?\"). Read-only.\n"
-        "Usage: winspect usb [--json | --csv]\n" },
+        "vendor, product, revision, serial (instance id), friendly name, first\n"
+        "install / last plugged-in / last removal times (Windows 8+ device\n"
+        "properties - readable only by SYSTEM live, so use --hive with a copy of the\n"
+        "SYSTEM hive), partition-manager disk id and the drive letters MountedDevices\n"
+        "tied to the serial. A standard DFIR question (\"which USB sticks were\n"
+        "plugged in, and when?\"). Read-only.\n"
+        "Usage: winspect usb [--hive <SYSTEM>] [--json | --csv]\n" },
     { "prefetch",
         "winspect prefetch - evidence of execution from %SystemRoot%\\Prefetch\\*.pf:\n"
         "executable name, run count, last run time(s) and - from the file's own\n"

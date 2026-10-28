@@ -11,6 +11,8 @@
 #     bam\UserSettings key (regipy reads both too); the dwm.exe record.
 #   * amcache: 1367 entries (1120 Root\File + 247 InventoryApplicationFile,
 #     same total as regipy); the TPVMMondeu.dll entry's SHA-1 and times.
+#   * usb: regipy's exact USBSTOR result for the Win10 1709 SYSTEM hive
+#     (identity, install / last connected / last removed, disk id).
 #   * shimcache: Windows 7 x86 cache, 330 entries (regipy's 660 counts the
 #     identical ControlSet001 and ControlSet002 copies); the mfeann.exe entry
 #     with the executed flag.
@@ -83,6 +85,18 @@ check(tp and tp[0]['path'] == 'C:\\Windows\\system32\\TPVMMondeu.dll' and tp[0][
 check(sum(r['layout'] == 'Inventory' for r in am) == 247, 'amcache: 247 InventoryApplicationFile entries')
 rc, out = run('amcache', hive('amcache.hve'), '--sha1', '056F4B9D9EC9B5DC548E1B460DA889E44089D76F', '--json')
 check(len(json.loads(out)) == 1, 'amcache --sha1 lookup (case-insensitive)')
+
+rc, out = run('usb', '--hive', hive('SYSTEM_WIN_10_1709'), '--json')
+u = json.loads(out)
+check(len(u) == 1 and u[0]['serial'] == '200608767007B7C08A6A&0' and u[0]['friendly_name'] == 'SanDisk Cruzer USB Device'
+      and u[0]['vendor'] == 'SanDisk' and u[0]['product'] == 'Cruzer' and u[0]['revision'] == '1.20',
+      'usb --hive (Win10): device identity')
+check(u and u[0]['first_installed'] == '2020-03-17 14:02:38' and u[0]['last_connected'] == '2020-03-17 14:02:38'
+      and u[0]['last_removed'] == '2020-03-17 14:23:45', 'usb: first installed / last connected / last removed')
+check(u and u[0]['disk_id'] == '{fc416b61-6437-11ea-bd0c-a483e7c21469}', 'usb: Partmgr disk id')
+rc, out = run('usb', '--hive', hive('SYSTEM'), '--json')
+u = json.loads(out)
+check(u and 'E:' in u[0]['mounted_as'] and u[0]['last_connected'] is None, 'usb (Win7): drive letter via MountedDevices, no devprop times')
 
 rc, out = run('hive', hive('NTUSER.DAT'), 'Software\\Microsoft\\Windows\\CurrentVersion\\Run', '--json')
 h = json.loads(out)
