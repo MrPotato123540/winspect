@@ -28,6 +28,7 @@
 #include "bitsjobs.h"
 #include "pshistory.h"
 #include "recyclebin.h"
+#include "comhijack.h"
 
 #include <windows.h>
 #include <io.h>
@@ -57,6 +58,7 @@ static const check checks[] = {
     { "prefetch",  "programs that ran from user-writable dirs", cmd_prefetch, { "--flagged", NULL } },
     { "defender",  "Defender exclusions / disabled protection", cmd_defender, { NULL } },
     { "wmi",       "WMI permanent subscriptions",            cmd_wmi,       { NULL } },
+    { "comhijack", "per-user COM classes replacing machine ones", cmd_comhijack, { "--flagged", NULL } },
     { "bits",      "BITS jobs with notify commands / risky downloads", cmd_bits, { "--flagged", NULL } },
     { "pshistory", "suspicious PowerShell history lines (all users)", cmd_pshistory, { "--all-users", "--flagged", NULL } },
     { "recyclebin","deleted programs and scripts",           cmd_recyclebin, { "--flagged", NULL } },

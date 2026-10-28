@@ -990,3 +990,67 @@ int task_parse(const char *xml, task_info *t)
     }
     return 0;
 }
+
+// ---- COM server paths -------------------------------------------------------
+
+// Normalised file part of a server registration into out (lower case).
+static void com_norm(const char *in, char *out, size_t n)
+{
+    static const struct { const char *var, *val; } env[] = {
+        { "%systemroot%", "c:\\windows" }, { "%windir%", "c:\\windows" },
+        { "%programfiles(x86)%", "c:\\program files (x86)" }, { "%programfiles%", "c:\\program files" },
+        { "%commonprogramfiles%", "c:\\program files\\common files" }, { "%systemdrive%", "c:" },
+    };
+    char low[1024];
+    size_t k = 0;
+    while (*in == ' ' || *in == '\t') in++;
+    int quoted = *in == '"';
+    if (quoted) in++;
+    for (; *in && k + 1 < sizeof low; in++) {
+        if (quoted && *in == '"') break;
+        char c = *in;
+        if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+        if (c == '/') c = '\\';
+        low[k++] = c;
+    }
+    low[k] = 0;
+    // Unquoted LocalServer32 values may carry arguments: cut after ".exe"/".dll".
+    if (!quoted) {
+        char *e = strstr(low, ".exe ");
+        char *d = strstr(low, ".dll ");
+        if (d && (e == NULL || d < e)) e = d;
+        if (e) e[4] = 0;
+    }
+    while (k > 0 && (low[k - 1] == ' ' || low[k - 1] == '\t')) low[--k] = 0;
+    size_t o = 0;
+    for (const char *p = low; *p && o + 1 < n;) {
+        int done = 0;
+        for (size_t i = 0; i < sizeof env / sizeof env[0]; i++) {
+            size_t L = strlen(env[i].var);
+            if (strncmp(p, env[i].var, L) == 0) {
+                for (const char *v = env[i].val; *v && o + 1 < n; v++) out[o++] = *v;
+                p += L;
+                done = 1;
+                break;
+            }
+        }
+        if (!done) out[o++] = *p++;
+    }
+    out[o] = 0;
+}
+
+int com_path_same(const char *a, const char *b)
+{
+    char x[1024], y[1024];
+    com_norm(a, x, sizeof x);
+    com_norm(b, y, sizeof y);
+    if (strcmp(x, y) == 0) return 1;
+    // A bare name is searched in the system directory first.
+    const char *bx = strrchr(x, '\\'), *by = strrchr(y, '\\');
+    if ((bx == NULL) == (by == NULL)) return 0;
+    const char *bare = bx ? y : x, *full = bx ? x : y;
+    const char *base = bx ? bx + 1 : by + 1;
+    if (strcmp(bare, base) != 0) return 0;
+    return strncmp(full, "c:\\windows\\system32\\", 20) == 0 ||
+           strncmp(full, "c:\\windows\\syswow64\\", 20) == 0;
+}

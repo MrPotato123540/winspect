@@ -183,6 +183,17 @@ db = [r for r in sb if r['path'] == 'Dropbox' and r['slot'] == 9]
 check(db and db[0]['mru_position'] == 4 and db[0]['key_written'] == '2018-04-05 02:13:26', 'shellbags: Dropbox root slot 9, MRU position 4 (regipy)')
 check(any(r['path'] == 'D:\\AKMonitor\\logs\\pic' for r in sb), 'shellbags: drive root + directory chain')
 check(any(r['path'] == 'User Files\\Google Drive' and r['created'] for r in sb), 'shellbags: CFSF delegate item name + times')
+# comhijack offline: per-user COM classes in a real UsrClass.dat (OneDrive and
+# Dropbox register theirs per user, under AppData). Values were read from the
+# raw hive with tests/regf_dump.c; per-user-only classes must not be flagged.
+rc, out = run('comhijack', '--usrclass', hive('UsrClass.dat'), '--all', '--json')
+ch = json.loads(out) if rc == 0 else []
+by = {(r['clsid'].upper(), r['view']): r for r in ch}
+fs = by.get(('{9AA2F32D-362A-42D9-9328-24A483E2CCC3}', '64-bit'))
+check(fs is not None and fs['user_server'].endswith('\\amd64\\FileSyncShell64.dll') and fs['user_kind'] == 'InprocServer32',
+      'comhijack --usrclass: OneDrive FileSyncShell64.dll per-user class')
+check(len(ch) == 42 and not any(r['suspicious'] for r in ch) and not any(r['overrides_machine'] for r in ch),
+      f'comhijack --usrclass: {len(ch)} per-user classes, none flagged without a machine hive')
 
 rc, out = run('hive', hive('NTUSER.DAT'), 'Software\\Microsoft\\Windows\\CurrentVersion\\Run', '--json')
 h = json.loads(out)

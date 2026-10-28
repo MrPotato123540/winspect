@@ -121,6 +121,13 @@ os.makedirs(tcopy, exist_ok=True)
 with open(os.path.join(tcopy, 'Dropped'), 'wb') as f:
     f.write(b'\xff\xfe' + task_xml('<Actions><Exec><Command>C:\\Users\\bob\\AppData\\Local\\Temp\\u.exe</Command>'
                                     '</Exec></Actions>').encode('utf-16-le'))
+# comhijack: the Shortcut class (HKLM -> shell32.dll) re-registered per-user
+# with a DLL under Public (flagged); XMLHTTP re-registered per-user with the
+# SAME file written as %SystemRoot%\... (not flagged).
+reg(HKCU + r'Software\Classes\CLSID\{00021401-0000-0000-C000-000000000046}\InprocServer32', '/ve', '/d',
+    r'C:\users\Public\shellhook.dll')
+reg(HKCU + r'Software\Classes\CLSID\{F5078F35-C551-11D3-89B9-0000F81FE221}\InprocServer32', '/ve', '/t',
+    'REG_EXPAND_SZ', '/d', r'%SystemRoot%\System32\MSXML3.dll')
 # --- prefetch: an uncompressed v30 SCCA file (pre-MAM layout is still valid) ---
 def make_pf(exe='EVIL.EXE', h=0xDEADBEEF, files=None):
     d = bytearray(1024)
@@ -321,6 +328,9 @@ checks = [
                            ('ComMachine', 'wscomtest.dll'), ('"arguments":"/c \\"echo a&b\\""', '"run_as":"S-1-5-18"'),
                            ('"triggers":"logon"', None)],
      ['"task":"ComMachine"', '"task":"Quoted"']),
+    (['comhijack', '--json'], [('{00021401-0000-0000-C000-000000000046}', 'COM hijacking'),
+                               ('{F5078F35-C551-11D3-89B9-0000F81FE221}', '"overrides_machine":true')],
+     ['{F5078F35-C551-11D3-89B9-0000F81FE221}', '{0F1E2D3C-4B5A-6978-8796-A5B4C3D2E1F0}']),
     (['tasks', '--dir', 'C:\\tasks_copy', '--json'], [('Sub\\\\Dropped', 'command in user-writable dir')], ['GoodOne']),
     (['services', '--json', '--flagged'], [('WsTestSvc', 'unquoted path with spaces')], []),
     (['autoruns', '--json'], [('Updater.lnk', 'shortcut launches a script host')], []),
@@ -364,6 +374,10 @@ for args, must, mustnot in checks:
             if bad in json.dumps(r, separators=(',',':')) and r.get('suspicious'):
                 print(f'FAIL {args}: {bad!r} should not be flagged: {r}'); fails += 1
     print(f'checked {" ".join(args)}  rc={rc}')
+# The per-user Shortcut-class override would break shell32 shortcuts for the
+# prefix user; remove both comhijack overrides now that they were checked.
+for cls in ('{00021401-0000-0000-C000-000000000046}', '{F5078F35-C551-11D3-89B9-0000F81FE221}'):
+    wine(['reg', 'delete', HKCU + r'Software\Classes\CLSID' + '\\' + cls, '/f'])
 # hunt: a process named svchost.exe running from outside System32. A tiny
 # sleeper is cross-compiled for this (MinGW is needed for the build anyway).
 fake = os.path.join(pfx, 'drive_c', 'fake'); os.makedirs(fake, exist_ok=True)
@@ -576,7 +590,7 @@ rc, out, err = wine([exe, 'sweep', '--json'], timeout=600)
 try:
     d = json.loads(out)
     want = ['posture', 'hunt', 'hidden', 'net', 'autoruns', 'services', 'tasks', 'taskcache',
-            'firewall', 'prefetch', 'defender', 'wmi', 'bits', 'pshistory', 'recyclebin', 'events']
+            'firewall', 'prefetch', 'defender', 'wmi', 'comhijack', 'bits', 'pshistory', 'recyclebin', 'events']
     missing = [k for k in want if k not in d]
     if missing:
         print(f'FAIL sweep: missing keys {missing}'); fails += 1

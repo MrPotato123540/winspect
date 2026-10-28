@@ -61,6 +61,19 @@ static const struct { const char *name, *text; } usage_table[] = {
         "each item also shows its target, arguments and timestamps. Flags items that\n"
         "launch a script host or point into a user-writable dir. Read-only. Usage:\n"
         "  winspect jumplist [<file | folder>] [--json | --csv]\n" },
+    { "comhijack",
+        "winspect comhijack - per-user COM class registrations (HKCU\\Software\\Classes\n"
+        "\\CLSID, also the WOW6432Node view) compared with the machine ones (HKLM).\n"
+        "For a process running as that user the per-user registration WINS, so a\n"
+        "user-writable key can silently replace a system class's DLL or EXE without\n"
+        "admin rights (COM hijacking, MITRE T1546.015). A per-user class that also\n"
+        "exists machine-wide with a DIFFERENT server file is flagged. Classes that\n"
+        "exist only per-user (OneDrive, Teams, ... register many) are shown with\n"
+        "--all but not flagged. --usrclass reads a user's UsrClass.dat copy and\n"
+        "--software the matching SOFTWARE hive (both from the same machine) for\n"
+        "offline use. Read-only. Usage:\n"
+        "  winspect comhijack [--usrclass <UsrClass.dat> [--software <SOFTWARE>]]\n"
+        "                     [--all] [--flagged] [--json | --csv]\n" },
     { "bits",
         "winspect bits - Background Intelligent Transfer Service jobs: name, owner,\n"
         "state, creation / modification / completion times and every file (remote\n"
@@ -277,7 +290,7 @@ static const struct { const char *name, *text; } usage_table[] = {
     { "sweep",
         "winspect sweep - one-shot machine triage: runs the system-wide checks in\n"
         "\"findings only\" mode (posture --warn, hunt, hidden, net, autoruns/services/tasks/\n"
-        "taskcache/firewall/prefetch --flagged, defender, wmi, bits/recyclebin --flagged,\n"
+        "taskcache/firewall/prefetch --flagged, defender, wmi, comhijack/bits/recyclebin --flagged,\n"
         "pshistory --all-users --flagged, events) and prints them as one\n"
         "report. With --json the result is a single object, one key per check; a\n"
         "check that could not run (e.g. needs elevation) is null instead of breaking\n"

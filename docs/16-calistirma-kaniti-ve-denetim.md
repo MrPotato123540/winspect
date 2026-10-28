@@ -443,7 +443,8 @@ kodu taşıyan **ServiceDll**'i doğrular.
 `winspect sweep` sistem çapındaki tüm kontrolleri **sadece bulgular** modunda
 sırayla çalıştırır: posture `--warn`, hunt, hidden, net `--flagged`, autoruns / services /
 tasks / taskcache / firewall `--flagged`, defender, wmi, bits / recyclebin
-`--flagged`, pshistory `--all-users --flagged` (20. belge), events. Böylece
+`--flagged`, comhijack `--flagged`, pshistory `--all-users --flagged` (20.
+belge), events. Böylece
 "bu makinede bakılması gereken ne var?" sorusunun cevabı tek sayfa olur.
 
 `--json` ile sonuç **tek bir nesne**dir: her kontrol bir anahtar. İnce nokta:

@@ -247,6 +247,10 @@ int main(int argc, char **argv)
         "\"C:\\Program Files\\A B\\a.exe\" -x rundll32.exe C:\\x.dll,Run",
         "powershell -enc SGVsbG8gV29ybGQhIFRoaXMgaXMgYSB0ZXN0IG9mIGJhc2U2NA==",
         "MSSE-1234-server", "192.168.1.1", "autocheck autochk *",
+        "<Task><Settings><Hidden>true</Hidden><Enabled>false</Enabled></Settings><Actions><Exec>"
+        "<Command>C:\\a.exe</Command><Arguments>&quot;x&amp;</Arguments></Exec><ComHandler><ClassId>{A}"
+        "</ClassId></ComHandler></Actions><Triggers><BootTrigger/><LogonTrigger></LogonTrigger></Triggers></Task>",
+        "\"%ProgramFiles(x86)%\\A B\\srv.exe\" -Embedding",
     };
     for (long it = 0; it < iters; it++) {
         size_t n;
@@ -327,6 +331,13 @@ int main(int argc, char **argv)
             ioc_classify(text);
             ioc_script_host(text);
             ioc_ps_reason(text);
+            {
+                task_info ti;
+                task_parse(text, &ti);
+                com_path_same(text, "shell32.dll");
+                com_path_same("C:\\Windows\\System32\\x.dll", text);
+                bits_reason(text, text, text);
+            }
             ioc_command_image(text, out, sizeof out);
             ioc_user_writable(text);
             ioc_pipe_known(text);

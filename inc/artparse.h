@@ -277,4 +277,13 @@ typedef struct {
 // Returns 0 when the text looks like a task definition (<Task ...>), else -1.
 int task_parse(const char *xml, task_info *t);
 
+// ---- COM server paths -------------------------------------------------------
+// 1 if two COM server registrations (InprocServer32 / LocalServer32 default
+// values) name the same file: quotes, case, surrounding space and command-line
+// arguments (LocalServer32) are ignored, the common environment variables
+// (%SystemRoot%, %windir%, %ProgramFiles%, %ProgramFiles(x86)%,
+// %CommonProgramFiles%, %SystemDrive%) are replaced by their default "C:"
+// values, and a bare file name matches the same name in System32/SysWOW64.
+int com_path_same(const char *a, const char *b);
+
 #endif

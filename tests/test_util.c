@@ -785,6 +785,18 @@ int main(void)
                 check_int("task unterminated", task_parse("<Task><Exec><Command>x", &ti), 0);
                 check_str("task unterminated cmd", ti.command, "");
             }
+            check_int("com same env", com_path_same("%systemroot%\\system32\\shell32.dll",
+                                                    "C:\\Windows\\System32\\shell32.dll"), 1);
+            check_int("com same quoted", com_path_same("\"C:\\Program Files\\A\\a.exe\" /automation",
+                                                       "%ProgramFiles%\\a\\A.EXE"), 1);
+            check_int("com same args", com_path_same("C:\\x\\srv.exe -Embedding", "c:\\x\\srv.exe"), 1);
+            check_int("com same bare", com_path_same("shell32.dll", "C:\\Windows\\System32\\shell32.dll"), 1);
+            check_int("com bare elsewhere", com_path_same("shell32.dll", "C:\\Users\\u\\shell32.dll"), 0);
+            check_int("com differ", com_path_same("C:\\Windows\\System32\\shell32.dll",
+                                                  "C:\\Users\\Public\\AppData\\evil.dll"), 0);
+            check_int("com x86 vs 64", com_path_same("%ProgramFiles(x86)%\\a.dll", "C:\\Program Files\\a.dll"), 0);
+            check_int("com wow vs sys32", com_path_same("C:\\Windows\\SysWOW64\\a.dll", "C:\\Windows\\System32\\a.dll"), 0);
+            check_int("com empty", com_path_same("", "a.dll"), 0);
         }
         check_int("rmm office", rmm_tool_name("Microsoft Office Professional Plus 2010") == NULL, 1);
         check_int("rmm remote desktop conn", rmm_tool_name("Remote Desktop Connection") == NULL, 1);

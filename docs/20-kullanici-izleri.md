@@ -1,4 +1,4 @@
-# 20 — Kullanıcı izleri: PowerShell geçmişi, Geri Dönüşüm Kutusu, BITS
+# 20 — Kullanıcı izleri ve sessiz kalıcılık: PowerShell geçmişi, Geri Dönüşüm Kutusu, BITS, COM hijacking
 
 Bu belge, bir kullanıcının (ya da onun hesabını kullanan birinin) bilgisayarda
 **ne yaptığını** gösteren düz dosya izlerini anlatır. İkisi de kayıt defteri
@@ -149,3 +149,57 @@ listelenir ve başlıkta bu açıkça yazar.
     BITS'i notify komutunu desteklemiyor (`E_NOTIMPL`).
   - Windows CI'da: notify komutunun okunması ve gerekçe olarak verilmesi
     bekleniyor (henüz gerçek Windows'ta koşmadı).
+
+## comhijack — kullanıcı başına COM kaydı (COM hijacking)
+
+Bir program `CoCreateInstance(CLSID)` dediğinde Windows CLSID'yi **HKCR**'de
+arar. HKCR birleşik bir görünümdür ve önce kullanıcıya bakar:
+
+1. `HKCU\Software\Classes\CLSID\{…}` (kullanıcının kendi hive'ı, UsrClass.dat)
+2. `HKLM\SOFTWARE\Classes\CLSID\{…}` (makine)
+
+Sonuç: **yönetici olmayan** bir kullanıcı, Windows'un ya da bir uygulamanın
+zaten kullandığı bir sınıfı kendi anahtarında yeniden kaydedip kendi DLL'ine
+yönlendirebilir. O kullanıcının bir sonraki süreci nesneyi oluşturduğunda bu
+DLL yüklenir. System32'de hiçbir dosya değişmez (MITRE ATT&CK T1546.015).
+
+`winspect comhijack` kullanıcı başına her CLSID için `InprocServer32` /
+`LocalServer32` değerini okur ve aynı CLSID'yi makine tarafında arar. 64 ve
+32 bitlik (`WOW6432Node`) görünümlerin ikisine de bakar.
+
+- **Makinede de kayıtlı ve sunucu dosyası farklı:** işaretlenir.
+- **Yalnızca kullanıcıda kayıtlı:** işaretlenmez, yalnızca `--all` ile
+  listelenir. Kullanıcı başına kurulan programlar (OneDrive, Teams, Dropbox…)
+  kendi sınıflarını böyle, AppData altına kaydeder. Bunu işaretlemek gerçek
+  bulguyu gürültüye gömerdi. Bunu regipy'nin gerçek UsrClass.dat'ında da
+  gördük: 42 sınıfın çoğu OneDrive'ın.
+
+"Farklı dosya" kararı `com_path_same` ile verilir (taşınabilir, birim testli).
+Aynı dosya birçok biçimde yazılabildiği için şunlar normalleştirilir:
+
+- tırnaklar, büyük/küçük harf, baştaki/sondaki boşluk;
+- `LocalServer32` değerindeki argümanlar (`… .exe -Embedding`);
+- `%SystemRoot%`, `%windir%`, `%ProgramFiles%`, `%ProgramFiles(x86)%`,
+  `%CommonProgramFiles%`, `%SystemDrive%` → varsayılan `C:\…` değerleri;
+- yalın dosya adı (`shell32.dll`) ↔ System32/SysWOW64'teki tam yol.
+
+`SysWOW64` ile `System32` ya da `Program Files` ile `Program Files (x86)`
+**farklı** sayılır.
+
+Çevrimdışı kullanım: `--usrclass <UsrClass.dat>` ve aynı makinenin
+`--software <SOFTWARE>` hive'ı. Yalnızca UsrClass verilirse karşılaştırma
+yapılmaz, her şey listelenir. Başka bir makinenin kullanıcı hive'ını bu
+makinenin HKLM'siyle karşılaştırmak anlamsız olurdu.
+
+**Doğrulama:**
+
+- 9 birim testi: ortam değişkeni, tırnak + argüman, yalın ad, x86 ↔ x64 ve
+  SysWOW64 ↔ System32 farkı.
+- wine'da: Shortcut sınıfı (HKLM'de `shell32.dll`) kullanıcıda Public altındaki
+  bir DLL'e yönlendirilince işaretleniyor. XMLHTTP sınıfı kullanıcıda **aynı**
+  dosyaya `%SystemRoot%\System32\MSXML3.dll` diye yazılınca işaretlenmiyor.
+  Testten sonra iki anahtar da siliniyor.
+- Gerçek UsrClass.dat (regipy verisi): 42 sınıf, OneDrive `FileSyncShell64.dll`
+  değeri ham hive dökümüyle aynı, hiçbiri işaretli değil.
+- Windows CI: Shortcut sınıfının kullanıcı başına kaydı oluşturulup işaretlenmesi
+  beklenir, ardından silinir. Sınıf bu sürede hiç oluşturulmaz.
