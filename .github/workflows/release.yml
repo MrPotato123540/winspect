@@ -1,0 +1,31 @@
+name: Release
+
+# The "CD" side of the pipeline. Pushing a version tag (e.g. v1.0.0) builds a
+# release binary with MSVC and attaches it to a GitHub Release automatically.
+on:
+  push:
+    tags: ['v*']
+
+# The release step needs to create a Release and upload assets, so grant the
+# built-in token write access to contents (least privilege: nothing else).
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build Release
+        run: |
+          cmake -S . -B build -A x64
+          cmake --build build --config Release
+
+      - name: Attach binary to the GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/Release/winspect.exe

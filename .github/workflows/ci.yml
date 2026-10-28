@@ -1,0 +1,221 @@
+name: CI
+
+# When to run: every push to main and every pull request. A PR that fails to
+# build on either compiler turns red before it can be merged.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # Pure-C helpers (MD5, JSON/CSV emitters) have no OS dependency, so we unit-test
+  # them on Linux where they can actually run. A bug here would silently corrupt
+  # --json/--csv output or make an imphash not match VirusTotal/YARA.
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Help text is in sync with the headers
+        run: |
+          python3 tools/gen_usage.py
+          git diff --exit-code src/usage.c || { echo "src/usage.c is stale: run python3 tools/gen_usage.py"; exit 1; }
+      - name: Build + run helper tests
+        run: |
+          SRC="src/md5.c src/jsonutil.c src/ioc.c src/entropy.c src/pecksum.c src/imphash_ords.c src/pfparse.c src/artparse.c src/capa.c src/lnkparse.c src/rights.c"
+          cc -I inc -Wall -Wextra -std=c11 $SRC tests/test_util.c -o test_util -lm
+          ./test_util
+      - name: Same tests + parser fuzz under AddressSanitizer / UBSan
+        run: |
+          SAN="-g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all"
+          SRC="src/md5.c src/jsonutil.c src/ioc.c src/entropy.c src/pecksum.c src/imphash_ords.c src/pfparse.c src/artparse.c src/capa.c src/lnkparse.c src/rights.c"
+          cc -I inc -std=c11 $SAN $SRC tests/test_util.c -o test_util_san -lm
+          ./test_util_san
+          cc -I inc -std=c11 $SAN src/ioc.c src/pfparse.c src/artparse.c src/lnkparse.c src/rights.c src/capa.c src/cfb.c tests/fuzz_parsers.c -o fuzz_parsers
+          ./fuzz_parsers 300000
+          # Compound-file reader: random files from tests/wine/cfbwrite.py must
+          # read back byte-identical (sizes + MD5 per stream).
+          cc -I inc -std=c11 $SAN src/cfb.c src/md5.c tests/cfb_dump.c -o cfb_dump
+          python3 tests/cfb_roundtrip.py ./cfb_dump 200
+      - name: .lnk parser vs an independent parser's expected output
+        # The LnkParse3 project keeps real-world (incl. malicious) .lnk samples
+        # with its parser's JSON output. Only those data files are used - no
+        # code from it runs - pinned to a commit so the oracle cannot drift.
+        run: |
+          git clone -q https://github.com/Matmaus/LnkParse3 lnkref
+          git -C lnkref checkout -q ad4230280b4ee1ceb3cdf5f274e6d92fb12e7abb
+          cc -I inc -std=c11 -g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all \
+             src/lnkparse.c src/jsonutil.c tests/lnk_dump.c -o lnk_dump
+          python3 -I tests/lnk_diff.py ./lnk_dump lnkref/tests/samples lnkref/tests/json
+
+  # Functional tests on Linux: cross-compile with MinGW and run the real .exe
+  # under wine. fixtures.py seeds a throw-away prefix with known-bad artifacts
+  # and checks each is reported with the right reason (and benign controls are
+  # not); wsmoke.py runs every command and checks exit codes, JSON and CSV;
+  # fuzz.py feeds corrupted PE and .lnk files to the parsers.
+  wine:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install MinGW + wine
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q gcc-mingw-w64-x86-64 wine64 upx-ucl ninja-build
+      - name: Cross-compile (same CMakeLists as the Windows jobs)
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_SYSTEM_NAME=Windows \
+                -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+          cp build/winspect.exe ./winspect.exe
+      - name: Functional fixtures + smoke under wine
+        env:
+          WINEPREFIX: ${{ runner.temp }}/wpfx
+        run: |
+          python3 tests/wine/fixtures.py ./winspect.exe
+          python3 tests/wine/wsmoke.py ./winspect.exe
+          python3 tests/wine/fuzz.py ./winspect.exe 60 150
+
+  build:
+    runs-on: windows-latest
+
+    strategy:
+      # Don't cancel the MSVC job just because MinGW failed (or vice versa);
+      # we want to see both results.
+      fail-fast: false
+      matrix:
+        # The whole point of the two-compiler matrix: the same source must build
+        # cleanly with Microsoft's compiler AND with GCC (MinGW). This is what
+        # catches "works on my machine" header and flag assumptions.
+        toolchain: [msvc, mingw]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # --- MSVC toolchain -----------------------------------------------------
+      - name: Set up MSVC
+        if: matrix.toolchain == 'msvc'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure + build (MSVC)
+        if: matrix.toolchain == 'msvc'
+        run: |
+          cmake -S . -B build -A x64
+          cmake --build build --config Release
+
+      - name: Smoke test (MSVC)
+        if: matrix.toolchain == 'msvc'
+        # Run every command on real Windows and fail only on a crash (an exit
+        # code outside the 0/1 our commands return). This is what catches a bad
+        # pointer or struct-layout bug that a compile can't - the thing a
+        # cross-build on Linux cannot verify.
+        run: |
+          $exe = "build\Release\winspect.exe"
+          $f = "C:\Windows\System32\notepad.exe"
+          $p = $PID
+          function Smoke { param([string[]]$a)
+            & $exe @a *> $null
+            if ($LASTEXITCODE -lt 0 -or $LASTEXITCODE -gt 1) { throw "crash in: $($a -join ' ') => $LASTEXITCODE" }
+          }
+          Smoke @()
+          foreach ($args in @(@("pe",$f), @("pe",$f,"--json"), @("sign",$f), @("hash",$f), @("strings",$f,"--ioc"))) { Smoke $args }
+          foreach ($c in "list","services","drivers","autoruns","pipes","hosts","net","arp","routes","sessions","shares","certstore","tasks","objects","defender","usb","prefetch","shimcache","bam","firewall","taskcache","wmi","lnk","hunt","posture","events","hidden","sweep","userassist","mru","jumplist") { Smoke @($c); Smoke @($c,"--json") }
+          foreach ($c in "inspect","threads","handles","regions","token","secinfo","modules","verify","triage") { Smoke @($c,"$p"); Smoke @($c,"$p","--json") }
+          foreach ($args in @(@("modules","$p","--unsigned"), @("firewall","--inbound","--allow","--active","--csv"), @("autoruns","--csv"), @("objects","--global","--type","Mutant"), @("drivers","--sig"), @("services","--flagged"), @("prefetch","--dir","C:\Windows\Prefetch","--csv"), @("streams","C:\Windows\System32\drivers\etc"), @("lnk","--json"), @("autoruns","--sig"), @("services","--sig","--flagged"), @("events","--summary"), @("prefetch","--flagged"), @("hunt","--all"), @("handles","--find","ntdll","--type","File"))) { Smoke $args }
+          Write-Host "all commands ran without crashing"
+
+      # --- MinGW toolchain ----------------------------------------------------
+      - name: Set up MinGW
+        if: matrix.toolchain == 'mingw'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+
+      - name: Configure + build (MinGW)
+        if: matrix.toolchain == 'mingw'
+        shell: msys2 {0}
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+
+      - name: Functional checks on real NTFS / Windows (MSVC)
+        if: matrix.toolchain == 'msvc'
+        # Things wine cannot emulate: alternate data streams, event logs.
+        run: |
+          $exe = "build\Release\winspect.exe"
+          $d = Join-Path $env:RUNNER_TEMP "adstest"
+          New-Item -ItemType Directory -Force -Path $d | Out-Null
+          Copy-Item C:\Windows\System32\notepad.exe (Join-Path $d "dl.exe")
+          $motw = "[ZoneTransfer]`r`nZoneId=3`r`nHostUrl=https://downloads.example/dl.exe`r`n"
+          Set-Content -Path (Join-Path $d "dl.exe") -Stream Zone.Identifier -Value $motw
+          Set-Content -Path (Join-Path $d "dl.exe") -Stream hidden -Value "secret payload"
+          $j = & $exe streams $d --json | ConvertFrom-Json
+          $z = $j | Where-Object { $_.stream -like "*Zone.Identifier*" }
+          if (-not $z -or $z.host_url -ne "https://downloads.example/dl.exe" -or -not $z.suspicious) { throw "streams: MOTW not decoded/flagged: $($j | ConvertTo-Json -Compress)" }
+          $h = $j | Where-Object { $_.stream -like "*:hidden:*" }
+          if (-not $h -or -not $h.suspicious) { throw "streams: unusual ADS not flagged" }
+          # events must return valid JSON (the System log is readable without elevation)
+          $e = & $exe events --max 5 --json | ConvertFrom-Json
+          $e = & $exe events --since 24 --json | ConvertFrom-Json
+          # events --summary: failed logons with 6 different account names from
+          # this host must group into one source flagged as password spraying.
+          # Only checked when the audit policy records logon failures.
+          $audit = auditpol /get /subcategory:"Logon" 2>$null | Out-String
+          foreach ($u in "wsa1","wsa2","wsa3","wsa4","wsa5","wsa6") {
+            net use \\127.0.0.1\IPC$ /user:$u "wrong-$u" 2>$null | Out-Null
+          }
+          $sum = & $exe events --summary --since 1 --json | ConvertFrom-Json
+          if ($audit -match "Failure") {
+            $spray = $sum | Where-Object { $_.distinct_users -ge 5 -and $_.reason -like "*spraying*" }
+            if (-not $spray) { throw "events --summary: spraying not flagged: $($sum | ConvertTo-Json -Compress)" }
+          } else { Write-Host "logon-failure auditing is off: spraying check skipped" }
+          # net: a program from a user-writable dir listening on all interfaces
+          # must be flagged with the owning process path (wine reports pid 0
+          # for every socket, so this can only be checked here).
+          $src = Join-Path $env:TEMP "lst.c"
+          Set-Content -Path $src -Value '#include <winsock2.h>
+          #include <windows.h>
+          #pragma comment(lib, "ws2_32.lib")
+          int main(void){WSADATA w;WSAStartup(MAKEWORD(2,2),&w);SOCKET s=socket(AF_INET,SOCK_STREAM,0);
+          struct sockaddr_in a={0};a.sin_family=AF_INET;a.sin_port=htons(47123);a.sin_addr.s_addr=INADDR_ANY;
+          bind(s,(struct sockaddr*)&a,sizeof a);listen(s,1);Sleep(60000);return 0;}'
+          cl /nologo $src /Fe:(Join-Path $env:TEMP "lst.exe") /Fo:(Join-Path $env:TEMP "lst.obj") | Out-Null
+          $lp = Start-Process (Join-Path $env:TEMP "lst.exe") -PassThru
+          Start-Sleep 3
+          $n = & $exe net --flagged --json | ConvertFrom-Json
+          $hit = $n | Where-Object { $_.local -like "*:47123" -and $_.reason -like "*listens on all interfaces*" }
+          Stop-Process -Id $lp.Id -Force
+          if (-not $hit) { throw "net: user-writable listener not flagged: $($n | ConvertTo-Json -Compress)" }
+          # handles: a helper holds a read+write file open and blocks on a pipe
+          # read. --find must name the file with the helper's pid, and the
+          # per-pid listing must not hang on the pending pipe read.
+          cl /nologo tests\holder.c /Fe:(Join-Path $env:TEMP "holder.exe") /Fo:(Join-Path $env:TEMP "holder.obj") | Out-Null
+          $marker = Join-Path $env:TEMP "wsfind_marker.txt"
+          $hp = Start-Process (Join-Path $env:TEMP "holder.exe") -ArgumentList "`"$marker`"","block" -PassThru
+          Start-Sleep 3
+          $hf = & $exe handles --find wsfind_marker --json | ConvertFrom-Json
+          $mine = $hf | Where-Object { $_.pid -eq $hp.Id -and $_.type -eq "File" }
+          if (-not $mine) { Stop-Process -Id $hp.Id -Force; throw "handles --find: marker not found: $($hf | ConvertTo-Json -Compress)" }
+          $job = Start-Job { param($e, $p) & $e handles $p --json } -ArgumentList (Resolve-Path $exe).Path, $hp.Id
+          if (-not (Wait-Job $job -Timeout 60)) { Stop-Process -Id $hp.Id -Force; throw "handles <pid>: hung on a blocked pipe" }
+          $hl = Receive-Job $job | ConvertFrom-Json
+          Stop-Process -Id $hp.Id -Force
+          if (-not ($hl | Where-Object { $_.name -like "*wsfind_marker*" })) { throw "handles <pid>: read/write file handle not named" }
+          Write-Host "streams + events (+summary) + net + handles functional checks passed"
+
+      - name: Smoke test (MinGW)
+        if: matrix.toolchain == 'mingw'
+        shell: msys2 {0}
+        run: |
+          exe=./build/winspect.exe
+          f=/c/Windows/System32/notepad.exe
+          p=$$
+          smoke() { "$exe" "$@" >/dev/null 2>&1; rc=$?; if [ $rc -gt 1 ]; then echo "crash: $* => $rc"; exit 1; fi; }
+          smoke
+          smoke pe "$f"; smoke pe "$f" --json; smoke sign "$f"; smoke hash "$f"; smoke strings "$f" --ioc
+          for c in list services drivers autoruns pipes hosts net arp routes sessions shares certstore tasks objects defender usb prefetch shimcache bam firewall taskcache wmi lnk hunt posture events hidden sweep userassist mru jumplist; do smoke $c; smoke $c --json; done
+          for c in inspect threads handles regions token secinfo modules verify triage; do smoke $c "$p"; smoke $c "$p" --json; done
+          smoke modules "$p" --unsigned; smoke firewall --inbound --allow --active --csv; smoke autoruns --csv; smoke objects --global --type Mutant; smoke drivers --sig; smoke services --flagged; smoke streams /c/Windows/System32/drivers/etc; smoke lnk --json; smoke autoruns --sig; smoke services --sig --flagged; smoke events --summary; smoke prefetch --flagged; smoke hunt --all; smoke handles --find ntdll --type File
+          echo "all commands ran without crashing"
