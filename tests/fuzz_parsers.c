@@ -9,12 +9,13 @@
 //
 // Build: cc -std=c11 -g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all \
 //          -I inc src/ioc.c src/pfparse.c src/artparse.c src/lnkparse.c src/rights.c \
-//          src/capa.c src/cfb.c tests/fuzz_parsers.c -o fuzz_parsers
+//          src/capa.c src/cfb.c src/destlist.c tests/fuzz_parsers.c -o fuzz_parsers
 // Run:   ./fuzz_parsers [iterations]      (exit 0 = no sanitizer findings)
 
 #include "pfparse.h"
 #include "artparse.h"
 #include "lnkparse.h"
+#include "destlist.h"
 #include "ioc.h"
 #include "rights.h"
 #include "capa.h"
@@ -134,6 +135,28 @@ static size_t seed_lnk(unsigned char *d)
     return p + 4;                                           // + terminal block
 }
 
+static size_t seed_destlist(unsigned char *d)
+{
+    // Version-3 header + two entries ("C:\\a", pinned; "x") with v1 droids.
+    memset(d, 0, 600);
+    d[0] = 3; d[4] = 2; d[8] = 1; d[16] = 2;
+    size_t p = 32;
+    for (int k = 0; k < 2; k++) {
+        unsigned char *e = d + p;
+        e[24 + 7] = 0x11; e[72] = 'h'; e[88] = (unsigned char)(k + 1);
+        e[100] = 0x40; e[107] = 0x01;
+        if (k) { e[108] = 0xFF; e[109] = 0xFF; e[110] = 0xFF; e[111] = 0xFF; }
+        e[116] = 3;
+        const char *path = k ? "x" : "C:\\a";
+        size_t L = strlen(path);
+        e[128] = (unsigned char)L;
+        for (size_t i = 0; i < L; i++) e[130 + 2 * i] = (unsigned char)path[i];
+        p += 130 + 2 * L + 4;
+    }
+    return p;
+}
+static void nop_dl(const dl_entry *e, void *ctx) { (void)e; (void)ctx; }
+
 int main(int argc, char **argv)
 {
     long iters = argc > 1 ? atol(argv[1]) : 20000;
@@ -174,7 +197,13 @@ int main(int argc, char **argv)
         case 1: n = seed_mam(seed); n = mutate(seed, n, buf, sizeof buf);
                 pf_mam_header(buf, n, &fmt, &us, &off); break;
         case 2: n = seed_shim(seed); n = mutate(seed, n, buf, sizeof buf);
-                shim_parse(buf, n, nop_shim, NULL); break;
+                shim_parse(buf, n, nop_shim, NULL);
+                {
+                    uint32_t dv, dp;
+                    n = seed_destlist(seed); n = mutate(seed, n, buf, sizeof buf);
+                    destlist_parse(buf, n, &dv, &dp, nop_dl, NULL);
+                }
+                break;
         case 3: n = seed_lnk(seed); n = mutate(seed, n, buf, sizeof buf);
                 lnk_parse(buf, n, &li);
                 {   // small registry blobs: MRUListEx, RecentDocs, UserAssist

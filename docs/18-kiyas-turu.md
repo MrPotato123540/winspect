@@ -141,8 +141,8 @@ boruda senkron okumada bekler.
 
 ## Hâlâ eksik olanlar (bilerek ertelendi)
 
-- **jumplist:** DestList (sıra, erişim zamanı, sabitleme) çözümü yok.
-  AppID → program adı tablosu da yok; doğrulanmış bir kaynak gerekiyor.
+- **jumplist:** AppID → program adı tablosu yok; doğrulanmış bir kaynak
+  gerekiyor. (DestList bu turdan sonra eklendi: 16. belge, "jumplist".)
 - **shimcache:** Windows 8/8.1 biçimi ve "executed" bayrağı yok; güvenilir
   kaynak olmadan eklenmiyor.
 - **userassist / mru / bam:** diğer kullanıcılar ve çevrimdışı hive desteği

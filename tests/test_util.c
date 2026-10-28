@@ -8,7 +8,8 @@
 // anywhere (Linux CI included), independent of Windows.
 //
 // Build:  cc -I inc src/md5.c src/jsonutil.c src/ioc.c src/entropy.c src/pecksum.c
-//             src/imphash_ords.c src/pfparse.c tests/test_util.c -o test_util -lm
+//             src/imphash_ords.c src/pfparse.c src/artparse.c src/capa.c src/lnkparse.c
+//             src/rights.c src/destlist.c tests/test_util.c -o test_util -lm
 // Run:    ./test_util   (exit 0 = all passed)
 
 #include "md5.h"
@@ -21,6 +22,7 @@
 #include "artparse.h"
 #include "capa.h"
 #include "lnkparse.h"
+#include "destlist.h"
 #include "rights.h"
 
 #include <stdio.h>
@@ -94,6 +96,12 @@ static void check_md5(const char *in, const char *want)
     char label[64];
     snprintf(label, sizeof label, "md5(\"%.20s\")", in);
     check_str(label, out, want);
+}
+
+static void dl_test_cb(const dl_entry *e, void *ctx)
+{
+    dl_entry *out = (dl_entry *)ctx;
+    if (e->mru < 4) out[e->mru] = *e;
 }
 
 int main(void)
@@ -440,6 +448,41 @@ int main(void)
         lk[tb] = 0xFF; lk[tb + 1] = 0x7F;               // block runs past the buffer
         check_int("lnk2 bad block rc", lnk_parse(lk, end, &o), 0);
         check_str("lnk2 bad block skipped", o.machine_id, "");
+    }
+
+    // --- Jump List DestList (version 1 layout) + v1 UUID ------------------------
+    {
+        static unsigned char dl[400];
+        memset(dl, 0, sizeof dl);
+        dl[0] = 1; dl[4] = 2; dl[8] = 0;                 // v1, 2 entries, 0 pinned
+        unsigned char *e = dl + 32;
+        // file droid: v1 UUID, time_low 0x01020304, time_mid 0x0506, time_hi
+        // 0x1D2 (Data3 = 0x11D2: version 1), node 0a:0b:0c:0d:0e:0f
+        e[24] = 0x04; e[25] = 0x03; e[26] = 0x02; e[27] = 0x01; e[28] = 0x06; e[29] = 0x05;
+        e[30] = 0xD2; e[31] = 0x11;
+        for (int i = 0; i < 6; i++) e[24 + 10 + i] = (unsigned char)(0x0A + i);
+        memcpy(e + 72, "pc-9", 4);
+        e[88] = 0x1A;                                    // entry number 0x1a
+        e[100] = 0x10;                                   // last used FILETIME 0x10
+        e[108] = 0xFF; e[109] = 0xFF; e[110] = 0xFF; e[111] = 0xFF;   // not pinned
+        e[112] = 2; e[114] = 'C'; e[116] = ':';
+        unsigned char *e2 = e + 114 + 4;                 // second entry: pinned, empty path
+        e2[88] = 2;
+        static dl_entry got[4];
+        uint32_t ver = 0, pin = 0;
+        check_int("dl count", destlist_parse(dl, 32 + 118 + 114, &ver, &pin, dl_test_cb, got), 2);
+        check_int("dl version", (int)ver, 1);
+        check_int("dl entry hex", (int)got[0].entry, 0x1A);
+        check_str("dl host", got[0].host, "pc-9");
+        check_str("dl path", got[0].path, "C:");
+        check_int("dl not pinned", got[0].pinned, 0);
+        check_int("dl pinned", got[1].pinned, 1);
+        check_int("dl v1 no interactions", got[0].has_interactions, 0);
+        check_str("dl mac", got[0].mac, "0a:0b:0c:0d:0e:0f");
+        check_int("dl droid time", got[0].droid_time == 0x01D2050601020304ULL - 5748192000000000ULL, 1);
+        check_int("dl mru", (int)got[1].mru, 1);
+        check_int("dl truncated", destlist_parse(dl, 32 + 118 + 50, &ver, &pin, dl_test_cb, got), 1);
+        check_int("dl bad version", (dl[0] = 9, destlist_parse(dl, sizeof dl, &ver, &pin, dl_test_cb, got)), -1);
     }
 
     // --- script host / LOLBin launcher detection --------------------------------

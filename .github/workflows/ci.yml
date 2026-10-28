@@ -21,16 +21,16 @@ jobs:
           git diff --exit-code src/usage.c || { echo "src/usage.c is stale: run python3 tools/gen_usage.py"; exit 1; }
       - name: Build + run helper tests
         run: |
-          SRC="src/md5.c src/jsonutil.c src/ioc.c src/entropy.c src/pecksum.c src/imphash_ords.c src/pfparse.c src/artparse.c src/capa.c src/lnkparse.c src/rights.c"
+          SRC="src/md5.c src/jsonutil.c src/ioc.c src/entropy.c src/pecksum.c src/imphash_ords.c src/pfparse.c src/artparse.c src/capa.c src/lnkparse.c src/rights.c src/destlist.c"
           cc -I inc -Wall -Wextra -std=c11 $SRC tests/test_util.c -o test_util -lm
           ./test_util
       - name: Same tests + parser fuzz under AddressSanitizer / UBSan
         run: |
           SAN="-g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all"
-          SRC="src/md5.c src/jsonutil.c src/ioc.c src/entropy.c src/pecksum.c src/imphash_ords.c src/pfparse.c src/artparse.c src/capa.c src/lnkparse.c src/rights.c"
+          SRC="src/md5.c src/jsonutil.c src/ioc.c src/entropy.c src/pecksum.c src/imphash_ords.c src/pfparse.c src/artparse.c src/capa.c src/lnkparse.c src/rights.c src/destlist.c"
           cc -I inc -std=c11 $SAN $SRC tests/test_util.c -o test_util_san -lm
           ./test_util_san
-          cc -I inc -std=c11 $SAN src/ioc.c src/pfparse.c src/artparse.c src/lnkparse.c src/rights.c src/capa.c src/cfb.c tests/fuzz_parsers.c -o fuzz_parsers
+          cc -I inc -std=c11 $SAN src/ioc.c src/pfparse.c src/artparse.c src/lnkparse.c src/rights.c src/capa.c src/cfb.c src/destlist.c tests/fuzz_parsers.c -o fuzz_parsers
           ./fuzz_parsers 300000
           # Compound-file reader: random files from tests/wine/cfbwrite.py must
           # read back byte-identical (sizes + MD5 per stream).
@@ -46,6 +46,16 @@ jobs:
           cc -I inc -std=c11 -g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all \
              src/lnkparse.c src/jsonutil.c tests/lnk_dump.c -o lnk_dump
           python3 -I tests/lnk_diff.py ./lnk_dump lnkref/tests/samples lnkref/tests/json
+      - name: Jump List DestList vs real Win7/8/8.1/10 jump lists
+        # Sample files from Eric Zimmerman's JumpList project (data only, no
+        # code run), pinned to a commit; expected values are facts its own
+        # tests assert, plus self-consistency checks inside each file.
+        run: |
+          git clone -q https://github.com/EricZimmerman/JumpList jlref
+          git -C jlref checkout -q c158abb87dbcd83edbec296d4024efa2debf4cc7
+          cc -I inc -std=c11 -g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all \
+             src/cfb.c src/destlist.c src/jsonutil.c tests/destlist_dump.c -o destlist_dump
+          python3 -I tests/destlist_check.py ./destlist_dump jlref/JumpList.Test/TestFiles
 
   # Functional tests on Linux: cross-compile with MinGW and run the real .exe
   # under wine. fixtures.py seeds a throw-away prefix with known-bad artifacts

@@ -13,14 +13,20 @@
 // survives the target being deleted or the USB stick being removed. (JLECmd is
 // the well-known tool for this; only the idea is borrowed.)
 //
+// The DestList stream (src/destlist.c) is the index of an automatic jump list:
+// items in most-recently-used order, each with its last-used time, pinned
+// state, interaction count (Windows 10+), the host name and MAC of the machine
+// and the stream that holds its link. Items are printed in that order, joined
+// to their link; streams DestList does not mention are listed after them.
+//
 // AppIDs are printed as they are; mapping them to program names needs a list
-// we could not verify, so none is shipped. The DestList stream (MRU order and
-// access times) is not decoded yet.
+// we could not verify, so none is shipped.
 //
 // Read-only: files are opened for reading only.
 
 #include "jumplist.h"
 #include "cfb.h"
+#include "destlist.h"
 #include "lnkparse.h"
 #include "ioc.h"
 #include "jsonutil.h"
@@ -55,33 +61,52 @@ static void ft_str(uint64_t t, char *out, size_t n)
              st.wHour, st.wMinute, st.wSecond);
 }
 
-static void report(jctx *c, const char *entry, const lnk_info *li)
+static void report(jctx *c, const char *entry, const lnk_info *li, const dl_entry *dl)
 {
     const char *target = li->target[0] ? li->target : li->relative;
+    if (target[0] == '\0' && dl != NULL) target = dl->path;   // URL / shell item: DestList has it
     if (target[0] == '\0') return;          // shell-namespace item with no path
     const char *reason = lnk_anomaly_reason(li->anomalies);
     if (reason == NULL)
         reason = ioc_script_host(target) ? "target is a script host / LOLBin"
                : ioc_user_writable(target) ? "target in user-writable dir" : NULL;
-    char cts[32], wts[32];
+    char cts[32], wts[32], used[32], dts[32];
     ft_str(li->created, cts, sizeof cts);
     ft_str(li->written, wts, sizeof wts);
+    ft_str(dl ? dl->last_used : 0, used, sizeof used);
+    ft_str(dl ? dl->droid_time : 0, dts, sizeof dts);
+    const char *host = dl && dl->host[0] ? dl->host : li->machine_id;
+    const char *mac = dl && dl->mac[0] ? dl->mac : li->mac;
+    char mru[16] = "-";
+    if (dl) snprintf(mru, sizeof mru, "%u", dl->mru);
     c->items++;
     if (reason) c->flagged++;
     if (c->mode == 0) {
-        printf("  %s%-18s %-6s %-6s %s%s%s\n", reason ? "[!] " : "    ", c->appid, c->kind, entry,
-               target, li->arguments[0] ? " " : "", li->arguments);
-        printf("        target created %s, modified %s%s%s%s\n", cts, wts,
+        printf("  %s%-18s %-6s %-6s %-4s %s%s%s%s\n", reason ? "[!] " : "    ", c->appid, c->kind, entry,
+               mru, dl && dl->pinned ? "(pinned) " : "", target, li->arguments[0] ? " " : "", li->arguments);
+        if (dl) {
+            printf("        last used %s", used);
+            if (dl->has_interactions) printf(", %u interaction(s)", (unsigned)dl->interactions);
+            putchar('\n');
+        }
+        if (li->created || li->written || li->has_volume)
+            printf("        target created %s, modified %s%s%s%s\n", cts, wts,
                li->has_volume ? ", " : "", li->has_volume ? lnk_drive_type_name(li->drive_type) : "",
                li->has_volume ? " volume" : "");
-        if (li->machine_id[0] || li->mac[0])
-            printf("        made on %s%s%s\n", li->machine_id[0] ? li->machine_id : "?",
-                   li->mac[0] ? ", MAC " : "", li->mac);
+        if (host[0] || mac[0])
+            printf("        made on %s%s%s\n", host[0] ? host : "?", mac[0] ? ", MAC " : "", mac);
         if (reason) printf("        <- %s\n", reason);
     } else if (c->mode == 2) {
         csv_str(c->appid); putchar(',');
         csv_str(c->kind); putchar(',');
         csv_str(entry); putchar(',');
+        printf("%s,", mru);
+        csv_str(used); putchar(',');
+        printf("%d,", dl && dl->pinned);
+        if (dl && dl->has_interactions) printf("%u", (unsigned)dl->interactions);
+        putchar(',');
+        csv_str(host); putchar(',');
+        csv_str(mac);  putchar(',');
         csv_str(target); putchar(',');
         csv_str(li->arguments); putchar(',');
         csv_str(cts); putchar(',');
@@ -92,14 +117,24 @@ static void report(jctx *c, const char *entry, const lnk_info *li)
         json_str(c->appid);
         fputs(",\"kind\":", stdout);    json_str(c->kind);
         fputs(",\"entry\":", stdout);   json_str(entry);
+        if (dl) {
+            printf(",\"mru\":%u,\"last_used\":", dl->mru);
+            json_str(used);
+            printf(",\"pinned\":%s,\"interactions\":", dl->pinned ? "true" : "false");
+            if (dl->has_interactions) printf("%u", (unsigned)dl->interactions); else fputs("null", stdout);
+            fputs(",\"tracked_since\":", stdout); json_str(dts);
+        } else {
+            fputs(",\"mru\":null,\"last_used\":null,\"pinned\":null,\"interactions\":null,"
+                  "\"tracked_since\":null", stdout);
+        }
         fputs(",\"target\":", stdout);  json_str(target);
         fputs(",\"arguments\":", stdout); json_str(li->arguments);
         fputs(",\"target_created\":", stdout);  json_str(cts);
         fputs(",\"target_modified\":", stdout); json_str(wts);
         fputs(",\"drive_type\":", stdout);
         if (li->has_volume) json_str(lnk_drive_type_name(li->drive_type)); else fputs("null", stdout);
-        fputs(",\"machine_id\":", stdout); json_str(li->machine_id);
-        fputs(",\"mac\":", stdout);        json_str(li->mac);
+        fputs(",\"machine_id\":", stdout); json_str(host);
+        fputs(",\"mac\":", stdout);        json_str(mac);
         printf(",\"suspicious\":%s,\"reason\":", reason ? "true" : "false");
         json_str(reason ? reason : "");
         putchar('}');
@@ -107,13 +142,92 @@ static void report(jctx *c, const char *entry, const lnk_info *li)
     }
 }
 
-static void on_stream(const char *name, const unsigned char *data, size_t len, void *vctx)
+// Automatic jump list: gather the streams first, then walk DestList in MRU
+// order and join each entry to its link stream (named by the entry number in
+// hex); finally list link streams that DestList does not mention.
+typedef struct {
+    char name[32];
+    const unsigned char *data;      // points into the caller's copy
+    size_t len;
+    int used;
+} jstream;
+
+typedef struct {
+    jstream *s;
+    size_t n, cap;
+    unsigned char *destlist;
+    size_t dlen;
+} jstreams;
+
+static void collect(const char *name, const unsigned char *data, size_t len, void *vctx)
 {
-    jctx *c = (jctx *)vctx;
-    if (_stricmp(name, "DestList") == 0) return;
+    jstreams *t = (jstreams *)vctx;
+    if (_stricmp(name, "DestList") == 0) {
+        free(t->destlist);
+        t->destlist = (unsigned char *)malloc(len ? len : 1);
+        if (t->destlist) { memcpy(t->destlist, data, len); t->dlen = len; }
+        return;
+    }
+    if (t->n == t->cap) {
+        size_t nc = t->cap ? t->cap * 2 : 32;
+        jstream *ns = (jstream *)realloc(t->s, nc * sizeof *ns);
+        if (ns == NULL) return;
+        t->s = ns;
+        t->cap = nc;
+    }
+    unsigned char *copy = (unsigned char *)malloc(len ? len : 1);
+    if (copy == NULL) return;
+    memcpy(copy, data, len);
+    jstream *j = &t->s[t->n++];
+    snprintf(j->name, sizeof j->name, "%s", name);
+    j->data = copy;
+    j->len = len;
+    j->used = 0;
+}
+
+typedef struct { jctx *c; jstreams *t; } jjoin;
+
+static void report_stream(jctx *c, jstream *j, const dl_entry *dl)
+{
     lnk_info li;
-    int rc = lnk_parse(data, len, &li);
-    if (rc == 0 || (rc == -2 && li.target[0])) report(c, name, &li);
+    int rc = lnk_parse(j->data, j->len, &li);
+    if (rc == 0 || dl != NULL || (rc == -2 && li.target[0])) report(c, j->name, &li, dl);
+    j->used = 1;
+}
+
+static void on_dl_entry(const dl_entry *e, void *vctx)
+{
+    jjoin *jj = (jjoin *)vctx;
+    char hex[16];
+    snprintf(hex, sizeof hex, "%x", (unsigned)e->entry);
+    for (size_t i = 0; i < jj->t->n; i++) {
+        if (_stricmp(jj->t->s[i].name, hex) == 0) {
+            report_stream(jj->c, &jj->t->s[i], e);
+            return;
+        }
+    }
+    // Entry without its link stream: still evidence (path + time from DestList).
+    lnk_info li;
+    memset(&li, 0, sizeof li);
+    report(jj->c, hex, &li, e);
+}
+
+static void automatic(jctx *c, cfb_file *f)
+{
+    jstreams t;
+    memset(&t, 0, sizeof t);
+    cfb_streams(f, collect, &t);
+    if (t.destlist != NULL) {
+        uint32_t ver = 0, pinned = 0;
+        jjoin jj = { c, &t };
+        destlist_parse(t.destlist, t.dlen, &ver, &pinned, on_dl_entry, &jj);
+    }
+    for (size_t i = 0; i < t.n; i++) {
+        if (!t.s[i].used) report_stream(c, &t.s[i], NULL);
+        free((void *)t.s[i].data);
+    }
+    free(t.s);
+    free(t.destlist);
 }
 
 static unsigned char *slurp(const WCHAR *path, size_t *len)
@@ -151,7 +265,7 @@ static void one_file(jctx *c, const WCHAR *path)
     cfb_file f;
     if (cfb_open(&f, d, len) == 0) {
         c->kind = "auto";
-        cfb_streams(&f, on_stream, c);
+        automatic(c, &f);
         cfb_close(&f);
     } else {
         // Custom destinations: shell links stored back to back.
@@ -164,7 +278,7 @@ static void one_file(jctx *c, const WCHAR *path)
             if (rc == 0 || (rc == -2 && li.target[0])) {
                 char entry[16];
                 snprintf(entry, sizeof entry, "#%u", k++);
-                report(c, entry, &li);
+                report(c, entry, &li, NULL);
             }
             off += sizeof LNK_HDR - 1;
         }
@@ -207,9 +321,10 @@ int cmd_jumplist(int argc, char **argv)
     }
     if (c.mode == 0) {
         puts("jumplist  (recent items per application)\n");
-        printf("      %-18s %-6s %-6s %s\n", "appid", "kind", "entry", "target");
+        printf("      %-18s %-6s %-6s %-4s %s\n", "appid", "kind", "entry", "mru", "target");
     } else if (c.mode == 2) {
-        puts("appid,kind,entry,target,arguments,target_created,target_modified,reason");
+        puts("appid,kind,entry,mru,last_used,pinned,interactions,machine_id,mac,target,arguments,"
+             "target_created,target_modified,reason");
     } else {
         putchar('[');
     }

@@ -92,9 +92,35 @@ ya da sahte bir zincir sonsuz döngüye sokamaz). Doğrulaması üç yoldan:
   hepsini aynı içerikle geri okumalı (CI'da her push'ta).
 - **Fuzz:** CFB, ASan/UBSan altındaki ayrıştırıcı fuzz'ına eklendi.
 
-AppID'leri program adına çeviren bir tablo **eklenmedi** (kaynaklarda
-doğrulayamadığımız eşlemeler yanlış bilgi verirdi); DestList akışı (sıra ve
-erişim zamanları) henüz çözülmüyor.
+**DestList** (`src/destlist.c`) otomatik listenin dizinidir. Her öğe için şunları
+tutar:
+
+- en son kullanılandan başlayan sıra (MRU),
+- son kullanım zamanı,
+- sabitlenmiş mi (`pin != -1`),
+- Windows 10'da etkileşim sayısı,
+- makinenin NetBIOS adı,
+- öğenin .lnk'sinin bulunduğu akışın adı (girdi numarası, onaltılık).
+
+Dosya kimliği (droid) sürüm-1 bir UUID'dir; içinde makinenin MAC adresi ve bir
+zaman damgası bulunur ("tracked since"). `jumplist` öğeleri bu sırayla basar ve
+her birini kendi .lnk akışıyla birleştirir. DestList'te geçmeyen akışlar en
+sonda listelenir. URL gibi .lnk'siz öğelerin yolu DestList'ten gelir.
+
+Doğrulama:
+
+- **Kahin:** Eric Zimmerman'ın JumpList projesindeki gerçek Win7, Win8, Win8.1
+  ve Win10 dosyaları kullanıldı; yalnızca dosyalar, kod çalıştırılmadı.
+  O projenin kendi testlerinin doğruladığı gerçekler kahin olarak alındı:
+  girdi ve sabitlenmiş sayıları, sürüm, MRU sırası `7,9,8,1,2,6,5,4,3`,
+  ilk girdinin yolu, makine adı, MAC, etkileşim sayısı ve 100 ns
+  hassasiyetinde iki zaman damgası.
+- **Tutarlılık:** her girdinin bir akışı olmalı; sabitlenmiş sayısı başlıktaki
+  değerle eşleşmeli. 8 dosyada hepsi ilk denemede geçti.
+- Ayrıca birim testi, fuzz ve wine fixture'ı da var.
+
+AppID'leri program adına çeviren bir tablo **eklenmedi**: kaynaklarda
+doğrulayamadığımız eşlemeler yanlış bilgi verirdi.
 
 ### bam
 

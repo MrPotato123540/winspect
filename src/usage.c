@@ -55,8 +55,10 @@ static const struct { const char *name, *text; } usage_table[] = {
         "winspect jumplist - the current user's Jump Lists: per application (AppID),\n"
         "the files and folders recently opened with it, from\n"
         "Recent\\AutomaticDestinations (compound files holding one shortcut per item)\n"
-        "and Recent\\CustomDestinations (shortcuts stored back to back). Each item\n"
-        "shows its target, arguments and the target's timestamps. Flags items that\n"
+        "and Recent\\CustomDestinations (shortcuts stored back to back). Automatic\n"
+        "lists are shown in their DestList order (most recent first) with last-used\n"
+        "time, pinned state, interaction count (Win10+) and the machine name/MAC;\n"
+        "each item also shows its target, arguments and timestamps. Flags items that\n"
         "launch a script host or point into a user-writable dir. Read-only. Usage:\n"
         "  winspect jumplist [<file | folder>] [--json | --csv]\n" },
     { "list",

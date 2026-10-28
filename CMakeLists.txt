@@ -52,6 +52,7 @@ add_executable(winspect
     src/userassist.c
     src/mru.c
     src/cfb.c
+    src/destlist.c
     src/jumplist.c
     src/tasks.c
     src/modules.c

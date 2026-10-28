@@ -140,6 +140,22 @@ def make_lnk(target, args):
     a = args.encode('utf-16-le')
     sd = struct.pack('<H', len(args)) + a
     return bytes(hdr) + bytes(li) + sd
+def make_destlist(entries):
+    # Version-3 (Windows 10) DestList: 32-byte header, then per entry 130 fixed
+    # bytes + UTF-16 path + 4 trailing bytes. entries: (number, path, pinned, interactions)
+    hdr = struct.pack('<IIIfIIII', 3, len(entries), sum(1 for e in entries if e[2]), 0.0,
+                      max(e[0] for e in entries), 0, len(entries), 0)
+    body = b''
+    for num, path, pinned, inter in entries:
+        e = bytearray(130)
+        e[72:72 + 8] = b'ws-hr-07'
+        struct.pack_into('<I', e, 88, num)
+        struct.pack_into('<Q', e, 100, 133500000000000000)
+        struct.pack_into('<i', e, 108, 0 if pinned else -1)
+        struct.pack_into('<I', e, 116, inter)
+        struct.pack_into('<H', e, 128, len(path))
+        body += bytes(e) + path.encode('utf-16-le') + b'\0' * 4
+    return hdr + body
 def make_lnk_crafted(target, args, machine, mac):
     # A link on a REMOVABLE volume (serial 1A2B3C4D, label "STICK") whose
     # WORKING_DIR count claims 1000 characters: the shell reads 260 and the
@@ -182,7 +198,7 @@ cust = os.path.join(recent, 'CustomDestinations'); os.makedirs(cust, exist_ok=Tr
 with open(os.path.join(auto, '5f7b5f1e01b83767.automaticDestinations-ms'), 'wb') as f:
     f.write(cfbwrite.build([('1', make_lnk(r'F:\usb\plans.pdf', '')),
                             ('2', make_lnk(r'C:\Users\Public\Downloads\tool.exe', '-x')),
-                            ('DestList', b'\x04' * 64)]))
+                            ('DestList', make_destlist([(1, 'F:\\usb\\plans.pdf', True, 5)]))]))
 with open(os.path.join(cust, 'abcdef0123456789.customDestinations-ms'), 'wb') as f:
     f.write(b'\xab' * 24 + make_lnk(r'C:\Windows\System32\mshta.exe', 'http://x/y.hta') +
             b'\x00' * 8 + make_lnk(r'D:\docs\report.docx', ''))
@@ -253,7 +269,8 @@ checks = [
     (['hosts', '--json'], [('update.vendor.example', '"suspicious":true'), ('ads.example', '"kind":"block"')], ['ads.example', 'localhost']),
     (['userassist', '--json'], [('dropper.exe', 'user-writable'), ('"runs":3', None)], []),
     (['mru', '--json'], [('powershell -nop -w hidden -enc SQBFAFgA', 'encoded PowerShell'), ('new.xlsx', '"position":0')], ['notepad']),
-    (['jumplist', '--json'], [('F:\\\\usb\\\\plans.pdf', None), ('tool.exe', 'user-writable'), ('mshta.exe', 'script host'), ('report.docx', None)], ['plans.pdf', 'report.docx']),
+    (['jumplist', '--json'], [('F:\\\\usb\\\\plans.pdf', '"mru":0,"last_used":"2024-01-17 21:20:00","pinned":true,"interactions":5'),
+                              ('tool.exe', '"mru":null'), ('tool.exe', 'user-writable'), ('mshta.exe', 'script host'), ('report.docx', None)], ['plans.pdf', 'report.docx']),
     (['prefetch', '--json'], [('EVIL.EXE', None), ('"run_count":3', None), ('DEADBEEF', None),
                                ('DOWNLOADS\\\\EVIL.EXE', 'ran from a user-writable dir'),
                                ('SYSTEM32\\\\NOTEPAD.EXE', None)], ['NOTEPAD']),
