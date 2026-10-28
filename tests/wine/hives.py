@@ -159,6 +159,16 @@ df = json.loads(out)
 check(any(p['source'] == 'local' and p['name'] == 'DisableAntiSpyware' and p['protection_off'] for p in df['policies']),
       'defender offline: local DisableAntiSpyware=1 (regipy antispyware_disabled) reported')
 
+rc, out = run('programs', '--software', hive('SOFTWARE'), '--json')
+pg = json.loads(out)
+check(len(pg) == 67 and any(r['id'] == 'AddressBook' for r in pg)
+      and any(r['id'] == 'Connection Manager' and r['hidden'] for r in pg), 'programs --software: 67 Uninstall entries (as regipy)')
+rc, out = run('programs', '--ntuser', hive('NTUSER_with_winscp.DAT'), '--json')
+pg = json.loads(out)
+zm = [r for r in pg if r['name'] == 'Zoom']
+check(len(pg) == 4 and zm and zm[0]['version'] == '5.9.3 (3169)' and zm[0]['key_written'] == '2022-02-28 09:05:31'
+      and zm[0]['scope'] == 'user', 'programs --ntuser: 4 per-user installs, Zoom fields')
+
 rc, out = run('hive', hive('NTUSER.DAT'), 'Software\\Microsoft\\Windows\\CurrentVersion\\Run', '--json')
 h = json.loads(out)
 check(h['checksum_ok'] and not h['dirty'] and h['keys'][0]['values'][0]['name'] == 'Sidebar', 'hive: Run key browse')

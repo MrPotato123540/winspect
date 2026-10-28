@@ -239,6 +239,12 @@ reg(E + r'\RecentDocs', '/v', '0', '/t', 'REG_BINARY', '/d', rdoc('old.docx'))
 reg(E + r'\RecentDocs', '/v', '1', '/t', 'REG_BINARY', '/d', rdoc('new.xlsx'))
 reg(E + r'\RecentDocs', '/v', 'MRUListEx', '/t', 'REG_BINARY', '/d', '0100000000000000ffffffff')
 
+# --- programs: a remote-access tool among installed software -------------------
+U = HK + r'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'
+reg(U + r'\AnyDesk', '/v', 'DisplayName', '/t', 'REG_SZ', '/d', 'AnyDesk')
+reg(U + r'\AnyDesk', '/v', 'Publisher', '/t', 'REG_SZ', '/d', 'AnyDesk Software GmbH')
+reg(U + r'\NotepadPP', '/v', 'DisplayName', '/t', 'REG_SZ', '/d', 'Notepad++ (64-bit x64)')
+
 # --- rdp: outgoing Remote Desktop history ---------------------------------------
 T = r'HKCU\Software\Microsoft\Terminal Server Client'
 reg(T + r'\Default', '/v', 'MRU0', '/t', 'REG_SZ', '/d', '10.10.5.21')
@@ -264,6 +270,7 @@ checks = [
                                ('certx.dll', 'rarely legitimate location'), ('tp.dll', 'non-default value'),
                                ('as.exe', 'user-writable path')], ['w32time.dll', '%1']),
     (['firewall', '--json'], [('Test Listener', 'true')], ['Benign Block"']),
+    (['programs', '--json'], [('"name":"AnyDesk"', 'remote-access (RMM) tool'), ('"rmm_tool":"AnyDesk"', None)], ['Notepad++']),
     (['rdp', '--json'], [('"source":"Default","position":0', '"host":"10.10.5.21"'),
                          ('fileserver01.corp.example', '"position":1'),
                          ('"source":"Servers"', 'CORP\\\\svc_backup'), ('"certificate_accepted":true', None)], []),

@@ -97,6 +97,15 @@ static const struct { const char *name, *text; } usage_table[] = {
         "VPN, domain / private / public, first and last connection in LOCAL time).\n"
         "Live, or offline from SOFTWARE / SYSTEM hive files. Read-only. Usage:\n"
         "  winspect sysinfo [--software <SOFTWARE>] [--system <SYSTEM>] [--json]\n" },
+    { "programs",
+        "winspect programs - installed software from the Uninstall keys (machine\n"
+        "64-bit and 32-bit views, plus the user's own per-user installs): name,\n"
+        "version, publisher, install date, location and the key's last-write time,\n"
+        "newest first. Well-known remote-access / RMM tools (AnyDesk, ScreenConnect,\n"
+        "TeamViewer, ...) are flagged \"confirm it is authorised\" - intruders install\n"
+        "them for hands-on access. Live, or offline from SOFTWARE / NTUSER.DAT.\n"
+        "Read-only. Usage:\n"
+        "  winspect programs [--software <SOFTWARE>] [--ntuser <NTUSER.DAT>] [--flagged] [--json | --csv]\n" },
     { "list",
         "winspect list - the live process tree from a Toolhelp snapshot: each process\n"
         "under its real parent (PID reuse is detected by creation time), with thread\n"

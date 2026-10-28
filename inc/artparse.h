@@ -204,6 +204,15 @@ void unix_time_str(uint32_t t, char *out, size_t n);
 const char *netlist_name_type(uint32_t t);
 const char *netlist_category(uint32_t c);
 
+// ---- Remote-access (RMM) tools ---------------------------------------------------
+// Commercial remote monitoring & management / remote-control products are
+// legitimate, but intruders install them to keep hands-on access (public
+// advisories, e.g. CISA AA23-025A, describe this). Returns the product name if
+// a program name contains one of the well-known product names
+// (case-insensitive), else NULL. A match means "confirm it is authorised", not
+// "malicious".
+const char *rmm_tool_name(const char *program);
+
 // ---- MRU lists (RunMRU, TypedPaths, RecentDocs) ------------------------------------
 // MRUListEx: a REG_BINARY array of u32 value indices, most recent first,
 // terminated by 0xFFFFFFFF. Copies up to max indices into out; returns count.

@@ -529,6 +529,51 @@ const char *netlist_category(uint32_t c)
     return c == 0 ? "public" : c == 1 ? "private" : c == 2 ? "domain" : "?";
 }
 
+// ---- remote-access (RMM) tools ---------------------------------------------------------
+
+static int has_ci(const char *s, const char *needle)
+{
+    size_t n = strlen(needle);
+    for (; *s; s++) {
+        size_t i = 0;
+        while (i < n) {
+            char a = s[i], b = needle[i];
+            if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
+            if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
+            if (a == '\0' || a != b) break;
+            i++;
+        }
+        if (i == n) return 1;
+    }
+    return 0;
+}
+
+const char *rmm_tool_name(const char *program)
+{
+    // needle -> product name. Specific names only, so ordinary software does
+    // not match (no bare "remote" or "vnc" substrings of unrelated words).
+    static const char *const t[][2] = {
+        { "anydesk", "AnyDesk" }, { "teamviewer", "TeamViewer" },
+        { "screenconnect", "ConnectWise ScreenConnect" }, { "connectwise control", "ConnectWise ScreenConnect" },
+        { "splashtop", "Splashtop" }, { "logmein", "LogMeIn" }, { "rustdesk", "RustDesk" },
+        { "atera", "Atera" }, { "ninjarmm", "NinjaOne" }, { "ninjaone", "NinjaOne" },
+        { "kaseya", "Kaseya" }, { "take control agent", "N-able Take Control" },
+        { "remote utilities", "Remote Utilities" }, { "ammyy", "Ammyy Admin" },
+        { "supremo", "Supremo" }, { "remotepc", "RemotePC" }, { "zoho assist", "Zoho Assist" },
+        { "gotoassist", "GoTo Assist" }, { "goto resolve", "GoTo Resolve" }, { "dwservice", "DWService" },
+        { "dwagent", "DWService" }, { "meshagent", "MeshCentral" }, { "meshcentral", "MeshCentral" },
+        { "tightvnc", "TightVNC" }, { "ultravnc", "UltraVNC" }, { "realvnc", "RealVNC" },
+        { "vnc server", "VNC" }, { "tigervnc", "TigerVNC" }, { "chrome remote desktop", "Chrome Remote Desktop" },
+        { "radmin", "Radmin" }, { "netsupport", "NetSupport Manager" }, { "simplehelp", "SimpleHelp" },
+        { "action1", "Action1" }, { "pulseway", "Pulseway" }, { "bomgar", "BeyondTrust Remote Support" },
+        { "beyondtrust remote", "BeyondTrust Remote Support" }, { "parsec", "Parsec" },
+    };
+    for (size_t i = 0; i < sizeof t / sizeof t[0]; i++) {
+        if (has_ci(program, t[i][0])) return t[i][1];
+    }
+    return NULL;
+}
+
 // ---- Amcache -------------------------------------------------------------------------
 
 int amcache_sha1(const char *id, char out[41])

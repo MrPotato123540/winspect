@@ -615,6 +615,12 @@ int main(void)
             check_str("nl wireless", netlist_name_type(71), "wireless");
             check_str("nl domain", netlist_category(2), "domain");
         }
+        check_str("rmm anydesk", rmm_tool_name("AnyDesk") ? rmm_tool_name("AnyDesk") : "", "AnyDesk");
+        check_str("rmm sc", rmm_tool_name("ScreenConnect Client (5e3b2c)") ? rmm_tool_name("ScreenConnect Client (5e3b2c)") : "", "ConnectWise ScreenConnect");
+        check_str("rmm tv case", rmm_tool_name("TEAMVIEWER 15") ? rmm_tool_name("TEAMVIEWER 15") : "", "TeamViewer");
+        check_int("rmm zoom", rmm_tool_name("Zoom") == NULL, 1);
+        check_int("rmm office", rmm_tool_name("Microsoft Office Professional Plus 2010") == NULL, 1);
+        check_int("rmm remote desktop conn", rmm_tool_name("Remote Desktop Connection") == NULL, 1);
         check_int("lin lsass ok", lineage_parent_ok("lsass.exe", "wininit.exe"), 1);
         check_int("lin lsass bad", lineage_parent_ok("LSASS.EXE", "explorer.exe"), 0);
         check_int("lin svchost ok", lineage_parent_ok("svchost.exe", "services.exe"), 1);
