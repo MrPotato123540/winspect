@@ -890,3 +890,103 @@ const char *bits_reason(const char *notify, const char *remote, const char *loca
         return "downloads a program or script into a user-writable folder";
     return NULL;
 }
+
+// ---- Scheduled task XML -----------------------------------------------------
+
+// Text of the first <tag ...>...</tag> inside [from, to) (to may be NULL).
+static int xml_text_in(const char *from, const char *to, const char *tag, char *out, size_t n)
+{
+    out[0] = '\0';
+    char open[64], close[64];
+    snprintf(open, sizeof open, "<%s", tag);
+    snprintf(close, sizeof close, "</%s>", tag);
+    size_t ol = strlen(open);
+    const char *p = from;
+    while ((p = strstr(p, open)) != NULL && (to == NULL || p < to)) {
+        char c = p[ol];
+        if (c == '>' || c == ' ' || c == '\t' || c == '\r' || c == '\n') break;
+        p++;
+    }
+    if (p == NULL || (to != NULL && p >= to)) return 0;
+    p = strchr(p, '>');
+    if (p == NULL || p[-1] == '/') return 0;
+    p++;
+    const char *e = strstr(p, close);
+    if (e == NULL || (to != NULL && e > to)) return 0;
+    // Trim surrounding whitespace before decoding.
+    while (p < e && (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n')) p++;
+    while (e > p && (e[-1] == ' ' || e[-1] == '\t' || e[-1] == '\r' || e[-1] == '\n')) e--;
+    xml_copy(p, e, out, n);
+    return 1;
+}
+
+// Start of the first <tag> or <tag ...> element (not a longer name), or NULL.
+static const char *xml_find(const char *xml, const char *tag)
+{
+    char open[64];
+    snprintf(open, sizeof open, "<%s", tag);
+    size_t ol = strlen(open);
+    const char *p = xml;
+    while ((p = strstr(p, open)) != NULL) {
+        char c = p[ol];
+        if (c == '>' || c == ' ' || c == '/' || c == '\t' || c == '\r' || c == '\n') return p;
+        p++;
+    }
+    return NULL;
+}
+
+int task_parse(const char *xml, task_info *t)
+{
+    memset(t, 0, sizeof *t);
+    t->enabled = 1;
+    if (xml_find(xml, "Task") == NULL) return -1;
+    xml_text_in(xml, NULL, "Author", t->author, sizeof t->author);
+    xml_text_in(xml, NULL, "Date", t->date, sizeof t->date);
+    xml_text_in(xml, NULL, "Description", t->description, sizeof t->description);
+    if (!xml_text_in(xml, NULL, "UserId", t->user, sizeof t->user))
+        xml_text_in(xml, NULL, "GroupId", t->user, sizeof t->user);
+    xml_text_in(xml, NULL, "RunLevel", t->run_level, sizeof t->run_level);
+
+    // Settings: Hidden / Enabled (inside <Settings>, not a trigger's Enabled).
+    const char *st = xml_find(xml, "Settings");
+    if (st) {
+        const char *se = strstr(st, "</Settings>");
+        char v[16];
+        if (xml_text_in(st, se, "Hidden", v, sizeof v)) t->hidden = strcmp(v, "true") == 0;
+        // <Enabled> may also appear in nested blocks (IdleSettings has none,
+        // but be safe): take the first one directly in Settings.
+        if (xml_text_in(st, se, "Enabled", v, sizeof v)) t->enabled = strcmp(v, "false") != 0;
+    }
+
+    // Actions.
+    for (const char *p = xml; (p = xml_find(p, "Exec")) != NULL; p++) {
+        if (t->actions++ == 0) {
+            const char *e = strstr(p, "</Exec>");
+            xml_text_in(p, e, "Command", t->command, sizeof t->command);
+            xml_text_in(p, e, "Arguments", t->arguments, sizeof t->arguments);
+            xml_text_in(p, e, "WorkingDirectory", t->workdir, sizeof t->workdir);
+        }
+    }
+    for (const char *p = xml; (p = xml_find(p, "ComHandler")) != NULL; p++) {
+        if (t->actions++ == 0 || (t->command[0] == 0 && t->com_clsid[0] == 0)) {
+            const char *e = strstr(p, "</ComHandler>");
+            xml_text_in(p, e, "ClassId", t->com_clsid, sizeof t->com_clsid);
+            xml_text_in(p, e, "Data", t->com_data, sizeof t->com_data);
+        }
+    }
+
+    // Triggers present, in a fixed order.
+    static const struct { const char *tag, *name; } trig[] = {
+        { "BootTrigger", "boot" }, { "LogonTrigger", "logon" },
+        { "SessionStateChangeTrigger", "session" }, { "IdleTrigger", "idle" },
+        { "RegistrationTrigger", "registration" }, { "EventTrigger", "event" },
+        { "TimeTrigger", "time" }, { "CalendarTrigger", "calendar" },
+        { "WnfStateChangeTrigger", "wnf" },
+    };
+    for (size_t i = 0; i < sizeof trig / sizeof trig[0]; i++) {
+        if (xml_find(xml, trig[i].tag) == NULL) continue;
+        size_t L = strlen(t->triggers);
+        snprintf(t->triggers + L, sizeof t->triggers - L, "%s%s", L ? "," : "", trig[i].name);
+    }
+    return 0;
+}

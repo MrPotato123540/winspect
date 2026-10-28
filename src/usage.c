@@ -352,10 +352,14 @@ static const struct { const char *name, *text; } usage_table[] = {
         "                         [--flagged] [--json | --csv]\n" },
     { "tasks",
         "winspect tasks - list scheduled tasks by reading their XML definitions under\n"
-        "%SystemRoot%\\System32\\Tasks, pulling out the command, arguments and author,\n"
-        "and flagging ones that run from user-writable locations. Scheduled tasks are a\n"
-        "common persistence mechanism. Read-only. Usage:\n"
-        "  winspect tasks [--flagged] [--json | --csv]\n" },
+        "%SystemRoot%\\System32\\Tasks (or a copied folder with --dir): the command and\n"
+        "arguments or the COM handler (CLSID -> DLL), the account it runs as, its\n"
+        "triggers (logon, boot, calendar...), registration date and author. Flags\n"
+        "commands or handler DLLs in user-writable locations, COM handlers\n"
+        "registered per-user (HKCU hijack, T1546.015), hidden tasks and script hosts\n"
+        "outside the Microsoft\\ folder. Scheduled tasks are a common persistence\n"
+        "mechanism. Read-only. Usage:\n"
+        "  winspect tasks [--dir <Tasks folder>] [--flagged] [--json | --csv]\n" },
     { "pipes",
         "winspect pipes - list the named pipes present on the system. Named pipes are\n"
         "a common IPC and C2 channel, so \"what pipes exist?\" is a useful triage view.\n"

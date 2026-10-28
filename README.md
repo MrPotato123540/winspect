@@ -66,7 +66,7 @@ that shows it.
 | `winspect taskcache [--flagged] [--json\|--csv]` | scheduled tasks from TaskCache\\Tree, flagging hidden ones: no SD value (Tarrask), deny-ACE SD, or no XML file (needs elevation) |
 | `winspect wmi [--json\|--csv]` | WMI permanent event subscriptions (filters, consumers, bindings); flags consumers that run commands/scripts |
 | `winspect defender [--software <SOFTWARE>] [--json\|--csv]` | Microsoft Defender exclusions (local + policy) and policy switches that turn protection off (local lists need elevation) |
-| `winspect tasks [--flagged] [--json\|--csv]` | scheduled tasks (command/arguments/author), flagging user-writable image paths |
+| `winspect tasks [--dir <Tasks folder>] [--flagged] [--json\|--csv]` | scheduled tasks from their XML: command/arguments or COM handler (CLSID → DLL), run-as account, triggers, registration date, author; flags user-writable commands/DLLs, per-user (HKCU) COM handler hijacks, hidden tasks and script hosts outside `Microsoft\`. `--dir` reads a copied Tasks folder |
 | `winspect arp [--json\|--csv]` | IPv4 neighbour (ARP) cache: IP ↔ MAC, adapter, type |
 | `winspect routes [--json\|--csv]` | IPv4 routing table: destination/mask/gateway/metric |
 | `winspect sessions [--json\|--csv]` | terminal/logon sessions: id, window station, state, user |

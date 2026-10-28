@@ -95,6 +95,32 @@ xml = ('<?xml version="1.0" encoding="UTF-16"?>\n<Task><Settings><Hidden>true</H
        '<Arguments>//B C:\\ProgramData\\x.vbs</Arguments></Exec></Actions></Task>')
 with open(os.path.join(tasks, 'GoodOne'), 'wb') as f:
     f.write(b'\xff\xfe' + xml.encode('utf-16-le'))
+# COM handler tasks: one whose CLSID is registered per-user with a DLL under
+# AppData (hijack pattern - flagged), one registered machine-wide in System32
+# (resolved, not flagged); and an Exec task whose arguments carry entities.
+def task_xml(body):
+    return ('<?xml version="1.0" encoding="UTF-16"?>\n<Task version="1.2" '
+            'xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">' + body + '</Task>')
+CLS_U, CLS_M = '{0F1E2D3C-4B5A-6978-8796-A5B4C3D2E1F0}', '{1A2B3C4D-5E6F-7081-92A3-B4C5D6E7F809}'
+for nm, cls in (('ComUser', CLS_U), ('ComMachine', CLS_M)):
+    with open(os.path.join(tasks, nm), 'wb') as f:
+        f.write(b'\xff\xfe' + task_xml('<Triggers><LogonTrigger/></Triggers><Actions><ComHandler><ClassId>' + cls +
+                                        '</ClassId></ComHandler></Actions>').encode('utf-16-le'))
+reg(HKCU + r'Software\Classes\CLSID' + '\\' + CLS_U + r'\InprocServer32', '/ve', '/d',
+    r'C:\users\Public\AppData\handler.dll')
+reg(HK + r'SOFTWARE\Classes\CLSID' + '\\' + CLS_M + r'\InprocServer32', '/ve', '/d',
+    r'C:\windows\system32\wscomtest.dll')
+with open(os.path.join(tasks, 'Quoted'), 'wb') as f:
+    f.write(b'\xff\xfe' + task_xml('<RegistrationInfo><Date>2024-03-01T10:00:00</Date></RegistrationInfo>'
+                                    '<Principals><Principal><UserId>S-1-5-18</UserId></Principal></Principals>'
+                                    '<Actions><Exec><Command>C:\\windows\\system32\\notepad.exe</Command>'
+                                    '<Arguments>/c &quot;echo a&amp;b&quot;</Arguments></Exec></Actions>').encode('utf-16-le'))
+# A copied Tasks folder (as from a disk image) for --dir.
+tcopy = os.path.join(pfx, 'drive_c', 'tasks_copy', 'Sub')
+os.makedirs(tcopy, exist_ok=True)
+with open(os.path.join(tcopy, 'Dropped'), 'wb') as f:
+    f.write(b'\xff\xfe' + task_xml('<Actions><Exec><Command>C:\\Users\\bob\\AppData\\Local\\Temp\\u.exe</Command>'
+                                    '</Exec></Actions>').encode('utf-16-le'))
 # --- prefetch: an uncompressed v30 SCCA file (pre-MAM layout is still valid) ---
 def make_pf(exe='EVIL.EXE', h=0xDEADBEEF, files=None):
     d = bytearray(1024)
@@ -291,7 +317,11 @@ checks = [
                           ('oldtool.exe', '"location":"legacy"')], ['"path":"Version"']),
     (['shimcache', '--json'], [('tool.exe', None), ('notepad.exe', None)], []),
     (['taskcache', '--json'], [('HiddenOne', 'no SD value'), ('GoodOne', None)], []),
-    (['tasks', '--json'], [('GoodOne', 'hidden task outside')], []),
+    (['tasks', '--json'], [('GoodOne', 'hidden task outside'), ('ComUser', 'COM handler DLL in user-writable dir'),
+                           ('ComMachine', 'wscomtest.dll'), ('"arguments":"/c \\"echo a&b\\""', '"run_as":"S-1-5-18"'),
+                           ('"triggers":"logon"', None)],
+     ['"task":"ComMachine"', '"task":"Quoted"']),
+    (['tasks', '--dir', 'C:\\tasks_copy', '--json'], [('Sub\\\\Dropped', 'command in user-writable dir')], ['GoodOne']),
     (['services', '--json', '--flagged'], [('WsTestSvc', 'unquoted path with spaces')], []),
     (['autoruns', '--json'], [('Updater.lnk', 'shortcut launches a script host')], []),
     (['lnk', '--json'], [('E:\\\\loot\\\\secret.docx', None),

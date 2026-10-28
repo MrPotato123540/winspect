@@ -261,4 +261,20 @@ const char *rb_reason(const char *path);
 // landing in a user-writable folder are download hints. NULL = nothing to say.
 const char *bits_reason(const char *notify, const char *remote, const char *local);
 
+// ---- Scheduled task XML ----------------------------------------------------
+// The fields of a Task Scheduler 2.0 definition (System32\Tasks\...) that say
+// what runs, when and as whom. Entities are decoded. Only the FIRST Exec or
+// ComHandler action is kept; actions counts all of them.
+typedef struct {
+    char command[1024], arguments[1024], workdir[512];
+    char com_clsid[64], com_data[256];      // ComHandler action
+    char author[256], date[64], description[256];
+    char user[128];                         // Principal UserId or GroupId
+    char run_level[32];                     // LeastPrivilege / HighestAvailable
+    char triggers[160];                     // e.g. "logon,boot,calendar"
+    int hidden, enabled, actions;
+} task_info;
+// Returns 0 when the text looks like a task definition (<Task ...>), else -1.
+int task_parse(const char *xml, task_info *t);
+
 #endif

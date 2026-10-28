@@ -747,6 +747,44 @@ int main(void)
             check_int("bits cab temp", bits_reason(NULL, "https://x.example/a", "C:\\Users\\u\\AppData\\Local\\Temp\\a.cab") == NULL, 1);
             check_int("bits exe win", bits_reason(NULL, "https://x.example/a", "C:\\Windows\\SoftwareDistribution\\a.exe") == NULL, 1);
             check_int("bits all null", bits_reason(NULL, NULL, NULL) == NULL, 1);
+            {
+                const char *tx =
+                    "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\n"
+                    "<Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\n"
+                    "  <RegistrationInfo><Date>2024-03-01T10:00:00</Date><Author>ACME\\bob</Author></RegistrationInfo>\n"
+                    "  <Triggers><LogonTrigger><Enabled>true</Enabled></LogonTrigger>"
+                    "<CalendarTrigger><StartBoundary>2024</StartBoundary></CalendarTrigger></Triggers>\n"
+                    "  <Principals><Principal id=\"Author\"><UserId>S-1-5-18</UserId>"
+                    "<RunLevel>HighestAvailable</RunLevel></Principal></Principals>\n"
+                    "  <Settings><Enabled>false</Enabled><Hidden>true</Hidden></Settings>\n"
+                    "  <Actions Context=\"Author\"><Exec><Command>  C:\\x\\a.exe </Command>"
+                    "<Arguments>-q &quot;a b&quot; &amp; c</Arguments></Exec>"
+                    "<ComHandler><ClassId>{11111111-2222-3333-4444-555555555555}</ClassId></ComHandler></Actions>\n"
+                    "</Task>";
+                task_info ti;
+                check_int("task ok", task_parse(tx, &ti), 0);
+                check_str("task cmd", ti.command, "C:\\x\\a.exe");
+                check_str("task args entities", ti.arguments, "-q \"a b\" & c");
+                check_str("task author", ti.author, "ACME\\bob");
+                check_str("task date", ti.date, "2024-03-01T10:00:00");
+                check_str("task user", ti.user, "S-1-5-18");
+                check_str("task level", ti.run_level, "HighestAvailable");
+                check_str("task triggers", ti.triggers, "logon,calendar");
+                check_int("task hidden", ti.hidden, 1);
+                check_int("task disabled", ti.enabled, 0);
+                check_int("task actions", ti.actions, 2);
+                check_str("task com kept empty (exec first)", ti.com_clsid, "");
+                const char *cx = "<Task><Actions><ComHandler><ClassId>{AB}</ClassId><Data>&lt;x/&gt;</Data>"
+                                 "</ComHandler></Actions><Triggers><BootTrigger/></Triggers></Task>";
+                check_int("task com ok", task_parse(cx, &ti), 0);
+                check_str("task com clsid", ti.com_clsid, "{AB}");
+                check_str("task com data", ti.com_data, "<x/>");
+                check_str("task boot selfclose", ti.triggers, "boot");
+                check_int("task enabled default", ti.enabled, 1);
+                check_int("task not xml", task_parse("<Tasks>", &ti), -1);
+                check_int("task unterminated", task_parse("<Task><Exec><Command>x", &ti), 0);
+                check_str("task unterminated cmd", ti.command, "");
+            }
         }
         check_int("rmm office", rmm_tool_name("Microsoft Office Professional Plus 2010") == NULL, 1);
         check_int("rmm remote desktop conn", rmm_tool_name("Remote Desktop Connection") == NULL, 1);

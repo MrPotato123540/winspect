@@ -235,6 +235,36 @@ yazar) işaretsiz listelenir.
 powershell başlatıyor. Bu yüzden bu iki işaret **sadece `Microsoft\` klasörü
 dışındaki** görevlere uygulanır; aksi halde gerçek bulgular gürültüde kaybolurdu.
 
+Sonraki turda eklenenler:
+
+- **Ayrıştırma `task_parse`'a taşındı** (taşınabilir, birim testli). Bu bir
+  hatayı da düzeltti: XML varlıkları çözülmüyordu; `/c &quot;x&quot;` gibi
+  argümanlar ham gösteriliyordu.
+- Yeni alanlar: **çalıştıran hesap** (`UserId`/`GroupId`), **tetikleyiciler**
+  (`boot, logon, session, idle, registration, event, time, calendar, wnf`),
+  **kayıt tarihi**, devre dışı mı, kaç eylem var.
+- **COM handler görevleri:** Komut yerine bir CLSID çalıştıran görevler önceden
+  **hiç listelenmiyordu**. Artık CLSID'nin `InprocServer32` DLL'i çözülür.
+  - DLL kullanıcının yazabildiği bir yerdeyse işaretlenir.
+  - CLSID **HKCU** altında kayıtlıysa da işaretlenir: o kullanıcıyla çalışan
+    görevde kullanıcı kaydı makine kaydını ezer. Bu, meşru (Microsoft dahil)
+    bir görevi XML'ine dokunmadan ele geçirmenin bilinen yoludur (COM
+    hijacking, T1546.015).
+- **`--dir <klasör>`:** disk imajından kopyalanmış bir `Tasks` klasörünü okur.
+  Bu modda COM handler'lar çözülmez; bu makinenin kayıt defteri o makinenin
+  değildir.
+
+Bu sırada bir hata daha bulundu ve **ilk testte** yakalandı: `RegGetValue`'ya
+`RRF_RT_REG_EXPAND_SZ`, `RRF_NOEXPAND` olmadan verilirse Windows
+`ERROR_INVALID_PARAMETER` döndürür. Değer artık genişletilmeden okunup
+`ExpandEnvironmentStrings` ile açılıyor.
+
+**Doğrulama:** 20 birim testi (varlık çözme, kendini kapatan tetikleyici,
+Settings dışındaki `Enabled`, sonlanmamış etiket). wine'da: HKCU'ya kayıtlı ve
+AppData'daki DLL'e giden COM görevi işaretleniyor; System32'deki DLL'e giden
+makine kaydı çözülüyor ama işaretlenmiyor; `&quot;` içeren argüman doğru
+çözülüyor; `--dir` kopyalanmış klasördeki Temp'ten çalışan görevi buluyor.
+
 ## pe — import yetenekleri (capa/pestudio fikri)
 
 `pe` çıktısına **Import capabilities** bölümü eklendi: isimle import edilen
