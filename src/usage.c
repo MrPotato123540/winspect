@@ -277,7 +277,8 @@ static const struct { const char *name, *text; } usage_table[] = {
     { "sweep",
         "winspect sweep - one-shot machine triage: runs the system-wide checks in\n"
         "\"findings only\" mode (posture --warn, hunt, hidden, net, autoruns/services/tasks/\n"
-        "taskcache/firewall/prefetch --flagged, defender, wmi, events) and prints them as one\n"
+        "taskcache/firewall/prefetch --flagged, defender, wmi, bits/recyclebin --flagged,\n"
+        "pshistory --all-users --flagged, events) and prints them as one\n"
         "report. With --json the result is a single object, one key per check; a\n"
         "check that could not run (e.g. needs elevation) is null instead of breaking\n"
         "the document. Read-only - it only calls the read-only commands. Usage:\n"

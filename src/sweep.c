@@ -25,6 +25,9 @@
 #include "prefetch.h"
 #include "wmi.h"
 #include "events.h"
+#include "bitsjobs.h"
+#include "pshistory.h"
+#include "recyclebin.h"
 
 #include <windows.h>
 #include <io.h>
@@ -54,6 +57,9 @@ static const check checks[] = {
     { "prefetch",  "programs that ran from user-writable dirs", cmd_prefetch, { "--flagged", NULL } },
     { "defender",  "Defender exclusions / disabled protection", cmd_defender, { NULL } },
     { "wmi",       "WMI permanent subscriptions",            cmd_wmi,       { NULL } },
+    { "bits",      "BITS jobs with notify commands / risky downloads", cmd_bits, { "--flagged", NULL } },
+    { "pshistory", "suspicious PowerShell history lines (all users)", cmd_pshistory, { "--all-users", "--flagged", NULL } },
+    { "recyclebin","deleted programs and scripts",           cmd_recyclebin, { "--flagged", NULL } },
     { "events",    "high-signal events (latest 10 per channel)", cmd_events, { "--max", "10", NULL } },
 };
 

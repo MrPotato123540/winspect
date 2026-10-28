@@ -546,7 +546,7 @@ rc, out, err = wine([exe, 'sweep', '--json'], timeout=600)
 try:
     d = json.loads(out)
     want = ['posture', 'hunt', 'hidden', 'net', 'autoruns', 'services', 'tasks', 'taskcache',
-            'firewall', 'prefetch', 'defender', 'wmi', 'events']
+            'firewall', 'prefetch', 'defender', 'wmi', 'bits', 'pshistory', 'recyclebin', 'events']
     missing = [k for k in want if k not in d]
     if missing:
         print(f'FAIL sweep: missing keys {missing}'); fails += 1
@@ -554,6 +554,11 @@ try:
         print(f"FAIL sweep: autoruns should hold only flagged entries: {d.get('autoruns')}"); fails += 1
     else:
         print('checked sweep --json  (all keys present, findings-only sections)')
+    if not any('dropper.exe' in r.get('path', '') for r in (d.get('recyclebin') or [])) or \
+            any('notes.docx' in r.get('path', '') for r in (d.get('recyclebin') or [])):
+        print(f"FAIL sweep: recyclebin section should hold only the flagged item: {d.get('recyclebin')}"); fails += 1
+    if not any('DownloadString' in r.get('command', '') for r in (d.get('pshistory') or [])):
+        print(f"FAIL sweep: pshistory --all-users missed the download cradle: {d.get('pshistory')}"); fails += 1
 except Exception as e:
     print('FAIL sweep check:', e, out[:200]); fails += 1
 
