@@ -479,6 +479,56 @@ int evt_time(const char *xml, char *out, size_t n)
     return 1;
 }
 
+// ---- system information values ------------------------------------------------------
+
+int systemtime_str(const unsigned char *d, size_t n, char *out, size_t outn)
+{
+    if (outn) out[0] = '\0';
+    if (n < 16) return 0;
+    unsigned v[8];
+    for (int i = 0; i < 8; i++) v[i] = (unsigned)d[2 * i] | ((unsigned)d[2 * i + 1] << 8);
+    // year, month, dow, day, hour, minute, second, ms
+    if (v[0] < 1601 || v[0] > 30827 || v[1] < 1 || v[1] > 12 || v[2] > 6 || v[3] < 1 || v[3] > 31 ||
+        v[4] > 23 || v[5] > 59 || v[6] > 59 || v[7] > 999) return 0;
+    snprintf(out, outn, "%04u-%02u-%02u %02u:%02u:%02u", v[0], v[1], v[3], v[4], v[5], v[6]);
+    return 1;
+}
+
+void unix_time_str(uint32_t t, char *out, size_t n)
+{
+    if (n) out[0] = '\0';
+    if (t == 0) return;
+    // Civil date from days since 1970-01-01 (H. Hinnant's public algorithm).
+    long long days = t / 86400, rem = t % 86400;
+    days += 719468;
+    long long era = days / 146097;
+    unsigned doe = (unsigned)(days - era * 146097);
+    unsigned yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    long long y = (long long)yoe + era * 400;
+    unsigned doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    unsigned mp = (5 * doy + 2) / 153;
+    unsigned d = doy - (153 * mp + 2) / 5 + 1;
+    unsigned m = mp < 10 ? mp + 3 : mp - 9;
+    if (m <= 2) y++;
+    snprintf(out, n, "%04lld-%02u-%02u %02lld:%02lld:%02lld", y, m, d, rem / 3600, (rem / 60) % 60, rem % 60);
+}
+
+const char *netlist_name_type(uint32_t t)
+{
+    switch (t) {
+    case 6:   return "wired";
+    case 23:  return "vpn";
+    case 71:  return "wireless";
+    case 243: return "mobile broadband";
+    default:  return "other";
+    }
+}
+
+const char *netlist_category(uint32_t c)
+{
+    return c == 0 ? "public" : c == 1 ? "private" : c == 2 ? "domain" : "?";
+}
+
 // ---- Amcache -------------------------------------------------------------------------
 
 int amcache_sha1(const char *id, char out[41])

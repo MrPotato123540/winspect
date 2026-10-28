@@ -191,6 +191,19 @@ int userassist_record(const unsigned char *d, size_t n, uint32_t *runs, uint64_t
 // for anything else, so a malformed id is never shown as a hash.
 int amcache_sha1(const char *file_id, char out[41]);
 
+// ---- System information values ---------------------------------------------------
+// A 16-byte SYSTEMTIME (year, month, day-of-week, day, hour, minute, second,
+// ms - u16 each) as "YYYY-MM-DD hh:mm:ss"; NetworkList stores these in LOCAL
+// time. Returns 1 if the fields are in range, else 0 with out = "".
+int systemtime_str(const unsigned char *d, size_t n, char *out, size_t outn);
+// Seconds since 1970-01-01 UTC (CurrentVersion\InstallDate) as
+// "YYYY-MM-DD hh:mm:ss"; 0 gives "".
+void unix_time_str(uint32_t t, char *out, size_t n);
+// NetworkList profile codes: NameType (6 wired, 23 VPN, 71 wireless, 243
+// mobile broadband) and Category (0 public, 1 private, 2 domain).
+const char *netlist_name_type(uint32_t t);
+const char *netlist_category(uint32_t c);
+
 // ---- MRU lists (RunMRU, TypedPaths, RecentDocs) ------------------------------------
 // MRUListEx: a REG_BINARY array of u32 value indices, most recent first,
 // terminated by 0xFFFFFFFF. Copies up to max indices into out; returns count.

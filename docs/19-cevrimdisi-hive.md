@@ -125,3 +125,28 @@ deneyecek.
 Windows CI'da bir de **iki yolun karşılaştırması** koşacak: `reg save
 HKLM\SYSTEM` ile gerçek bir hive dosyası alınıp `shimcache` ve `bam`'ın canlı
 API'den ve `--hive` ile dosyadan okunan kayıtları birebir eşit olmalı.
+
+## Çevrimdışı moda geçen diğer komutlar
+
+Aynı okuyucu üzerine şunlar eklendi. Hepsi regipy'nin gerçek hive'larıyla ve
+onun testlerinin doğruladığı değerlerle sınanır (`tests/wine/hives.py`).
+
+| Komut | Ne okur | Doğrulanan |
+|---|---|---|
+| `usb --hive SYSTEM` | USBSTOR + aygıt özellik zamanları (`0064` kurulum, `0065` ilk kurulum, `0066` son takılma, `0067` son çıkarılma) + Partmgr DiskId + MountedDevices | Win10 1709 hive'ında regipy'nin kesin USBSTOR sonucu; Win7'de `E:` eşlemesi |
+| `autoruns --software/--system/--ntuser` | tüm kayıt tabanlı başlangıç noktaları | HKLM Run'ın 7 değeri regipy'deki sırayla; LSA paketleri |
+| `services --hive SYSTEM` | `Services` anahtarı (durum/PID "-") | Abiosdsk (Start 4), AdobeARMservice yapılandırması |
+| `mru` (WordWheelQuery) | Explorer arama terimleri | 6 terim, en yenisi "alloy" + zaman |
+| `rdp --hive NTUSER.DAT` | mstsc MRU + Servers (UsernameHint, CertHash) | örnek hive'da veri yok → `[]`; biçim wine fixture'ıyla |
+| `sysinfo --software/--system` | ad, sürüm, kurulum, kapanış, saat dilimi, son kullanıcı, arayüzler, profiller, ağ geçmişi | regipy'nin bilgisayar adı, winver, shutdown, last_logon, network_data ve profile_list gerçekleri |
+
+Bu karşılaştırma bir **gerçek tespit** de getirdi. regipy'nin SOFTWARE
+örneğindeki Run anahtarında `c:\windows\system32\dllhost\svchost.exe` var:
+svchost adı System32'nin bir **alt dizininde**. Eski autoruns bunu işaretlemezdi,
+çünkü yol "kullanıcının yazabildiği" bir yer değil. Artık `asep_masquerade`
+kuralı (birim testli) autoruns ve services'te bunu "masquerading" diye
+işaretliyor.
+
+NetworkList tarihleri 16 baytlık SYSTEMTIME olarak ve makinenin **yerel**
+saatiyle tutulur (regipy bunları çözmüyor). Biz çözüyor ve "local" diye
+etiketliyoruz; UTC değil.

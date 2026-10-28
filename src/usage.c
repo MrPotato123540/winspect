@@ -88,6 +88,15 @@ static const struct { const char *name, *text; } usage_table[] = {
         "account. Live mode: current user; --hive reads another user's NTUSER.DAT.\n"
         "(Incoming RDP logons are in \"events\".) Read-only. Usage:\n"
         "  winspect rdp [--hive <NTUSER.DAT>] [--json | --csv]\n" },
+    { "sysinfo",
+        "winspect sysinfo - the first page of an investigation, from the registry:\n"
+        "computer name (and older names in other control sets), Windows edition /\n"
+        "build / install date, last shutdown, time zone, last logged-on user, network\n"
+        "interfaces with their addresses, user profiles (SID, path, last load) and\n"
+        "the networks the machine has joined (NetworkList: name, wired / wireless /\n"
+        "VPN, domain / private / public, first and last connection in LOCAL time).\n"
+        "Live, or offline from SOFTWARE / SYSTEM hive files. Read-only. Usage:\n"
+        "  winspect sysinfo [--software <SOFTWARE>] [--system <SYSTEM>] [--json]\n" },
     { "list",
         "winspect list - the live process tree from a Toolhelp snapshot: each process\n"
         "under its real parent (PID reuse is detected by creation time), with thread\n"

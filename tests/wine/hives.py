@@ -130,6 +130,24 @@ check(all(r['state'] == '-' for r in sv), 'services --hive: no live state claime
 rc, out = run('services', '--hive', hive('SYSTEM'), '--sig')
 check(rc == 1, 'services: --sig refused with --hive')
 
+rc, out = run('sysinfo', '--software', hive('SOFTWARE'), '--system', hive('SYSTEM'), '--json')
+si = json.loads(out)
+cp, wv = si['computer'], si['windows']
+check(cp['name'] == 'WKS-WIN732BITA' and cp['name_key_written'] == '2010-11-10 17:18:08'
+      and 'WIN-V5T3CSP8U4H' in cp['other_names'], 'sysinfo: computer names (both control sets, as regipy)')
+check(cp['last_shutdown_utc'] == '2012-04-04 01:58:40', 'sysinfo: last shutdown')
+check(wv['ProductName'] == 'Windows 7 Ultimate' and wv['CurrentBuild'] == '7601' and wv['CSDVersion'] == 'Service Pack 1'
+      and wv['install_date_utc'] == '2010-11-10 16:28:55' and wv['ProductId'] == '00426-067-1817155-86250', 'sysinfo: Windows version + install date')
+check(wv['last_logged_on_user'] == 'SHIELDBASE\\rsydow' and wv['last_logon_key_written'] == '2012-04-04 12:20:41', 'sysinfo: last logged-on user')
+ifs = {i['ip_address']: i for i in si['interfaces']}
+check('10.3.58.5' in ifs and ifs['10.3.58.5']['default_gateway'] == '10.3.58.1' and ifs['10.3.58.5']['name_server'] == '10.3.58.4'
+      and '192.168.1.123' in ifs, 'sysinfo: static interfaces as regipy reads them')
+pr = si['profiles']
+check(len(pr) == 11 and pr[0]['sid'] == 'S-1-5-18' and pr[0]['key_written'] == '2009-07-14 04:41:12', 'sysinfo: 11 profiles')
+nw = [n for n in si['networks'] if n['name'] == 'shieldbase.local']
+check(nw and nw[0]['type'] == 'wired' and nw[0]['category'] == 'domain' and nw[0]['first_connected_local'] == '2010-11-10 11:23:43'
+      and nw[0]['last_connected_local'] == '2012-04-04 07:48:39', 'sysinfo: NetworkList profile with SYSTEMTIME dates')
+
 rc, out = run('hive', hive('NTUSER.DAT'), 'Software\\Microsoft\\Windows\\CurrentVersion\\Run', '--json')
 h = json.loads(out)
 check(h['checksum_ok'] and not h['dirty'] and h['keys'][0]['values'][0]['name'] == 'Sidebar', 'hive: Run key browse')

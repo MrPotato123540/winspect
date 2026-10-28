@@ -598,6 +598,23 @@ int main(void)
         check_int("masq bare", asep_masquerade("svchost.exe"), 0);
         check_int("masq temp", asep_masquerade("C:\\Users\\a\\AppData\\Local\\Temp\\lsass.exe"), 1);
         check_int("masq other name", asep_masquerade("C:\\Tools\\svc.exe"), 0);
+        {
+            char st[32];
+            static const unsigned char created[16] = { 0xda, 0x07, 0x0b, 0, 0x03, 0, 0x0a, 0, 0x0b, 0, 0x17, 0, 0x2b, 0, 0x9f, 0x02 };
+            check_int("systime ok", systemtime_str(created, 16, st, sizeof st), 1);
+            check_str("systime val", st, "2010-11-10 11:23:43");
+            static const unsigned char bad[16] = { 0xda, 0x07, 0x0d, 0 };
+            check_int("systime bad month", systemtime_str(bad, 16, st, sizeof st), 0);
+            check_int("systime short", systemtime_str(created, 8, st, sizeof st), 0);
+            unix_time_str(0x4cdac847u, st, sizeof st);
+            check_str("unix install", st, "2010-11-10 16:28:55");
+            unix_time_str(951782400u, st, sizeof st);          // 2000-02-29 (leap day)
+            check_str("unix leap", st, "2000-02-29 00:00:00");
+            unix_time_str(0, st, sizeof st);
+            check_str("unix zero", st, "");
+            check_str("nl wireless", netlist_name_type(71), "wireless");
+            check_str("nl domain", netlist_category(2), "domain");
+        }
         check_int("lin lsass ok", lineage_parent_ok("lsass.exe", "wininit.exe"), 1);
         check_int("lin lsass bad", lineage_parent_ok("LSASS.EXE", "explorer.exe"), 0);
         check_int("lin svchost ok", lineage_parent_ok("svchost.exe", "services.exe"), 1);
