@@ -58,6 +58,7 @@ alınır:
 | tasks | görev XML'indeki `Date` | görevi yazanın beyanıdır, değiştirilebilir |
 | comhijack | kullanıcı başına CLSID anahtarının zamanı | `--all` ile: tüm kullanıcı sınıfları |
 | events | olay zamanı | kanal başına en fazla 200 olay |
+| sysinfo | Windows kurulumu, son temiz kapanma, profilin son yüklenmesi | ağların ilk/son bağlantı zamanları kayıt defterinde **yerel saattir**; UTC listeye karışmasın diye alınmaz |
 
 Kullanıcı başına kaynaklar (userassist, mru, jumplist, lnk, shellbags,
 pshistory, comhijack) **komutu çalıştıran kullanıcıyı** okur.

@@ -32,6 +32,7 @@
 #include "tasks.h"
 #include "comhijack.h"
 #include "events.h"
+#include "sysinfo.h"
 
 #include <windows.h>
 #include <stdio.h>
@@ -263,6 +264,23 @@ static void x_events(tl *t, const jm_node *r)
     add(t, S(r, "time"), w, S(r, "reason"), B(r, "suspicious"));
 }
 
+// sysinfo prints one object, not a list. Network first/last-connected times
+// are LOCAL time in the registry, so they are left out of this UTC view.
+static void x_sysinfo(tl *t, const jm_node *doc)
+{
+    const jm_node *win = jm_get(doc, "windows"), *comp = jm_get(doc, "computer");
+    char w[400];
+    snprintf(w, sizeof w, "Windows installed: %s", S(win, "ProductName"));
+    add(t, S(win, "install_date_utc"), w, S(win, "CurrentBuild"), 0);
+    snprintf(w, sizeof w, "last clean shutdown: %s", S(comp, "name"));
+    add(t, S(comp, "last_shutdown_utc"), w, "", 0);
+    const jm_node *pr = jm_get(doc, "profiles");
+    for (const jm_node *p = pr && pr->type == JM_ARR ? pr->child : NULL; p; p = p->next) {
+        snprintf(w, sizeof w, "user profile last loaded: %s", S(p, "path"));
+        add(t, S(p, "last_load_utc"), w, S(p, "sid"), 0);
+    }
+}
+
 typedef struct {
     const char *name;
     capture_fn fn;
@@ -289,6 +307,7 @@ static const source sources[] = {
     { "tasks",      cmd_tasks,      { NULL },               NULL, x_tasks },
     { "comhijack",  cmd_comhijack,  { "--all", NULL },      NULL, x_comhijack },
     { "events",     cmd_events,     { "--max", "200", NULL }, NULL, x_events },
+    { "sysinfo",    cmd_sysinfo,    { NULL },               NULL, x_sysinfo },
 };
 
 static int in_list(const char *list, const char *name)
@@ -372,6 +391,7 @@ int cmd_timeline(int argc, char **argv)
         }
         const jm_node *list = sources[i].list ? jm_get(doc, sources[i].list) : doc;
         t.source = sources[i].name;
+        if (list && list->type == JM_OBJ) sources[i].x(&t, list);      // a single-object source
         for (const jm_node *r = list && list->type == JM_ARR ? list->child : NULL; r; r = r->next)
             if (r->type == JM_OBJ) sources[i].x(&t, r);
         if (sources[i].x == x_pshistory) ps_flush(&t);
