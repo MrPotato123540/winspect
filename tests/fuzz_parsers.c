@@ -9,7 +9,7 @@
 //
 // Build: cc -std=c11 -g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all \
 //          -I inc src/ioc.c src/pfparse.c src/artparse.c src/lnkparse.c src/rights.c \
-//          src/capa.c src/cfb.c src/destlist.c src/regf.c tests/fuzz_parsers.c -o fuzz_parsers
+//          src/capa.c src/cfb.c src/destlist.c src/regf.c src/shellitem.c tests/fuzz_parsers.c -o fuzz_parsers
 // Run:   ./fuzz_parsers [iterations]      (exit 0 = no sanitizer findings)
 
 #include "pfparse.h"
@@ -17,6 +17,7 @@
 #include "lnkparse.h"
 #include "destlist.h"
 #include "regf.h"
+#include "shellitem.h"
 #include "ioc.h"
 #include "rights.h"
 #include "capa.h"
@@ -192,6 +193,21 @@ static size_t seed_regf(unsigned char *d)
     put32(b + 0x140 + 8, 0x150 + 16352);
     return 4096 + 20480;
 }
+static size_t seed_shellitem(unsigned char *d)
+{
+    // directory entry + BEEF0004 v9 with a long name, followed by a CFSF
+    // delegate item and a property-store item (see test_util.c)
+    memset(d, 0, 512);
+    d[2] = 0x31; d[8] = 0x10; d[9] = 0x53; memcpy(d + 14, "tmp", 3);
+    unsigned char *b = d + 18;
+    b[0] = 0x44; b[2] = 9; b[4] = 0x04; b[6] = 0xEF; b[7] = 0xBE; b[0x2E] = 'x';
+    d[0] = 18 + 0x44;
+    unsigned char *e = d + 128;
+    e[0] = 0x60; e[2] = 0x74; memcpy(e + 6, "CFSF", 4); e[10] = 0x16; e[12] = 0x31; memcpy(e + 24, "abc", 3);
+    unsigned char *pv = d + 256;
+    pv[0] = 0x60; memcpy(pv + 12, "1SPS", 4); pv[8] = 0x50;
+    return 512;
+}
 static void nop_key(uint32_t k, void *ctx) { (void)k; (void)ctx; }
 static void nop_val(const regf_value *v, void *ctx) { (void)v; (void)ctx; }
 
@@ -240,6 +256,11 @@ int main(int argc, char **argv)
                     uint32_t dv, dp;
                     n = seed_destlist(seed); n = mutate(seed, n, buf, sizeof buf);
                     destlist_parse(buf, n, &dv, &dp, nop_dl, NULL);
+                }
+                {
+                    shellitem si;
+                    n = seed_shellitem(seed); n = mutate(seed, n, buf, sizeof buf);
+                    for (size_t off = 0; off < n; off += 128) shellitem_parse(buf + off, n - off, &si);
                 }
                 {
                     regf_hive rh;

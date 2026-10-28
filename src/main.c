@@ -85,6 +85,7 @@
 #include "rdp.h"
 #include "sysinfo.h"
 #include "programs.h"
+#include "shellbags.h"
 #include "tasks.h"
 
 // cmd_modules lives in modules.c: a live process's loaded modules
@@ -224,6 +225,7 @@ static const struct {
     { "lnk",      cmd_lnk,      "shortcut files (default: Recent folder)",  "file" },
     { "streams",  cmd_streams,  "alternate data streams + Mark-of-the-Web", "file" },
     { "jumplist", cmd_jumplist, "Jump Lists: recent items per application",  "file" },
+    { "shellbags", cmd_shellbags, "folders browsed in Explorer (ShellBags)", "file" },
     { "hive",     cmd_hive,     "browse an offline registry hive file",      "file" },
     { "amcache",  cmd_amcache,  "Amcache.hve: file inventory with SHA-1",    "file" },
     { "rdp",      cmd_rdp,      "outgoing Remote Desktop history (mstsc)",   "system" },

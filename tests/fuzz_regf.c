@@ -1,9 +1,10 @@
 // Mutation fuzz of src/regf.c starting from a REAL hive: each round corrupts
 // a few bytes / dwords of a copy (cell sizes, offsets, counts, signatures are
 // all fair game) and walks the whole tree. Meant to run under ASan/UBSan.
-// Build: cc -I inc -fsanitize=address,undefined src/regf.c tests/fuzz_regf.c -o fuzz_regf
+// Build: cc -I inc -fsanitize=address,undefined src/regf.c src/shellitem.c tests/fuzz_regf.c -o fuzz_regf
 // Run:   ./fuzz_regf <hive> [rounds]
 #include "regf.h"
+#include "shellitem.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,6 +18,12 @@ static void val(const regf_value *v, void *ctx)
     volatile unsigned char x = 0;
     for (size_t i = 0; i < v->len; i += 64) x ^= v->data[i];   // touch the data
     (void)x;
+    // Every binary value also goes through the shell-item parser: a hive full
+    // of ShellBags makes a realistic corpus for it.
+    if (v->type == 3 && v->data != NULL) {
+        shellitem it;
+        shellitem_parse(v->data, v->len, &it);
+    }
 }
 
 static void walk(uint32_t key, void *ctx)

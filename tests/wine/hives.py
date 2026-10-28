@@ -169,6 +169,21 @@ zm = [r for r in pg if r['name'] == 'Zoom']
 check(len(pg) == 4 and zm and zm[0]['version'] == '5.9.3 (3169)' and zm[0]['key_written'] == '2022-02-28 09:05:31'
       and zm[0]['scope'] == 'user', 'programs --ntuser: 4 per-user installs, Zoom fields')
 
+rc, out = run('shellbags', '--ntuser', hive('NTUSER_BAGMRU.DAT'), '--json')
+sb = json.loads(out)
+check(len(sb) == 102, f'shellbags --ntuser: {len(sb)} entries (102 as regipy)')
+rk = [r for r in sb if r['path'] == 'Search Folder\\tmp\\rekall']
+check(rk and rk[0]['created'] == '2021-08-16 09:41:32' and rk[0]['accessed'] == '2021-08-16 09:43:22'
+      and rk[0]['modified'] == '2021-08-16 09:41:32' and rk[0]['key_written'] == '2021-08-16 09:44:39'
+      and rk[0]['mru_position'] == 0, 'shellbags: "Search Folder\\tmp\\rekall" path, item times, key time (regipy)')
+rc, out = run('shellbags', '--usrclass', hive('UsrClass.dat'), '--json')
+sb = json.loads(out)
+check(len(sb) == 29, f'shellbags --usrclass: {len(sb)} entries (29 as regipy)')
+db = [r for r in sb if r['path'] == 'Dropbox' and r['slot'] == 9]
+check(db and db[0]['mru_position'] == 4 and db[0]['key_written'] == '2018-04-05 02:13:26', 'shellbags: Dropbox root slot 9, MRU position 4 (regipy)')
+check(any(r['path'] == 'D:\\AKMonitor\\logs\\pic' for r in sb), 'shellbags: drive root + directory chain')
+check(any(r['path'] == 'User Files\\Google Drive' and r['created'] for r in sb), 'shellbags: CFSF delegate item name + times')
+
 rc, out = run('hive', hive('NTUSER.DAT'), 'Software\\Microsoft\\Windows\\CurrentVersion\\Run', '--json')
 h = json.loads(out)
 check(h['checksum_ok'] and not h['dirty'] and h['keys'][0]['values'][0]['name'] == 'Sidebar', 'hive: Run key browse')

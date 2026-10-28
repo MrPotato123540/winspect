@@ -60,6 +60,8 @@ add_executable(winspect
     src/rdp.c
     src/sysinfo.c
     src/programs.c
+    src/shellitem.c
+    src/shellbags.c
     src/jumplist.c
     src/tasks.c
     src/modules.c

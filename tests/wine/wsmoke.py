@@ -80,7 +80,8 @@ cases += [['ssn','NtOpenProcess'], ['ssn','NtOpenProcess','--json'], ['modules',
           ['shimcache','--hive','C:\\nonexistent.dat'], ['mru','--hive','C:\\nonexistent.dat','--json'],
           ['amcache'], ['amcache','--json'], ['amcache','C:\\nonexistent.hve','--csv'],
           ['sysinfo','--software','C:\\nonexistent'], ['services','--hive','C:\\nonexistent'],
-          ['autoruns','--ntuser','C:\\nonexistent'], ['usb','--hive','C:\\nonexistent']]
+          ['autoruns','--ntuser','C:\\nonexistent'], ['usb','--hive','C:\\nonexistent'],
+          ['shellbags','--csv'], ['shellbags','--usrclass','C:\\nonexistent'], ['programs','--flagged']]
 
 bad = 0
 for args in cases:

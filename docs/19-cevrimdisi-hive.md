@@ -150,3 +150,33 @@ işaretliyor.
 NetworkList tarihleri 16 baytlık SYSTEMTIME olarak ve makinenin **yerel**
 saatiyle tutulur (regipy bunları çözmüyor). Biz çözüyor ve "local" diye
 etiketliyoruz; UTC değil.
+
+## shellbags
+
+Explorer, kullanıcının açtığı her klasörün görünüm ayarını saklar. Klasörün
+kimliğini de bir **shell öğesi** ağacı olarak tutar (`BagMRU`). Klasör silinse
+ya da USB bellek/paylaşım ortadan kalksa bile bu kayıtlar kalır.
+
+Her değer bir öğedir; yolu, üst düzeylerdeki öğe adlarının zinciri verir.
+Ayrıştırıcı taşınabilir koddadır (`src/shellitem.c`) ve şu türleri çözer:
+
+- **kök klasör:** GUID; regipy'nin tablosuyla çapraz doğrulanmış bilinen adlar,
+- **kabuk klasörü** (`0x2E`) ve **birim**,
+- **dosya/dizin girdisi:** `0xBEEF0004` uzantı bloğundan uzun ad ve
+  oluşturma/erişim zamanları,
+- **ağ konumu:** tür baytında üst bit set olabilir (`0xC3`),
+- **`CFSF` delegate öğeleri,**
+- **property-store öğeleri:** [MS-PROPSTORE], `System.ItemNameDisplay`.
+
+**Doğrulama:**
+
+- NTUSER_BAGMRU'da 102, UsrClass'ta 29 girdi; regipy ile aynı.
+- `Search Folder\tmp\rekall` yolu, üç öğe zamanı, anahtar zamanı ve MRU
+  konumu regipy ile aynı.
+- Dropbox kökü slot 9, MRU konumu 4; regipy ile aynı.
+- Birim testleri elle kurulmuş öğelerle yazıldı.
+- Fuzz iki katmanda koşuyor: gömülü tohumla ve gerçek ShellBag hive'larının
+  bozulmuş kopyalarıyla (ASan/UBSan).
+
+**Bilinen sınır:** bazı property-view öğeleri (`0x00`) ad taşımaz;
+bunlar türüyle (`[type 0x00]`) gösterilir.

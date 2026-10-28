@@ -49,7 +49,7 @@ static void show_value(const regf_value *v, void *ctx)
     printf("%s{\"name\":", firstval ? "" : ",");
     json_str(v->name);
     printf(",\"type\":%u,\"len\":%lu,\"hex\":\"", (unsigned)v->type, (unsigned long)v->len);
-    for (size_t i = 0; i < v->len && i < 256; i++) printf("%02x", v->data[i]);
+    for (size_t i = 0; i < v->len && i < 65536; i++) printf("%02x", v->data[i]);
     fputs("\"}", stdout);
     firstval = 0;
 }

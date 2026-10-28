@@ -61,6 +61,16 @@ static const struct { const char *name, *text; } usage_table[] = {
         "each item also shows its target, arguments and timestamps. Flags items that\n"
         "launch a script host or point into a user-writable dir. Read-only. Usage:\n"
         "  winspect jumplist [<file | folder>] [--json | --csv]\n" },
+    { "shellbags",
+        "winspect shellbags - folders a user browsed in Explorer, from the ShellBags\n"
+        "(BagMRU tree in NTUSER.DAT and UsrClass.dat): full path rebuilt from the\n"
+        "shell items, item type, the folder's created / modified / accessed times\n"
+        "recorded in the item, and the BagMRU key's last-write time. Folders stay\n"
+        "listed after they are deleted or the USB stick / share is gone, which is\n"
+        "what makes them evidence. Live: current user (HKCU + its UsrClass under\n"
+        "HKCU\\Software\\Classes); offline: --ntuser / --usrclass hive files.\n"
+        "Read-only. Usage:\n"
+        "  winspect shellbags [--ntuser <NTUSER.DAT>] [--usrclass <UsrClass.dat>] [--json | --csv]\n" },
     { "hive",
         "winspect hive - browse an OFFLINE registry hive file (NTUSER.DAT, SYSTEM,\n"
         "SOFTWARE, SAM, Amcache.hve ... copied off a machine): header facts (dirty\n"

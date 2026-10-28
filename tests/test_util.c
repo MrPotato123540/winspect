@@ -23,6 +23,7 @@
 #include "capa.h"
 #include "lnkparse.h"
 #include "destlist.h"
+#include "shellitem.h"
 #include "rights.h"
 
 #include <stdio.h>
@@ -523,6 +524,71 @@ int main(void)
         check_int("dl mru", (int)got[1].mru, 1);
         check_int("dl truncated", destlist_parse(dl, 32 + 118 + 50, &ver, &pin, dl_test_cb, got), 1);
         check_int("dl bad version", (dl[0] = 9, destlist_parse(dl, sizeof dl, &ver, &pin, dl_test_cb, got)), -1);
+    }
+
+    // --- shell items (ShellBags) ------------------------------------------------
+    {
+        shellitem it;
+        char dt[24];
+        // DOS date 2021-08-16 (0x5310), time 09:41:32 (0x4D30): date first
+        static const unsigned char fat[4] = { 0x10, 0x53, 0x30, 0x4D };
+        check_int("dos dt", dos_datetime_str(fat, dt, sizeof dt), 1);
+        check_str("dos dt val", dt, "2021-08-16 09:41:32");
+        // root folder: My Computer
+        static const unsigned char root[20] = { 0x14, 0, 0x1F, 0x50, 0xE0, 0x4F, 0xD0, 0x20, 0xEA, 0x3A, 0x69, 0x10,
+                                                0xA2, 0xD8, 0x08, 0x00, 0x2B, 0x30, 0x30, 0x9D };
+        check_int("si root size", shellitem_parse(root, sizeof root, &it), 20);
+        check_str("si root name", it.name, "My Computer");
+        // volume "C:\"
+        static const unsigned char vol[25] = { 0x19, 0, 0x2F, 'C', ':', '\\' };
+        shellitem_parse(vol, sizeof vol, &it);
+        check_str("si volume", it.name, "C:\\");
+        // network location with the high type bit (0xC3)
+        static const unsigned char net[20] = { 0x14, 0, 0xC3, 0x01, 0x85, '\\', '\\', 's', 'r', 'v', '\\', 'x', 0 };
+        shellitem_parse(net, sizeof net, &it);
+        check_str("si network", it.name, "\\\\srv\\x");
+        // directory entry: short name "tmp", then a version-9 BEEF0004 block
+        // (created/accessed, long name "tmp-long" at 0x2E)
+        static unsigned char dir[128];
+        memset(dir, 0, sizeof dir);
+        dir[2] = 0x31;
+        dir[8] = 0x10; dir[9] = 0x53; dir[10] = 0x30; dir[11] = 0x4D;      // modified
+        memcpy(dir + 14, "tmp", 3);                                        // short name, padded to 18
+        unsigned char *b = dir + 18;
+        size_t bl = 0x2E + 2 * 9 + 2;
+        b[0] = (unsigned char)bl; b[2] = 9; b[4] = 0x04; b[6] = 0xEF; b[7] = 0xBE;
+        b[8] = 0x10; b[9] = 0x53; b[10] = 0x30; b[11] = 0x4D;              // created
+        b[12] = 0x10; b[13] = 0x53; b[14] = 0x6B; b[15] = 0x4D;            // accessed 09:43:22
+        const char *ln = "tmp-long";
+        for (int i = 0; i < 8; i++) b[0x2E + 2 * i] = (unsigned char)ln[i];
+        size_t total = 18 + bl;
+        dir[0] = (unsigned char)total;
+        check_int("si dir size", shellitem_parse(dir, sizeof dir, &it), (int)total);
+        check_str("si dir kind", it.kind, "Directory");
+        check_str("si dir long name", it.name, "tmp-long");
+        check_str("si dir created", it.created, "2021-08-16 09:41:32");
+        check_str("si dir accessed", it.accessed, "2021-08-16 09:43:22");
+        check_str("si dir modified", it.modified, "2021-08-16 09:41:32");
+        check_int("si truncated", shellitem_parse(dir, 10, &it), -1);
+        static const unsigned char end2[2] = { 0, 0 };
+        check_int("si terminator", shellitem_parse(end2, 2, &it), 0);
+        // property view item whose property store names it "Docs"
+        static unsigned char pv[96];
+        memset(pv, 0, sizeof pv);
+        pv[2] = 0x00;
+        size_t sp = 8;                                   // storage at 8: size, "1SPS", fmt, values
+        static const unsigned char fmt[16] = { 0x30, 0xF1, 0x25, 0xB7, 0xEF, 0x47, 0x1A, 0x10,
+                                               0xA5, 0xF1, 0x02, 0x60, 0x8C, 0x9E, 0xEB, 0xAC };
+        memcpy(pv + sp + 4, "1SPS", 4);
+        memcpy(pv + sp + 8, fmt, 16);
+        unsigned char *v = pv + sp + 24;
+        v[0] = 28; v[4] = 10; v[9] = 0x1F; v[13] = 5;   // size, id 10, VT_LPWSTR, 5 chars
+        const char *dn = "Docs";
+        for (int i = 0; i < 4; i++) v[17 + 2 * i] = (unsigned char)dn[i];
+        pv[sp] = (unsigned char)(24 + 28 + 4);
+        pv[0] = (unsigned char)(sp + 24 + 28 + 4);
+        shellitem_parse(pv, sizeof pv, &it);
+        check_str("si propstore name", it.name, "Docs");
     }
 
     // --- script host / LOLBin launcher detection --------------------------------
