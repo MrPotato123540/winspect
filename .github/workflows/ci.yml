@@ -89,6 +89,9 @@ jobs:
           SAN="-g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all"
           cc -I inc -std=c11 $SAN src/regf.c src/jsonutil.c tests/regf_dump.c -o regf_dump
           python3 -I tests/regf_check.py ./regf_dump regipy/regipy_tests/data
+          # The test-only hive writer used by the offline fixtures must
+          # produce what the reader reads back, key by key.
+          python3 -I tests/regf_roundtrip.py ./regf_dump 100
           cc -I inc -std=c11 $SAN src/regf.c src/shellitem.c tests/fuzz_regf.c -o fuzz_regf
           python3 -c "import lzma;open('ntuser.dat','wb').write(lzma.open('regipy/regipy_tests/data/NTUSER.DAT.xz').read())"
           ./fuzz_regf ntuser.dat 2000

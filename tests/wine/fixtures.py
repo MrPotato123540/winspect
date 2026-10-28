@@ -13,7 +13,8 @@ exe = sys.argv[1]
 # /usr/lib/wine/wine64 (Debian/Ubuntu wine64 package).
 import shutil
 pfx = os.path.abspath(os.environ.get('WINEPREFIX', 'wpfx'))
-env = dict(os.environ, WINEPREFIX=pfx, WINEDEBUG='-all')
+# UTF-8 unix locale: wine maps non-ASCII file names through it.
+env = dict(os.environ, WINEPREFIX=pfx, WINEDEBUG='-all', LC_ALL='C.UTF-8')
 WINE = os.environ.get('WINE') or shutil.which('wine64') or shutil.which('wine') or '/usr/lib/wine/wine64'
 WINESERVER = shutil.which('wineserver') or os.path.join(os.path.dirname(WINE), 'wineserver')
 
@@ -290,6 +291,15 @@ with open(os.path.join(psd, 'ConsoleHost_history.txt'), 'w', newline='') as f:
             'Set-MpPreference -DisableRealtimeMonitoring $true\r\n'
             'git status\r\n')
 
+# A profile whose name is not representable in the legacy ANSI code page
+# ('ş' is not in cp1252): without the UTF-8 activeCodePage manifest the "A"
+# file APIs turned it into "Gülsen", the path did not exist and the user was
+# silently skipped by pshistory --all-users.
+gpsd = os.path.join(users, 'Gülşen', 'AppData', 'Roaming', 'Microsoft', 'Windows', 'PowerShell', 'PSReadLine')
+os.makedirs(gpsd, exist_ok=True)
+with open(os.path.join(gpsd, 'ConsoleHost_history.txt'), 'w', newline='') as f:
+    f.write('Clear-EventLog -LogName Security\r\n')
+
 # --- rdp: outgoing Remote Desktop history ---------------------------------------
 T = r'HKCU\Software\Microsoft\Terminal Server Client'
 reg(T + r'\Default', '/v', 'MRU0', '/t', 'REG_SZ', '/d', '10.10.5.21')
@@ -318,6 +328,7 @@ checks = [
     (['programs', '--json'], [('"name":"AnyDesk"', 'remote-access (RMM) tool'), ('"rmm_tool":"AnyDesk"', None)], ['Notepad++']),
     (['pshistory', '--json'], [('DownloadString', 'download cradle'), ('DisableRealtimeMonitoring', 'Defender'),
                                ('"line":1', None)], ['Get-ChildItem', 'git status']),
+    (['pshistory', '--all-users', '--flagged', '--json'], [('"user":"Gülşen"', 'log / history clearing')], []),
     (['rdp', '--json'], [('"source":"Default","position":0', '"host":"10.10.5.21"'),
                          ('fileserver01.corp.example', '"position":1'),
                          ('"source":"Servers"', 'CORP\\\\svc_backup'), ('"certificate_accepted":true', None)], []),
@@ -361,20 +372,20 @@ for args, must, mustnot in checks:
         print(f'FAIL {args}: bad json ({e}) rc={rc} err={err.strip()[:200]} out={out[:200]!r}')
         fails += 1
         continue
-    flat = json.dumps(data, separators=(',',':'))
+    flat = json.dumps(data, separators=(',',':'), ensure_ascii=False)
     for needle, reason in must:
         # The needle must appear, and if a reason is given it must be on the
         # same record (look at each record's JSON).
         recs = data if isinstance(data, list) else [v for vs in data.values() if isinstance(vs, list) for v in vs]
-        hit = [r for r in recs if needle in json.dumps(r, separators=(',',':'))] if recs else []
+        hit = [r for r in recs if needle in json.dumps(r, separators=(',',':'), ensure_ascii=False)] if recs else []
         if needle not in flat and not hit:
             print(f'FAIL {args}: missing {needle!r}'); fails += 1; continue
-        if reason and not any(reason in json.dumps(r, separators=(',',':')) for r in hit):
+        if reason and not any(reason in json.dumps(r, separators=(',',':'), ensure_ascii=False) for r in hit):
             print(f'FAIL {args}: {needle!r} present but not flagged with {reason!r}: {hit[:1]}'); fails += 1
     for bad in mustnot:
         recs = data if isinstance(data, list) else []
         for r in recs:
-            if bad in json.dumps(r, separators=(',',':')) and r.get('suspicious'):
+            if bad in json.dumps(r, separators=(',',':'), ensure_ascii=False) and r.get('suspicious'):
                 print(f'FAIL {args}: {bad!r} should not be flagged: {r}'); fails += 1
     print(f'checked {" ".join(args)}  rc={rc}')
 # The per-user Shortcut-class override would break shell32 shortcuts for the
@@ -624,6 +635,99 @@ try:
             print(f'checked timeline --json  ({len(tlr)} rows, order, marks, --since/--sources)')
 except Exception as e:
     print('FAIL timeline check:', e, out[:200]); fails += 1
+
+
+# --- offline hives built with the test-only writer (tests/wine/regfwrite.py) ---
+import regfwrite as rw
+off = os.path.join(pfx, 'drive_c', 'offline'); os.makedirs(off, exist_ok=True)
+SHORTCUT = '{00021401-0000-0000-C000-000000000046}'
+def K(name, values=(), subkeys=()): return rw.Key(name, values, subkeys)
+def inproc(path): return K('InprocServer32', [rw.Value('', rw.REG_SZ, rw.sz(path))])
+# certstore --software: one honest ROOT entry and one whose blob claims a
+# wrong SHA-1 (key name and stored property both all zeros) - edited by hand.
+ossl = _sh.which('openssl')
+certs = []
+if ossl:
+    import hashlib
+    for cn in ('winspect honest root', 'winspect edited root'):
+        with tempfile.TemporaryDirectory() as td:
+            subprocess.run([ossl, 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', os.path.join(td, 'k.pem'),
+                            '-out', os.path.join(td, 'c.der'), '-outform', 'DER', '-days', '30', '-subj', '/CN=' + cn],
+                           check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            certs.append(open(os.path.join(td, 'c.der'), 'rb').read())
+def cert_key(der, claimed):
+    blob = struct.pack('<III', 3, 1, 20) + claimed + struct.pack('<III', 32, 1, len(der)) + der
+    return K(claimed.hex().upper(), [rw.Value('Blob', rw.REG_BINARY, blob)])
+sw_keys = [K('Classes', [], [K('CLSID', [], [K(SHORTCUT, [rw.Value('', rw.REG_SZ, rw.sz('Shortcut'))],
+                                              [inproc(r'%SystemRoot%\system32\shell32.dll')])])])]
+if certs:
+    sw_keys.append(K('Microsoft', [], [K('SystemCertificates', [], [K('ROOT', [], [K('Certificates', [], [
+        cert_key(certs[0], hashlib.sha1(certs[0]).digest()), cert_key(certs[1], bytes(20))])])])]))
+with open(os.path.join(off, 'SOFTWARE'), 'wb') as f:
+    f.write(rw.build(K('ROOT', [], sw_keys)))
+# comhijack --usrclass + --software: the user re-points the Shortcut class.
+with open(os.path.join(off, 'UsrClass.dat'), 'wb') as f:
+    f.write(rw.build(K('S-1-5-21-1-2-3-1001_Classes', [], [K('CLSID', [], [
+        K(SHORTCUT, [], [inproc(r'C:\Users\bob\AppData\Roaming\sh.dll')])])])))
+# users --sam: Administrator (disabled), Guest ENABLED, a disabled "backup$"
+# and an enabled account without password requirement. Each V value holds a
+# canary instead of hashes: it must never show up in any output.
+def f_rec(rid, acb, logons):
+    f = bytearray(0x50)
+    struct.pack_into('<QQ', f, 0x08, 133485408000000000, 0)
+    struct.pack_into('<Q', f, 0x18, 133400000000000000)
+    struct.pack_into('<I', f, 0x30, rid)
+    struct.pack_into('<HHH', f, 0x38, acb, 0, 0)
+    struct.pack_into('<HH', f, 0x40, 0, logons)
+    return bytes(f)
+accts = [('Administrator', 500, 0x0211), ('Guest', 501, 0x0210), ('backup$', 1003, 0x0011), ('kiosk', 1004, 0x0014)]
+canary = b'HASHCANARY-must-never-be-printed'
+users_k = [K('%08X' % rid, [rw.Value('F', rw.REG_BINARY, f_rec(rid, acb, 3)), rw.Value('V', rw.REG_BINARY, canary * 4)])
+           for _, rid, acb in accts]
+users_k.append(K('Names', [], [K(n, [rw.Value('', rid, b'')]) for n, rid, _ in accts]))
+dom_v = b'\0' * 40 + canary + struct.pack('<III', 1111, 2222, 3333)
+with open(os.path.join(off, 'SAM'), 'wb') as f:
+    f.write(rw.build(K('ROOT', [], [K('SAM', [], [K('Domains', [], [
+        K('Account', [rw.Value('V', rw.REG_BINARY, dom_v)], [K('Users', [], users_k)])])])])))
+rc, out, err = wine([exe, 'users', '--sam', r'C:\offline\SAM', '--json'])
+try:
+    us = json.loads(out)
+    by = {a['name']: a for a in us['accounts']}
+    flagged = sorted(n for n, a in by.items() if a['suspicious'])
+    if 'HASHCANARY' in out or 'HASHCANARY' in err:
+        print('FAIL users --sam: V value content leaked into the output'); fails += 1
+    elif flagged != ['Guest', 'backup$', 'kiosk'] or us['machine_sid'] != 'S-1-5-21-1111-2222-3333':
+        print(f'FAIL users --sam: flagged {flagged}, sid {us.get("machine_sid")}'); fails += 1
+    elif by['Administrator']['enabled'] or by['Administrator']['logons'] != 3:
+        print(f"FAIL users --sam: Administrator record wrong: {by['Administrator']}"); fails += 1
+    else:
+        print('checked users --sam (synthetic hive: $ / Guest / no-password flagged, V never printed)')
+except Exception as e:
+    print('FAIL users --sam check:', e, out[:200]); fails += 1
+rc, out, err = wine([exe, 'comhijack', '--usrclass', r'C:\offline\UsrClass.dat', '--software', r'C:\offline\SOFTWARE', '--json'])
+try:
+    ch = json.loads(out)
+    if len(ch) != 1 or ch[0]['clsid'] != SHORTCUT or not ch[0]['suspicious'] or ch[0]['name'] != 'Shortcut':
+        print(f'FAIL comhijack offline: {ch}'); fails += 1
+    else:
+        print('checked comhijack --usrclass --software (synthetic hives: override flagged)')
+except Exception as e:
+    print('FAIL comhijack offline check:', e, out[:200]); fails += 1
+if certs:
+    rc, out, err = wine([exe, 'certstore', '--software', r'C:\offline\SOFTWARE', '--json'])
+    try:
+        cr = {c['subject']: c for c in json.loads(out)}
+        ed, ho = cr.get('winspect edited root'), cr.get('winspect honest root')
+        if not ed or 'edited by hand' not in ed['reason'] or ed['thumbprint'] != hashlib.sha1(certs[1]).hexdigest():
+            print(f'FAIL certstore --software: edited entry not flagged: {ed}'); fails += 1
+        elif not ho or ho['suspicious']:
+            print(f'FAIL certstore --software: honest entry flagged: {ho}'); fails += 1
+        else:
+            print('checked certstore --software (synthetic hive: wrong stored SHA-1 flagged)')
+    except Exception as e:
+        print('FAIL certstore offline check:', e, out[:200]); fails += 1
+else:
+    print('skipped certstore offline check (openssl not installed)')
 
 # sweep: one valid JSON document with every check as a key; checks that
 # cannot run under wine (WMI, event logs) must be null or empty, not broken.

@@ -312,4 +312,14 @@ int sam_machine_sid(const unsigned char *v, size_t n, char *out, size_t outn);
 // an enabled account that needs no password.
 const char *account_reason(const char *name, uint32_t rid, int disabled, int pw_not_required, int machine);
 
+// ---- Certificate store blobs ------------------------------------------------
+// A certificate kept in the registry (value "Blob" of the key
+// SystemCertificates\<store>\Certificates\<SHA-1>) is a list of properties: u32 id | u32 reserved (1) | u32 length |
+// data. Property 32 is the DER certificate itself, 3 its stored SHA-1, 11 the
+// friendly name (UTF-16). Finds property id: 1 and its data offset/length.
+#define CERTBLOB_DER    32
+#define CERTBLOB_SHA1   3
+#define CERTBLOB_NAME   11
+int certblob_prop(const unsigned char *b, size_t n, uint32_t id, size_t *off, size_t *len);
+
 #endif

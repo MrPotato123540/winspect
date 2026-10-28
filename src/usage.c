@@ -412,8 +412,11 @@ static const struct { const char *name, *text; } usage_table[] = {
         "winspect certstore - list the certificates in a system certificate store\n"
         "(Root by default). A rogue trusted-root certificate lets an attacker's\n"
         "signatures and TLS be trusted, so the Root store is worth baselining.\n"
-        "Read-only. Usage:\n"
-        "  winspect certstore [--store <name>] [--user] [--json | --csv]\n" },
+        "Flags roots with a local private key, roots that are not self-signed and\n"
+        "entries whose stored SHA-1 differs from the certificate's real one.\n"
+        "--software / --ntuser read the registry-backed stores of a copied SOFTWARE\n"
+        "or NTUSER.DAT hive (also the Group Policy copy). Read-only. Usage:\n"
+        "  winspect certstore [--store <name>] [--user | --software <S> | --ntuser <N>] [--json | --csv]\n" },
     { "objects",
         "winspect objects - list named kernel objects in an Object Manager directory\n"
         "(default: this session's \\Sessions\\<N>\\BaseNamedObjects), with each object's\n"

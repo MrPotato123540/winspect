@@ -1,0 +1,3 @@
+// Embeds the application manifest (see winspect.manifest): resource 1 of
+// type RT_MANIFEST (24) is what the loader reads for an .exe.
+1 24 "winspect.manifest"

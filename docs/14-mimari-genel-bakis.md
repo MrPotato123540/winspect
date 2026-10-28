@@ -69,6 +69,18 @@ API'ler ve iyi bilinen yapılarla çalışırız.
 3. **UTF-8 köprüsü**: Windows wide (UTF-16) döner; biz `WideCharToMultiByte(CP_UTF8)`
    ile UTF-8'e çevirip basarız, `main()` de konsolu `SetConsoleOutputCP(CP_UTF8)`
    ile UTF-8'e alır. Türkçe/yerelleştirilmiş adlar mojibake olmaz.
+   Bazı komutlar `FindFirstFileA`, `LookupAccountSidA` gibi `A` API'lerini
+   kullanır. Bunlar varsayılanda eski ANSI kod sayfasını (Türkçe sistemde
+   cp1254, İngilizcede cp1252) konuşur. Bu yüzden exe'ye gömülü manifest
+   (`res/winspect.manifest`) `activeCodePage = UTF-8` ister (Windows 10 1903+).
+   Böylece `A` API'leri de UTF-8 konuşur.
+
+   Bu bir süs değil, bir **hata düzeltmesiydi**. Manifest olmadan
+   `C:\Users\Gülşen` profili `A` API'sinden `Gülsen` diye döndü (`ş` cp1252'de
+   yok). O yol da var olmadığı için kullanıcı `pshistory --all-users`
+   çıktısından **sessizce düştü**. Ayrıca `certstore --json`, `CertGetNameStringA`
+   yüzünden geçersiz UTF-8 basıyordu ("Főtanúsítvány"); orası `W` API'sine
+   çevrildi.
 4. **Fonksiyon-işaretçisi dökümü**: ntdll'den `GetProcAddress` ile çözülen
    fonksiyonlar `(T)(void(*)(void))GetProcAddress(...)` ikili dökümüyle alınır —
    `-Wpedantic` (nesne↔fonksiyon) ve `-Wcast-function-type` ikisini de susturur.

@@ -20,7 +20,8 @@
 import json, lzma, os, shutil, subprocess, sys, tempfile
 exe, data = sys.argv[1:3]
 pfx = os.path.abspath(os.environ.get('WINEPREFIX', 'wpfx'))
-env = dict(os.environ, WINEPREFIX=pfx, WINEDEBUG='-all')
+# UTF-8 unix locale: wine maps non-ASCII file names through it.
+env = dict(os.environ, WINEPREFIX=pfx, WINEDEBUG='-all', LC_ALL='C.UTF-8')
 WINE = os.environ.get('WINE') or shutil.which('wine64') or shutil.which('wine') or '/usr/lib/wine/wine64'
 hdir = os.path.join(pfx, 'drive_c', 'hives')
 os.makedirs(hdir, exist_ok=True)
@@ -196,6 +197,20 @@ check(len(acc) == 3 and a5 and a5['name'] == 'Administrator' and not a5['enabled
 check(a1k and a1k['enabled'] and a1k['last_logon'] == '2014-09-30 02:59:34' and a1k['password_set'] == '2014-09-24 03:35:45'
       and a1k['logons'] == 4 and a1k['bad_passwords'] == 0, 'users --sam: RID 1000 times and counters (regipy samparse)')
 check(not any(a['suspicious'] for a in acc.values()), 'users --sam: nothing flagged (Guest disabled)')
+# certstore offline: registry-backed ROOT / AuthRoot stores of the regipy
+# SOFTWARE hive. Expected values were taken with openssl x509 and hashlib
+# from the DER inside each Blob (property 32); every key name must equal the
+# SHA-1 of its certificate, so nothing may be flagged as edited.
+rc, out = run('certstore', '--software', hive('SOFTWARE'), '--json')
+cr = json.loads(out) if rc == 0 else []
+vs = [c for c in cr if c['thumbprint'] == '18f7c1fcc3090203fd5baa2f861a754976c8dd25']
+check(len(cr) == 6 and vs and vs[0]['not_after'] == '2004-01-07' and vs[0]['not_before'] == '1997-05-12'
+      and vs[0]['self_signed'] and not any(c['suspicious'] for c in cr),
+      f'certstore --software ROOT: {len(cr)} certificates, VeriSign timestamping root dates (openssl)')
+rc, out = run('certstore', '--software', hive('SOFTWARE'), '--store', 'AuthRoot', '--json')
+ca = json.loads(out) if rc == 0 else []
+check(len(ca) == 17 and all(c['thumbprint'].upper() == c['location'].rsplit('\\', 1)[-1] for c in ca),
+      f'certstore --software AuthRoot: {len(ca)} certificates, key name = SHA-1 of the DER')
 # comhijack offline: per-user COM classes in a real UsrClass.dat (OneDrive and
 # Dropbox register theirs per user, under AppData). Values were read from the
 # raw hive with tests/regf_dump.c; per-user-only classes must not be flagged.

@@ -12,7 +12,8 @@ flt = sys.argv[2] if len(sys.argv) > 2 else None
 # /usr/lib/wine/wine64 (Debian/Ubuntu wine64 package).
 import shutil
 pfx = os.path.abspath(os.environ.get('WINEPREFIX', 'wpfx'))
-env = dict(os.environ, WINEPREFIX=pfx, WINEDEBUG='-all')
+# UTF-8 unix locale: wine maps non-ASCII file names through it.
+env = dict(os.environ, WINEPREFIX=pfx, WINEDEBUG='-all', LC_ALL='C.UTF-8')
 WINE = os.environ.get('WINE') or shutil.which('wine64') or shutil.which('wine') or '/usr/lib/wine/wine64'
 WINESERVER = shutil.which('wineserver') or os.path.join(os.path.dirname(WINE), 'wineserver')
 # Keep one wineserver alive for the whole run.
@@ -92,7 +93,9 @@ cases += [['ssn','NtOpenProcess'], ['ssn','NtOpenProcess','--json'], ['modules',
           ['users'], ['users','--csv'], ['users','--flagged','--json'], ['users','--sam','C:\\nonexistent'],
           ['users','--sam','C:\\windows\\win.ini'], ['users','--sam'], ['users','x'],
           ['timeline'], ['timeline','--csv'], ['timeline','--flagged','--json'], ['timeline','--since','24'],
-          ['timeline','--since','-5'], ['timeline','--sources','bam,mru'], ['timeline','--sources','bogus'], ['timeline','--since']]
+          ['timeline','--since','-5'], ['timeline','--sources','bam,mru'], ['timeline','--sources','bogus'], ['timeline','--since'],
+          ['certstore','--software','C:\\nonexistent'], ['certstore','--software','a','--ntuser','b'], ['certstore','--ntuser'],
+          ['certstore','--store','CA','--csv']]
 
 bad = 0
 for args in cases:

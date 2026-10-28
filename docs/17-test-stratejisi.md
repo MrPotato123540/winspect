@@ -81,6 +81,10 @@ birinin **doğru nedenle** raporlandığını doğrular:
 | RunMRU'da `powershell -enc`, sıralı iki RecentDocs | mru: kodlanmış komut işaretli, sıra doğru, `notepad` işaretsiz |
 | SCM başladıktan sonra registry'ye yazılan servis | hidden: `written straight into the registry`; sahte gizli süreç **yok** |
 | `sweep --json` | tek geçerli JSON; tüm anahtarlar var; wine'ın desteklemediği bölümler `null` |
+| `C:\users\Gülşen\...\ConsoleHost_history.txt` | pshistory --all-users: kullanıcı bulunur, adı doğru (UTF-8 manifest regresyonu) |
+| Test yazıcısıyla üretilen SAM (Guest açık, `backup$`, parolasız hesap; V değerinde "kanarya") | users --sam: üçü işaretli, kanarya **hiçbir** çıktıda yok |
+| Üretilen UsrClass.dat + SOFTWARE (Shortcut sınıfı kullanıcıda başka DLL'e) | comhijack çevrimdışı: işaretli |
+| Üretilen SOFTWARE (biri dürüst, biri yanlış SHA-1 taşıyan iki ROOT kaydı) | certstore --software: yalnızca yanlış olan işaretli |
 
 **Negatif kontroller de var** — bunlar en az pozitifler kadar önemli: stok LSA
 paketi (`scecli`) ve sıradan bir firewall engelleme kuralı **işaretlenmemeli**.
@@ -99,6 +103,23 @@ Bu katman da gerçek hatalar buldu:
 
 Ders: "çökmüyor ve JSON geçerli" yeterli değil; **değerlerin anlamlı olduğunu**
 da kontrol etmek gerekiyor.
+
+### Test için hive yazıcısı
+
+Çevrimdışı modlar (`--sam`, `--software`, `--usrclass`…) için gerçek hive'lar
+(regipy verisi) değerli ama içerikleri sabit: içlerinde "işaretlenmesi
+gereken" bir şey yok. Bu yüzden **yalnızca test kodu** olarak küçük bir regf
+yazıcısı var: `tests/wine/regfwrite.py`. Ürettiği yapı Windows'unkiyle aynı:
+
+- base block + checksum,
+- 4 KiB katlarında hive bin,
+- 8 bayt hizalı nk / vk / lh / sk hücreleri,
+- değer listeleri, ≤ 4 bayt değerlerde satır içi veri.
+
+Yazıcının kendisi de test ediliyor. `tests/regf_roundtrip.py` rastgele anahtar
+ağaçları (Latin-1 olmayan adlar, boş anahtarlar, her boyutta değer) yazıp C
+okuyucusuyla geri okur ve birebir karşılaştırır. Okuyucu da gerçek hive'larla
+ayrıca doğrulanır. Böylece iki taraf birbirini "kendi kendine onaylamaz".
 
 ## Katman 4 — Sağlamlık: gerçek dosya taraması + fuzz
 

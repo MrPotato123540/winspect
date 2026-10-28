@@ -1,9 +1,10 @@
 cmake_minimum_required(VERSION 3.21)
  
-project(winspect C)
+project(winspect C RC)
  
 add_executable(winspect
     src/main.c
+    res/winspect.rc
     src/list.c
     src/pe.c
     src/inspect.c
@@ -100,6 +101,9 @@ target_compile_definitions(winspect PRIVATE WIN32_LEAN_AND_MEAN)
 if(MSVC)
 	target_compile_options(winspect PRIVATE /W4)
 	target_compile_definitions(winspect PRIVATE _CRT_SECURE_NO_WARNINGS)
+	# res/winspect.rc embeds our own manifest (UTF-8 code page); the linker's
+	# generated one would be a duplicate RT_MANIFEST resource.
+	target_link_options(winspect PRIVATE /MANIFEST:NO)
 else()
 	target_compile_options(winspect PRIVATE -Wall -Wextra -Wpedantic)
 endif()

@@ -1091,3 +1091,22 @@ const char *account_reason(const char *name, uint32_t rid, int disabled, int pw_
     if (pw_not_required) return "enabled account does not require a password";
     return NULL;
 }
+
+// ---- Certificate store blobs --------------------------------------------------
+
+int certblob_prop(const unsigned char *b, size_t n, uint32_t id, size_t *off, size_t *len)
+{
+    size_t o = 0;
+    while (n - o >= 12 && o <= n) {
+        uint32_t pid = rd32(b + o), plen = rd32(b + o + 8);
+        o += 12;
+        if (plen > n - o) return 0;             // truncated / bogus length
+        if (pid == id) {
+            *off = o;
+            *len = plen;
+            return 1;
+        }
+        o += plen;
+    }
+    return 0;
+}

@@ -10,7 +10,8 @@ exe = sys.argv[1]
 n_random = int(sys.argv[2]) if len(sys.argv) > 2 else 150
 n_lnk = int(sys.argv[3]) if len(sys.argv) > 3 else 300
 pfx = os.path.abspath(os.environ.get('WINEPREFIX', 'wpfx'))
-env = dict(os.environ, WINEPREFIX=pfx, WINEDEBUG='-all')
+# UTF-8 unix locale: wine maps non-ASCII file names through it.
+env = dict(os.environ, WINEPREFIX=pfx, WINEDEBUG='-all', LC_ALL='C.UTF-8')
 WINE = os.environ.get('WINE') or shutil.which('wine64') or shutil.which('wine') or '/usr/lib/wine/wine64'
 WINESERVER = shutil.which('wineserver') or os.path.join(os.path.dirname(WINE), 'wineserver')
 subprocess.Popen([WINESERVER, '-p'], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

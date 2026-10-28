@@ -873,6 +873,24 @@ int main(void)
                 check_int("jm depth ok", ok != NULL, 1);
                 jm_free(ok);
                 check_int("jm truncated len", jm_parse("[1,2]", 4) == NULL, 1);
+                {
+                    // Three properties: 4 (16 bytes), 32 (DER, 5 bytes), 3 (20 bytes).
+                    unsigned char cb[12 + 16 + 12 + 5 + 12 + 20];
+                    memset(cb, 0, sizeof cb);
+                    cb[0] = 4; cb[4] = 1; cb[8] = 16;
+                    cb[28] = 32; cb[32] = 1; cb[36] = 5; memcpy(cb + 40, "\x30\x03\x02\x01\x01", 5);
+                    cb[45] = 3; cb[49] = 1; cb[53] = 20;
+                    size_t co = 0, cl = 0;
+                    check_int("cblob der", certblob_prop(cb, sizeof cb, CERTBLOB_DER, &co, &cl), 1);
+                    check_int("cblob der off", (int)co, 40);
+                    check_int("cblob der len", (int)cl, 5);
+                    check_int("cblob sha1", certblob_prop(cb, sizeof cb, CERTBLOB_SHA1, &co, &cl) && co == 57 && cl == 20, 1);
+                    check_int("cblob missing", certblob_prop(cb, sizeof cb, CERTBLOB_NAME, &co, &cl), 0);
+                    check_int("cblob truncated", certblob_prop(cb, sizeof cb - 1, CERTBLOB_SHA1, &co, &cl), 0);
+                    cb[36] = 0xFF; cb[37] = 0xFF;          // DER length runs past the end
+                    check_int("cblob bogus len", certblob_prop(cb, sizeof cb, CERTBLOB_SHA1, &co, &cl), 0);
+                    check_int("cblob tiny", certblob_prop(cb, 11, 4, &co, &cl), 0);
+                }
                 // Found by tests/jm_diff.py: a broken escape after a high
                 // surrogate was replaced by '?' instead of being rejected.
                 const char *bh = "\"\\ud83d\\ude:0\"", *lh = "\"\\ud83d\\u0041\"";

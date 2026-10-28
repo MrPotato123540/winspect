@@ -180,3 +180,33 @@ Ayrıştırıcı taşınabilir koddadır (`src/shellitem.c`) ve şu türleri ç�
 
 **Bilinen sınır:** bazı property-view öğeleri (`0x00`) ad taşımaz;
 bunlar türüyle (`[type 0x00]`) gösterilir.
+
+## certstore --software / --ntuser
+
+Makine ve kullanıcı sertifika depolarının bir kısmı kayıt defterinde durur:
+
+```
+SOFTWARE  Microsoft\SystemCertificates\<depo>\Certificates\<SHA-1>\Blob
+          Policies\Microsoft\SystemCertificates\<depo>\...   (Grup İlkesi kopyası)
+NTUSER    Software\Microsoft\SystemCertificates\<depo>\...
+```
+
+`Blob` bir özellik listesidir: `u32 no | u32 1 | u32 uzunluk | veri`.
+Özellik **32** DER sertifikanın kendisi, **3** saklanan SHA-1, **11** kolay ad.
+Listeyi `certblob_prop` yürütür (taşınabilir, birim testli: sınır dışı uzunluk,
+kesik blob). Yalnızca DER, çözülmek için CryptoAPI'ye
+(`CertCreateCertificateContext`) verilir.
+
+Parmak izi **her zaman sertifikanın kendisinden hesaplanır** (canlı modda da).
+Saklanan SHA-1 (çevrimdışı: anahtar adı; canlı: önbellekteki özellik) farklıysa
+kayıt "elle düzenlenmiş" diye işaretlenir.
+
+**Doğrulama:**
+
+- regipy'nin SOFTWARE hive'ındaki 6 ROOT + 17 AuthRoot sertifikası. Her biri
+  için DER, `openssl x509` ve `hashlib` ile ayrıca okundu; geçerlilik tarihleri
+  ve SHA-1 (= anahtar adı) 23/23 tuttu.
+- Test yazıcısıyla üretilen hive'da yanlış SHA-1 taşıyan kayıt işaretli,
+  dürüst kayıt işaretsiz.
+- wine'da canlı karşılığı denenemedi: wine'ın crypt32'si ROOT deposunu kayıt
+  defterinden değil ana makinenin sertifikalarından kuruyor.
