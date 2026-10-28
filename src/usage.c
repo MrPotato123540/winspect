@@ -61,6 +61,16 @@ static const struct { const char *name, *text; } usage_table[] = {
         "each item also shows its target, arguments and timestamps. Flags items that\n"
         "launch a script host or point into a user-writable dir. Read-only. Usage:\n"
         "  winspect jumplist [<file | folder>] [--json | --csv]\n" },
+    { "bits",
+        "winspect bits - Background Intelligent Transfer Service jobs: name, owner,\n"
+        "state, creation / modification / completion times and every file (remote\n"
+        "URL -> local path). A job can name a command that BITS runs when it ends,\n"
+        "which survives reboots and runs under the owner's account (MITRE T1197);\n"
+        "such jobs are flagged, as are downloads from a bare IP address and programs\n"
+        "or scripts landing in a user-writable folder. Other users' jobs need admin;\n"
+        "without it only the caller's own jobs are listed (and said so). Read-only:\n"
+        "jobs are only enumerated, never created, changed or cancelled. Usage:\n"
+        "  winspect bits [--flagged] [--json | --csv]\n" },
     { "recyclebin",
         "winspect recyclebin - what was deleted, by whom and when. Reads the \"$I\"\n"
         "metadata files in <drive>:\\$Recycle.Bin\\<user SID>\\ on every local drive\n"

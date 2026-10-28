@@ -15,6 +15,7 @@
 // leading version ("v2.30"); fw_field pulls one field out by exact key.
 
 #include "artparse.h"
+#include "ioc.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -841,7 +842,8 @@ void filetime_utc_str(uint64_t ft, char *out, size_t n)
              (int)(rem / 3600), (int)(rem / 60 % 60), (int)(rem % 60));
 }
 
-const char *rb_reason(const char *path)
+// 1 if the file name ends in an extension Windows runs as a program or script.
+static int prog_ext(const char *path)
 {
     static const char *const ext[] = {
         ".exe", ".dll", ".scr", ".sys", ".ps1", ".bat", ".cmd", ".vbs", ".vbe", ".js", ".jse",
@@ -849,11 +851,42 @@ const char *rb_reason(const char *path)
     };
     const char *dot = strrchr(path, '.');
     const char *sl = strrchr(path, '\\');
-    if (dot == NULL || (sl != NULL && dot < sl)) return NULL;
+    if (dot == NULL || (sl != NULL && dot < sl)) return 0;
     for (size_t i = 0; i < sizeof ext / sizeof ext[0]; i++) {
         const char *a = dot, *b = ext[i];
         while (*a && *b && (*a | 0x20) == *b) { a++; b++; }
-        if (*a == 0 && *b == 0) return "deleted program or script";
+        if (*a == 0 && *b == 0) return 1;
     }
+    return 0;
+}
+
+const char *rb_reason(const char *path)
+{
+    return prog_ext(path) ? "deleted program or script" : NULL;
+}
+
+const char *bits_reason(const char *notify, const char *remote, const char *local)
+{
+    if (notify && notify[0])
+        return "runs a command when the job ends (BITS persistence, T1197)";
+    if (remote) {
+        // Host part of scheme://[user[:pass]@]host[:port]/...
+        const char *h = strstr(remote, "://");
+        h = h ? h + 3 : remote;
+        char auth[256];
+        size_t k = 0;
+        while (h[k] && h[k] != '/' && h[k] != '\\' && k + 1 < sizeof auth) {
+            auth[k] = h[k];
+            k++;
+        }
+        auth[k] = 0;
+        char *host = strrchr(auth, '@');
+        host = host ? host + 1 : auth;
+        char *colon = strchr(host, ':');
+        if (colon) *colon = 0;
+        if (ioc_is_ipv4(host)) return "downloads from a bare IP address";
+    }
+    if (local && prog_ext(local) && ioc_user_writable(local))
+        return "downloads a program or script into a user-writable folder";
     return NULL;
 }

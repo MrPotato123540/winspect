@@ -394,6 +394,36 @@ if cc:
     except Exception as e:
         print('FAIL handles check:', e, out[:200]); fails += 1
     hold.kill()
+# bits: a helper creates one SUSPENDED download job from a bare IP (never
+# resumed, cancelled afterwards). wine's BITS has no notify command line
+# (E_NOTIMPL), so here the job must be flagged for the bare-IP source; the
+# notify-command rule is checked on real Windows in CI.
+if cc:
+    subprocess.run([cc, os.path.join(here, '..', 'bitsjob.c'), '-o', os.path.join(fake, 'bitsjob.exe'),
+                    '-lole32', '-lbits', '-luuid'], check=True)
+    bj = subprocess.Popen([WINE, r'C:\fake\bitsjob.exe'], env=env, stdout=subprocess.PIPE,
+                          stderr=subprocess.DEVNULL, stdin=subprocess.PIPE, text=True)
+    ready = ''
+    for _ in range(5):
+        ready = bj.stdout.readline()
+        if ready.startswith('ready') or not ready:
+            break
+    rc, out, err = wine([exe, 'bits', '--json'])
+    try:
+        jobs = [j for j in json.loads(out) if j.get('name') == 'winspect-test-job']
+        if not jobs:
+            print(f'FAIL bits: test job not listed: {out[:300]}'); fails += 1
+        elif not jobs[0]['suspicious'] or 'bare IP' not in jobs[0]['reason'] or \
+                jobs[0]['files'][0]['remote'] != 'http://10.0.0.5/payload.bin':
+            print(f'FAIL bits: test job not flagged as expected: {jobs[0]}'); fails += 1
+        else:
+            print('checked bits --json  (suspended test job listed, bare-IP source flagged)')
+    except Exception as e:
+        print('FAIL bits check:', e, out[:200]); fails += 1
+    try:
+        bj.communicate('\n', timeout=30)
+    except Exception:
+        bj.kill()
 # (pipes: wine cannot enumerate \\.\pipe\, so the known-name matcher is
 # covered by the unit tests instead.)
 imp.kill()

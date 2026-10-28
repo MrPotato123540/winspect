@@ -255,4 +255,10 @@ void filetime_utc_str(uint64_t ft, char *out, size_t n);
 // NULL. Deleting the dropped tool is a common clean-up step after an intrusion.
 const char *rb_reason(const char *path);
 
+// BITS job judged from its notify command line (program + parameters, may be
+// NULL), a remote URL and the local file it writes: a notify command is the
+// documented persistence trick (T1197); a bare-IP source or a program/script
+// landing in a user-writable folder are download hints. NULL = nothing to say.
+const char *bits_reason(const char *notify, const char *remote, const char *local);
+
 #endif

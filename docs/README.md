@@ -66,8 +66,8 @@ Sırayla oku. Her dosya bir öncekinin üstüne kurulu:
     Registry hive dosyalarını (NTUSER.DAT, SYSTEM, Amcache.hve) API olmadan
     okumak; `hive` komutu ve `--hive` seçenekleri; gerçek hive'larla doğrulama.
 21. **[20 — Kullanıcı izleri](20-kullanici-izleri.md)**
-    PowerShell komut geçmişi (`pshistory`) ve Geri Dönüşüm Kutusu: düz dosya
-    izleri, işaretleme kuralları ve sınırları.
+    PowerShell komut geçmişi (`pshistory`), Geri Dönüşüm Kutusu (`recyclebin`)
+    ve BITS işleri (`bits`): işaretleme kuralları, doğrulama ve sınırları.
 
 ## Aklında tut: tek cümlelik fikir
 

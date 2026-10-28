@@ -738,6 +738,15 @@ int main(void)
             check_int("info2 bad", (int)rb_info2_count(i2, 19), 0);
             filetime_utc_str(0, ts, sizeof ts);
             check_str("ft zero", ts, "-");
+            check_int("bits notify", bits_reason("C:\\Windows\\System32\\cmd.exe /c x", NULL, NULL) != NULL, 1);
+            check_str("bits ip", bits_reason(NULL, "http://10.1.2.3:8080/a.bin", "C:\\x\\a.bin") ?
+                      bits_reason(NULL, "http://10.1.2.3:8080/a.bin", "C:\\x\\a.bin") : "", "downloads from a bare IP address");
+            check_int("bits ip userinfo", bits_reason(NULL, "https://u:p@192.168.0.9/a", NULL) != NULL, 1);
+            check_int("bits name host", bits_reason(NULL, "https://10.example.com/a.cab", "C:\\Windows\\a.cab") == NULL, 1);
+            check_int("bits exe temp", bits_reason("", "https://x.example/a", "C:\\Users\\u\\AppData\\Local\\Temp\\a.exe") != NULL, 1);
+            check_int("bits cab temp", bits_reason(NULL, "https://x.example/a", "C:\\Users\\u\\AppData\\Local\\Temp\\a.cab") == NULL, 1);
+            check_int("bits exe win", bits_reason(NULL, "https://x.example/a", "C:\\Windows\\SoftwareDistribution\\a.exe") == NULL, 1);
+            check_int("bits all null", bits_reason(NULL, NULL, NULL) == NULL, 1);
         }
         check_int("rmm office", rmm_tool_name("Microsoft Office Professional Plus 2010") == NULL, 1);
         check_int("rmm remote desktop conn", rmm_tool_name("Remote Desktop Connection") == NULL, 1);
