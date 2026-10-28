@@ -244,6 +244,9 @@ reg(HK + r'SYSTEM\CurrentControlSet\Control\SecurityProviders\WDigest', '/v', 'U
 reg(HK + r'SOFTWARE\Policies\Microsoft\Windows\Installer', '/v', 'AlwaysInstallElevated', '/t', 'REG_DWORD', '/d', '1')
 reg(HK + r'SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon', '/v', 'AutoAdminLogon', '/t', 'REG_SZ', '/d', '1')
 reg(HK + r'SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon', '/v', 'DefaultPassword', '/t', 'REG_SZ', '/d', 'hunter2-SECRET')
+reg(HK + r'SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System', '/v', 'LocalAccountTokenFilterPolicy', '/t', 'REG_DWORD', '/d', '1')
+reg(HK + r'SYSTEM\CurrentControlSet\Control\Lsa', '/v', 'NoLMHash', '/t', 'REG_DWORD', '/d', '0')
+reg(HK + r'SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Audit', '/v', 'ProcessCreationIncludeCmdLine_Enabled', '/t', 'REG_DWORD', '/d', '1')
 
 # --- hosts: one block entry (fine) and one redirect (flagged) -------------------
 etc = os.path.join(pfx, 'drive_c', 'windows', 'system32', 'drivers', 'etc')
@@ -480,13 +483,19 @@ for fmt in ([], ['--json'], ['--csv']):
 rc, out, err = wine([exe, 'posture', '--json'])
 try:
     rows = {r['check']: r for r in json.loads(out)}
-    for chk in ('WDigest cleartext', 'AlwaysInstallElevated (HKLM)', 'AutoLogon password'):
+    for chk in ('WDigest cleartext', 'AlwaysInstallElevated (HKLM)', 'AutoLogon password',
+                'Remote local-admin token', 'LM hash storage'):
         if rows.get(chk, {}).get('status') != 'WARN':
             print(f'FAIL posture: {chk} should be WARN: {rows.get(chk)}'); fails += 1
     # An unset value with a safe Windows default must not raise a WARN.
     # (Wine itself ships EnableLUA=0, so UAC is a real WARN there.)
     if rows.get('NTLM level', {}).get('status') != 'OK':
         print('FAIL posture: unset NTLM level must be OK (default is NTLMv2)'); fails += 1
+    if rows.get('Command line in process events', {}).get('status') != 'OK':
+        print(f"FAIL posture: cmdline auditing set to 1 must be OK: {rows.get('Command line in process events')}"); fails += 1
+    for chk in ('Anonymous SAM enumeration', 'Credential Guard', 'SMB signing required (client)'):
+        if rows.get(chk, {}).get('status') == 'WARN':
+            print(f'FAIL posture: unset {chk} must not be WARN: {rows.get(chk)}'); fails += 1
     print('checked posture --json (+ no secret in any format)')
 except Exception as e:
     print('FAIL posture check:', e, out[:200]); fails += 1

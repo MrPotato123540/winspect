@@ -256,9 +256,11 @@ static const struct { const char *name, *text; } usage_table[] = {
         "  winspect hunt [--all] [--json | --csv]\n" },
     { "posture",
         "winspect posture - host security-posture audit from the registry: UAC, LSA\n"
-        "protection, WDigest cleartext credentials, NTLM level, SMBv1, RDP/NLA,\n"
-        "LLMNR, Secure Boot, firewall profiles, AlwaysInstallElevated, AutoLogon\n"
-        "password presence, PowerShell logging. Each check prints OK / WARN / INFO\n"
+        "protection, WDigest cleartext credentials, NTLM level, LM hashes, anonymous\n"
+        "SAM listing, Credential Guard, remote local-admin token filtering, SMBv1,\n"
+        "SMB signing, RDP/NLA, LLMNR, Secure Boot, firewall profiles,\n"
+        "AlwaysInstallElevated, AutoLogon password presence, PowerShell logging and\n"
+        "transcription, command lines in 4688 events. Each check prints OK / WARN / INFO\n"
         "with a one-line reason. Secrets are never printed (only \"present\").\n"
         "Offline: the same rules on hive files from another machine.\n"
         "Read-only. Usage:\n"

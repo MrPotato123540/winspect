@@ -2,9 +2,11 @@
 #define WINSPECT_POSTURE_H
 
 // winspect posture - host security-posture audit from the registry: UAC, LSA
-// protection, WDigest cleartext credentials, NTLM level, SMBv1, RDP/NLA,
-// LLMNR, Secure Boot, firewall profiles, AlwaysInstallElevated, AutoLogon
-// password presence, PowerShell logging. Each check prints OK / WARN / INFO
+// protection, WDigest cleartext credentials, NTLM level, LM hashes, anonymous
+// SAM listing, Credential Guard, remote local-admin token filtering, SMBv1,
+// SMB signing, RDP/NLA, LLMNR, Secure Boot, firewall profiles,
+// AlwaysInstallElevated, AutoLogon password presence, PowerShell logging and
+// transcription, command lines in 4688 events. Each check prints OK / WARN / INFO
 // with a one-line reason. Secrets are never printed (only "present").
 // Offline: the same rules on hive files from another machine.
 // Read-only. Usage:

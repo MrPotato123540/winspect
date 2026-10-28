@@ -326,11 +326,11 @@ geçişte okur ve her biri için **OK / WARN / INFO** + tek satırlık anlam bas
 | Alan | Kontroller |
 |---|---|
 | UAC | EnableLUA, yöneticiye sormadan yükseltme, secure desktop |
-| Kimlik bilgileri | LSA koruması (RunAsPPL), **WDigest düz metin şifre**, NTLM seviyesi, AutoLogon şifresi |
+| Kimlik bilgileri | LSA koruması (RunAsPPL), **WDigest düz metin şifre**, NTLM seviyesi, LM hash saklama, anonim SAM listeleme, Credential Guard, uzak yerel-admin token'ı (`LocalAccountTokenFilterPolicy`), AutoLogon şifresi |
 | Yetki | AlwaysInstallElevated (HKLM + HKCU — ikisi birden açıksa her kullanıcı MSI'yi SYSTEM olarak kurar) |
-| Ağ | SMBv1 istemci/sunucu, LLMNR, RDP + NLA, firewall profilleri |
+| Ağ | SMBv1 istemci/sunucu, LLMNR, SMB imzalama (sunucu/istemci), RDP + NLA, firewall profilleri |
 | Platform | Secure Boot, VBS |
-| Kayıt | PowerShell script block logging |
+| Kayıt | PowerShell script block logging, PowerShell transcription, 4688 olaylarında komut satırı |
 
 İki tasarım kararı:
 
@@ -342,6 +342,22 @@ geçişte okur ve her biri için **OK / WARN / INFO** + tek satırlık anlam bas
   sadece **var olup olmadığına** bakar; içeriği programa hiç okunmaz. Wine
   testinde şifre olarak `hunter2-SECRET` yerleştirilip text/JSON/CSV
   çıktılarının hiçbirinde geçmediği doğrulanıyor.
+
+Sonradan eklenen kuralların "değer yoksa" metinleri:
+
+| Kural | Değer yoksa | WARN ne zaman |
+|---|---|---|
+| `NoLMHash` | INFO: Vista+ varsayılanı LM hash saklamaz | `0` |
+| `RestrictAnonymousSAM` | INFO: varsayılan kısıtlı | `0` |
+| `LsaCfgFlags` (Credential Guard) | INFO: Windows 11 22H2+ uygun donanımda varsayılan açabilir | `0` (açıkça kapalı) |
+| `LocalAccountTokenFilterPolicy` | OK: yerel admin uzaktan filtreli token alır | `1`: yerel admin hesabıyla uzaktan tam yetki, pass-the-hash ile yanal hareketi kolaylaştırır |
+| SMB `RequireSecuritySignature` | INFO: yalnızca DC'lerde ve Windows 11 24H2+'da varsayılan zorunlu | `0`: NTLM relay'e açık |
+| `EnableTranscripting` | INFO | değer var ama `1` değil |
+| `ProcessCreationIncludeCmdLine_Enabled` | INFO: 4688'de komut satırı yok | değer var ama `1` değil |
+
+wine testi: `LocalAccountTokenFilterPolicy=1` ve `NoLMHash=0` WARN, komut
+satırı denetimi `1` iken OK; tanımsız Credential Guard / anonim SAM / SMB
+istemci imzalama WARN **değil**.
 
 ## events — olay günlüğünden yüksek sinyalli zaman çizelgesi
 
