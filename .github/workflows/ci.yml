@@ -148,7 +148,7 @@ jobs:
           foreach ($args in @(@("pe",$f), @("pe",$f,"--json"), @("sign",$f), @("hash",$f), @("strings",$f,"--ioc"))) { Smoke $args }
           foreach ($c in "list","services","drivers","autoruns","pipes","hosts","net","arp","routes","sessions","shares","certstore","tasks","objects","defender","usb","prefetch","shimcache","bam","firewall","taskcache","wmi","lnk","hunt","posture","events","hidden","sweep","userassist","mru","jumplist") { Smoke @($c); Smoke @($c,"--json") }
           foreach ($c in "inspect","threads","handles","regions","token","secinfo","modules","verify","triage") { Smoke @($c,"$p"); Smoke @($c,"$p","--json") }
-          foreach ($args in @(@("modules","$p","--unsigned"), @("firewall","--inbound","--allow","--active","--csv"), @("autoruns","--csv"), @("objects","--global","--type","Mutant"), @("drivers","--sig"), @("services","--flagged"), @("prefetch","--dir","C:\Windows\Prefetch","--csv"), @("streams","C:\Windows\System32\drivers\etc"), @("lnk","--json"), @("autoruns","--sig"), @("services","--sig","--flagged"), @("events","--summary"), @("prefetch","--flagged"), @("hunt","--all"), @("handles","--find","ntdll","--type","File"), @("hive","C:\Windows\System32\config\SYSTEM"))) { Smoke $args }
+          foreach ($args in @(@("modules","$p","--unsigned"), @("firewall","--inbound","--allow","--active","--csv"), @("autoruns","--csv"), @("objects","--global","--type","Mutant"), @("drivers","--sig"), @("services","--flagged"), @("prefetch","--dir","C:\Windows\Prefetch","--csv"), @("streams","C:\Windows\System32\drivers\etc"), @("lnk","--json"), @("autoruns","--sig"), @("services","--sig","--flagged"), @("events","--summary"), @("prefetch","--flagged"), @("hunt","--all"), @("handles","--find","ntdll","--type","File"), @("hive","C:\Windows\System32\config\SYSTEM"), @("amcache"))) { Smoke $args }
           Write-Host "all commands ran without crashing"
 
       # --- MinGW toolchain ----------------------------------------------------
@@ -245,6 +245,14 @@ jobs:
             if ($lk -ne $ok) { throw "$c --hive differs from live: $(@($live).Count) live vs $(@($off).Count) offline" }
             Write-Host "$c --hive matches live ($(@($live).Count) records)"
           }
+          # amcache: the live Amcache.hve is locked; take a VSS copy (admin) and read it.
+          $am = Join-Path $env:RUNNER_TEMP "amcache.hve"
+          esentutl /y C:\Windows\AppCompat\Programs\Amcache.hve /vss /d $am 2>$null | Out-Null
+          if (Test-Path $am) {
+            $aj = & $exe amcache $am --json | ConvertFrom-Json
+            if (-not ($aj | Where-Object { $_.sha1 -match '^[0-9a-f]{40}$' })) { throw "amcache: no entry with a SHA-1 in a real Amcache.hve" }
+            Write-Host "amcache: $(@($aj).Count) entries from a VSS copy"
+          } else { Write-Host "amcache: VSS copy not possible here, check skipped" }
           $hj = & $exe hive $hv "Select" --json | ConvertFrom-Json
           if (-not $hj.checksum_ok) { throw "hive: checksum of a reg-saved hive must be valid" }
           Write-Host "streams + events (+summary) + net + handles functional checks passed"
@@ -261,5 +269,5 @@ jobs:
           smoke pe "$f"; smoke pe "$f" --json; smoke sign "$f"; smoke hash "$f"; smoke strings "$f" --ioc
           for c in list services drivers autoruns pipes hosts net arp routes sessions shares certstore tasks objects defender usb prefetch shimcache bam firewall taskcache wmi lnk hunt posture events hidden sweep userassist mru jumplist; do smoke $c; smoke $c --json; done
           for c in inspect threads handles regions token secinfo modules verify triage; do smoke $c "$p"; smoke $c "$p" --json; done
-          smoke modules "$p" --unsigned; smoke firewall --inbound --allow --active --csv; smoke autoruns --csv; smoke objects --global --type Mutant; smoke drivers --sig; smoke services --flagged; smoke streams /c/Windows/System32/drivers/etc; smoke lnk --json; smoke autoruns --sig; smoke services --sig --flagged; smoke events --summary; smoke prefetch --flagged; smoke hunt --all; smoke handles --find ntdll --type File; smoke hive /c/Windows/System32/config/SYSTEM
+          smoke modules "$p" --unsigned; smoke firewall --inbound --allow --active --csv; smoke autoruns --csv; smoke objects --global --type Mutant; smoke drivers --sig; smoke services --flagged; smoke streams /c/Windows/System32/drivers/etc; smoke lnk --json; smoke autoruns --sig; smoke services --sig --flagged; smoke events --summary; smoke prefetch --flagged; smoke hunt --all; smoke handles --find ntdll --type File; smoke hive /c/Windows/System32/config/SYSTEM; smoke amcache
           echo "all commands ran without crashing"

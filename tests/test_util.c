@@ -580,6 +580,17 @@ int main(void)
             check_str("fail local ip", ft.src[2].ip, "-");
             check_int("fail quiet", evt_fail_verdict(&ft.src[2]) == NULL, 1);
         }
+        {
+            char sh[41];
+            check_int("amc sha1", amcache_sha1("0000056f4b9d9ec9b5dc548e1b460da889e44089d76f", sh), 1);
+            check_str("amc sha1 val", sh, "056f4b9d9ec9b5dc548e1b460da889e44089d76f");
+            check_int("amc sha1 upper", amcache_sha1("056F4B9D9EC9B5DC548E1B460DA889E44089D76F", sh), 1);
+            check_str("amc sha1 lower", sh, "056f4b9d9ec9b5dc548e1b460da889e44089d76f");
+            check_int("amc sha1 short", amcache_sha1("0000abc", sh), 0);
+            check_int("amc sha1 nonhex", amcache_sha1("0000zz6f4b9d9ec9b5dc548e1b460da889e44089d76f", sh), 0);
+            check_str("amc sha1 cleared", sh, "");
+            check_int("amc sha1 bad prefix", amcache_sha1("1111056f4b9d9ec9b5dc548e1b460da889e44089d76f", sh), 0);
+        }
         check_int("lin lsass ok", lineage_parent_ok("lsass.exe", "wininit.exe"), 1);
         check_int("lin lsass bad", lineage_parent_ok("LSASS.EXE", "explorer.exe"), 0);
         check_int("lin svchost ok", lineage_parent_ok("svchost.exe", "services.exe"), 1);

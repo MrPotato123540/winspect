@@ -81,6 +81,7 @@
 #include "mru.h"
 #include "jumplist.h"
 #include "hive.h"
+#include "amcache.h"
 #include "tasks.h"
 
 // cmd_modules lives in modules.c: a live process's loaded modules
@@ -221,6 +222,7 @@ static const struct {
     { "streams",  cmd_streams,  "alternate data streams + Mark-of-the-Web", "file" },
     { "jumplist", cmd_jumplist, "Jump Lists: recent items per application",  "file" },
     { "hive",     cmd_hive,     "browse an offline registry hive file",      "file" },
+    { "amcache",  cmd_amcache,  "Amcache.hve: file inventory with SHA-1",    "file" },
 
     { "list",    cmd_list,    "process/thread tree via Toolhelp",           "process" },
     { "inspect", cmd_inspect, "dump a live process PEB (cmdline/modules)",  "process" },

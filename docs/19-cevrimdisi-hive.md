@@ -96,6 +96,32 @@ Sağlamlık:
 - Gömülü küçük hive tohumuyla genel fuzz: bulgu yok.
 - 117 bin anahtarlı SOFTWARE hive'ı sanitizer altında 0,25 sn'de okunuyor.
 
+## amcache
+
+`Amcache.hve`, Program Uyumluluk Yardımcısı'nın kendi hive'ıdır. Her
+çalıştırılabilir dosya için tam yolu ve **SHA-1**'i tutar. Bu yüzden dosya
+silinmiş olsa bile tehdit istihbaratında aranabilir. Aynı dosyada iki düzen yan
+yana bulunabilir:
+
+- **`Root\File\{birim}\{dosya başvurusu}`:** sayısal adlı değerler taşır:
+  `15` yol, `101` `0000`+SHA-1, `17` dosya değişiklik zamanı, `0`/`1` ürün ve
+  şirket.
+- **`Root\InventoryApplicationFile`:** Windows 10 1607 ve sonrası.
+  `LowerCaseLongPath`, `FileId`, `Publisher`, `ProductName`, `Version` ve
+  `LinkDate` değerlerini taşır.
+
+Her iki düzende de girdi anahtarının son yazma zamanı, dosyanın kaydedildiği
+andır. Bu tek başına çalıştırıldığını kanıtlamaz. `--sha1` ile karma değerine
+göre arama yapılır. Canlı dosya Windows tarafından kilitlidir; bir yedek ya da
+VSS kopyası verilmelidir.
+
+**Doğrulama:** gerçek amcache.hve'de 1120 + 247 = **1367** girdi bulunuyor;
+regipy'nin toplamıyla aynı. TPVMMondeu.dll girdisinde yol, SHA-1
+(`056f4b9d…`), kayıt zamanı ve değişiklik zamanı aynı. SHA-1 çıkarımı
+taşınabilir koddadır ve bozuk kimliklerin karma diye gösterilmediği birim
+testiyle sınanır. Windows CI, canlı Amcache'in VSS kopyasını da okumayı
+deneyecek.
+
 Windows CI'da bir de **iki yolun karşılaştırması** koşacak: `reg save
 HKLM\SYSTEM` ile gerçek bir hive dosyası alınıp `shimcache` ve `bam`'ın canlı
 API'den ve `--hive` ile dosyadan okunan kayıtları birebir eşit olmalı.

@@ -177,6 +177,13 @@ const char *zone_name(int zone);
 void rot13_inplace(char *s);
 int userassist_record(const unsigned char *d, size_t n, uint32_t *runs, uint64_t *last);
 
+// ---- Amcache ----------------------------------------------------------------------
+// Amcache stores a file's SHA-1 as "0000" + 40 hex digits (value "101" in
+// Root\File entries, "FileId" in Root\InventoryApplicationFile). Copies the
+// 40 lowercase hex digits to out (41 bytes) and returns 1; returns 0 (out = "")
+// for anything else, so a malformed id is never shown as a hash.
+int amcache_sha1(const char *file_id, char out[41]);
+
 // ---- MRU lists (RunMRU, TypedPaths, RecentDocs) ------------------------------------
 // MRUListEx: a REG_BINARY array of u32 value indices, most recent first,
 // terminated by 0xFFFFFFFF. Copies up to max indices into out; returns count.

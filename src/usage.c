@@ -70,6 +70,15 @@ static const struct { const char *name, *text; } usage_table[] = {
         "registry; the file is only read. The per-user / SYSTEM artifact commands\n"
         "take the same files with --hive (userassist, mru, bam, shimcache). Usage:\n"
         "  winspect hive <file> [<key\\\\path>] [--recurse] [--json]\n" },
+    { "amcache",
+        "winspect amcache - programs recorded in Amcache.hve: full path, SHA-1,\n"
+        "publisher / product / version and the time the entry was written, from both\n"
+        "the older Root\\File layout and the Windows 10+ Root\\InventoryApplicationFile\n"
+        "layout. The SHA-1 lets you look a file up in threat intel even after it was\n"
+        "deleted. Flags files in user-writable dirs. The live file\n"
+        "(%SystemRoot%\\AppCompat\\Programs\\Amcache.hve) is locked by Windows: copy it\n"
+        "first (backup / VSS tool) and pass the copy. Read-only. Usage:\n"
+        "  winspect amcache [<Amcache.hve>] [--sha1 <hash>] [--find <text>] [--flagged] [--json | --csv]\n" },
     { "list",
         "winspect list - the live process tree from a Toolhelp snapshot: each process\n"
         "under its real parent (PID reuse is detected by creation time), with thread\n"

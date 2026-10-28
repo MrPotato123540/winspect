@@ -467,6 +467,24 @@ int evt_time(const char *xml, char *out, size_t n)
     return 1;
 }
 
+// ---- Amcache -------------------------------------------------------------------------
+
+int amcache_sha1(const char *id, char out[41])
+{
+    out[0] = '\0';
+    size_t n = strlen(id);
+    if (n == 44 && strncmp(id, "0000", 4) == 0) id += 4;
+    else if (n != 40) return 0;
+    for (int i = 0; i < 40; i++) {
+        char c = id[i];
+        if (c >= 'A' && c <= 'F') c = (char)(c - 'A' + 'a');
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) { out[0] = '\0'; return 0; }
+        out[i] = c;
+    }
+    out[40] = '\0';
+    return 1;
+}
+
 // ---- event filters / failed-logon summary ---------------------------------------
 
 int evt_xpath_since(const char *base, unsigned hours, char *out, size_t n)

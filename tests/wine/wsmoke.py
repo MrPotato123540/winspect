@@ -77,7 +77,8 @@ cases += [['ssn','NtOpenProcess'], ['ssn','NtOpenProcess','--json'], ['modules',
           ['autoruns','--sig','--flagged','--json'], ['lnk','--csv'], ['jumplist','--csv'],
           ['hive'], ['hive','C:\\nonexistent.dat'], ['hive','C:\\windows\\system32\\notepad.exe'],
           ['userassist','--hive','C:\\nonexistent.dat'], ['bam','--hive','C:\\windows\\win.ini'],
-          ['shimcache','--hive','C:\\nonexistent.dat'], ['mru','--hive','C:\\nonexistent.dat','--json']]
+          ['shimcache','--hive','C:\\nonexistent.dat'], ['mru','--hive','C:\\nonexistent.dat','--json'],
+          ['amcache'], ['amcache','--json'], ['amcache','C:\\nonexistent.hve','--csv']]
 
 bad = 0
 for args in cases:

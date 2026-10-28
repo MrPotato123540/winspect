@@ -9,6 +9,8 @@
 #   * mru: TypedPaths exactly as regipy's exact_expected_result, key time.
 #   * bam: 55 records = 31 in bam\State\UserSettings + 24 in the legacy
 #     bam\UserSettings key (regipy reads both too); the dwm.exe record.
+#   * amcache: 1367 entries (1120 Root\File + 247 InventoryApplicationFile,
+#     same total as regipy); the TPVMMondeu.dll entry's SHA-1 and times.
 #   * shimcache: Windows 7 x86 cache, 330 entries (regipy's 660 counts the
 #     identical ControlSet001 and ControlSet002 copies); the mfeann.exe entry
 #     with the executed flag.
@@ -71,6 +73,16 @@ sc = json.loads(out)
 check(len(sc) == 330, f'shimcache --hive (Windows 7): {len(sc)} entries (330 expected)')
 mf = [r for r in sc if r['path'] == '\\??\\C:\\Program Files\\McAfee\\VirusScan Enterprise\\mfeann.exe']
 check(mf and mf[0]['file_modified'] == '2011-01-12 12:08:00' and mf[0]['executed'] is True, 'shimcache: mfeann.exe + executed flag')
+
+rc, out = run('amcache', hive('amcache.hve'), '--json')
+am = json.loads(out)
+check(len(am) == 1367, f'amcache: {len(am)} entries (1120 Root\\File + 247 Inventory = 1367)')
+tp = [r for r in am if r['sha1'] == '056f4b9d9ec9b5dc548e1b460da889e44089d76f']
+check(tp and tp[0]['path'] == 'C:\\Windows\\system32\\TPVMMondeu.dll' and tp[0]['recorded'] == '2017-08-03 11:34:02'
+      and tp[0]['file_modified'] == '2017-03-17 05:06:04', 'amcache: TPVMMondeu.dll path / SHA-1 / times')
+check(sum(r['layout'] == 'Inventory' for r in am) == 247, 'amcache: 247 InventoryApplicationFile entries')
+rc, out = run('amcache', hive('amcache.hve'), '--sha1', '056F4B9D9EC9B5DC548E1B460DA889E44089D76F', '--json')
+check(len(json.loads(out)) == 1, 'amcache --sha1 lookup (case-insensitive)')
 
 rc, out = run('hive', hive('NTUSER.DAT'), 'Software\\Microsoft\\Windows\\CurrentVersion\\Run', '--json')
 h = json.loads(out)
