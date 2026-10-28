@@ -263,7 +263,9 @@ static const struct { const char *name, *text; } usage_table[] = {
         "(SCM query access only). Flags unquoted paths with spaces and binaries /\n"
         "ServiceDlls in user-writable dirs, each with a reason.\n"
         "--sig verifies the binary (or svchost ServiceDll) signature.\n"
-        "Usage: winspect services [--drivers] [--flagged] [--sig] [--json | --csv]\n" },
+        "Core Windows binary names outside System32 are flagged as masquerading.\n"
+        "--hive reads an offline SYSTEM hive's Services key instead of the SCM.\n"
+        "Usage: winspect services [--drivers] [--flagged] [--sig] [--hive <SYSTEM>] [--json | --csv]\n" },
     { "drivers",
         "winspect drivers - list the kernel-mode drivers currently loaded in the\n"
         "system, with each one's load address and backing file; flags files missing\n"

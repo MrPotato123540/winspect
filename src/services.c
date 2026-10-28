@@ -13,6 +13,10 @@
 //                      Windows try C:\Program.exe, C:\Program Files\My.exe...
 //                      first; a classic misconfiguration (logic in artparse.c)
 //   * user-writable  - the binary or ServiceDll lives in Temp/AppData/...
+//   * masquerading   - a core Windows binary name (svchost.exe, lsass.exe ...)
+//                      outside System32 (rule shared with autoruns / hunt)
+// --hive reads the Services key of an offline SYSTEM hive instead of asking
+// the SCM: same configuration fields; state and PID are then unknown ("-").
 // For shared svchost services the real code is the ServiceDll under
 // Services\<name>\Parameters, so we show that too.
 
@@ -21,6 +25,7 @@
 #include "artparse.h"
 #include "ioc.h"
 #include "sign.h"
+#include "regsrc.h"
 
 #include <windows.h>
 #include <winsvc.h>
@@ -162,10 +167,94 @@ static void query_config(SC_HANDLE scm, const WCHAR *name,
     CloseServiceHandle(svc);
 }
 
+static const char *classify(int is_win32, const char *path, const char *dll)
+{
+    char image[1024];
+    if (is_win32 && svc_unquoted_path(path))           return "unquoted path with spaces";
+    if (ioc_user_writable(path))                       return "binary in user-writable dir";
+    if (dll[0] && ioc_user_writable(dll))              return "ServiceDll in user-writable dir";
+    if (ioc_command_image(path, image, sizeof image) && asep_masquerade(image))
+        return "Windows system binary name outside System32 (masquerading)";
+    return NULL;
+}
+
+// --hive: the same fields straight from <ControlSet>\Services in a SYSTEM
+// hive file. A subkey is a service when it has a Type value; Win32 services
+// have type bits 0x10/0x20 (own / shared process), drivers 0x1/0x2.
+typedef struct { char n[2048][128]; int count; } svcnames;
+static void svc_name_cb(const char *name, void *vctx)
+{
+    svcnames *l = (svcnames *)vctx;
+    if (l->count < 2048) snprintf(l->n[l->count++], sizeof l->n[0], "%s", name);
+}
+
+static int offline_services(const char *hive, struct svc_ctx *c, int drivers)
+{
+    regsrc src;
+    char err[512];
+    if (regsrc_open_hive(&src, hive, err, sizeof err) != 0) {
+        fprintf(stderr, "services: %s\n", err);
+        return 1;
+    }
+    if (regsrc_dirty(&src)) fputs("services: note: hive is dirty (transaction logs not replayed)\n", stderr);
+    char cs[32], base[96];
+    regsrc_control_set(&src, cs, sizeof cs);
+    snprintf(base, sizeof base, "%s\\Services", cs);
+    rkey k;
+    if (rk_open(&src, base, &k) != 0) {
+        fprintf(stderr, "services: no %s key in %s\n", base, hive);
+        regsrc_close(&src);
+        return 1;
+    }
+    static svcnames names;
+    names.count = 0;
+    rk_subkeys(&src, &k, svc_name_cb, &names);
+    rk_close(&k);
+    unsigned total = 0;
+    for (int i = 0; i < names.count; i++) {
+        char p[300];
+        snprintf(p, sizeof p, "%s\\%s", base, names.n[i]);
+        if (rk_open(&src, p, &k) != 0) continue;
+        unsigned char d[4];
+        uint32_t vt = 0;
+        uint32_t type = 0, startv = 99;
+        if (rk_get(&src, &k, "Type", &vt, d, 4) != 4 || vt != REG_DWORD) { rk_close(&k); continue; }
+        type = (uint32_t)d[0] | ((uint32_t)d[1] << 8) | ((uint32_t)d[2] << 16) | ((uint32_t)d[3] << 24);
+        if (rk_get(&src, &k, "Start", &vt, d, 4) == 4 && vt == REG_DWORD)
+            startv = (uint32_t)d[0] | ((uint32_t)d[1] << 8) | ((uint32_t)d[2] << 16) | ((uint32_t)d[3] << 24);
+        int is_win32 = (type & 0x30) != 0, is_driver = (type & 0x3) != 0;
+        if (!(is_win32 || (drivers && is_driver))) { rk_close(&k); continue; }
+        char path[1024] = "", disp[512] = "", account[256] = "", dll[1024] = "";
+        rk_get_str(&src, &k, "ImagePath", path, sizeof path);
+        rk_get_str(&src, &k, "DisplayName", disp, sizeof disp);
+        rk_get_str(&src, &k, "ObjectName", account, sizeof account);
+        rk_close(&k);
+        char pp[340];
+        snprintf(pp, sizeof pp, "%s\\Parameters", p);
+        if (rk_open(&src, pp, &k) == 0) {
+            rk_get_str(&src, &k, "ServiceDll", dll, sizeof dll);
+            rk_close(&k);
+        }
+        total++;
+        emit(c, names.n[i], disp, "-", 0, startv <= 4 ? start_name(startv) : "?", path, account, dll,
+             classify(is_win32, path, dll), "");
+    }
+    regsrc_close(&src);
+    if (c->mode == SVC_TEXT) {
+        printf("\n%u service(s) in %s, %u flagged%s\n", total, hive, c->flagged,
+               c->only_flagged ? " (only flagged shown)" : "");
+    } else if (c->mode == SVC_JSON) {
+        puts("]");
+    }
+    return 0;
+}
+
 int cmd_services(int argc, char **argv)
 {
     int mode = SVC_TEXT, drivers = 0, only_flagged = 0, sig = 0;
+    const char *hive = NULL;
     for (int a = 0; a < argc; a++) {
+        if (strcmp(argv[a], "--hive") == 0 && a + 1 < argc) { hive = argv[++a]; continue; }
         if (strcmp(argv[a], "--json") == 0)        mode = SVC_JSON;
         else if (strcmp(argv[a], "--csv") == 0)    mode = SVC_CSV;
         else if (strcmp(argv[a], "--drivers") == 0) drivers = 1;
@@ -175,6 +264,24 @@ int cmd_services(int argc, char **argv)
             fprintf(stderr, "services: unexpected argument '%s'\n", argv[a]);
             return 1;
         }
+    }
+
+    if (hive != NULL) {
+        if (sig) {
+            fputs("services: --sig is not available with --hive (the files are on another machine)\n", stderr);
+            return 1;
+        }
+        struct svc_ctx oc;
+        memset(&oc, 0, sizeof oc);
+        oc.mode = mode; oc.first = 1; oc.only_flagged = only_flagged;
+        if (mode == SVC_TEXT) {
+            printf("      %-28s %-14s %-9s %-7s %-9s %s\n", "name", "state", "start", "pid", "account", "binary path");
+        } else if (mode == SVC_CSV) {
+            puts("name,display_name,state,pid,start_type,account,binary_path,service_dll,reason,signature");
+        } else {
+            putchar('[');
+        }
+        return offline_services(hive, &oc, drivers);
     }
 
     SC_HANDLE scm = OpenSCManagerW(NULL, NULL, SC_MANAGER_ENUMERATE_SERVICE);
@@ -234,10 +341,7 @@ int cmd_services(int argc, char **argv)
         if (is_win32 && ioc_contains_ci(path, "svchost.exe")) {
             service_dll(svc[i].lpServiceName, dll, sizeof dll);
         }
-        const char *reason = NULL;
-        if (is_win32 && svc_unquoted_path(path))           reason = "unquoted path with spaces";
-        else if (ioc_user_writable(path))                  reason = "binary in user-writable dir";
-        else if (dll[0] && ioc_user_writable(dll))         reason = "ServiceDll in user-writable dir";
+        const char *reason = classify(is_win32, path, dll);
         // --sig: verify the code that really runs (the ServiceDll for shared
         // svchost services, the binary otherwise).
         char sigtxt[32] = "";

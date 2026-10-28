@@ -6,7 +6,9 @@
 // (SCM query access only). Flags unquoted paths with spaces and binaries /
 // ServiceDlls in user-writable dirs, each with a reason.
 // --sig verifies the binary (or svchost ServiceDll) signature.
-// Usage: winspect services [--drivers] [--flagged] [--sig] [--json | --csv]
+// Core Windows binary names outside System32 are flagged as masquerading.
+// --hive reads an offline SYSTEM hive's Services key instead of the SCM.
+// Usage: winspect services [--drivers] [--flagged] [--sig] [--hive <SYSTEM>] [--json | --csv]
 int cmd_services(int argc, char **argv);
 
 #endif

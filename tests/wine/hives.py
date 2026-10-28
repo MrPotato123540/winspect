@@ -118,6 +118,18 @@ check(lsa == ['kerberos', 'msv1_0', 'schannel', 'wdigest', 'tspkg', 'pku2u'], 'a
 rc, out = run('autoruns', '--software', hive('SOFTWARE'), '--sig')
 check(rc == 1, 'autoruns: --sig refused with offline hives')
 
+rc, out = run('services', '--hive', hive('corrupted_system_hive'), '--drivers', '--json')
+ab = [r for r in json.loads(out) if r['name'] == 'Abiosdsk']
+check(ab and ab[0]['start_type'] == 'disabled', 'services --hive --drivers: Abiosdsk (Start 4) as regipy reads it')
+rc, out = run('services', '--hive', hive('SYSTEM'), '--json')
+sv = json.loads(out)
+ad = [r for r in sv if r['name'] == 'AdobeARMservice']
+check(ad and ad[0]['account'] == 'LocalSystem' and ad[0]['start_type'] == 'auto' and 'armsvc.exe' in ad[0]['binary_path'],
+      'services --hive: AdobeARMservice config')
+check(all(r['state'] == '-' for r in sv), 'services --hive: no live state claimed')
+rc, out = run('services', '--hive', hive('SYSTEM'), '--sig')
+check(rc == 1, 'services: --sig refused with --hive')
+
 rc, out = run('hive', hive('NTUSER.DAT'), 'Software\\Microsoft\\Windows\\CurrentVersion\\Run', '--json')
 h = json.loads(out)
 check(h['checksum_ok'] and not h['dirty'] and h['keys'][0]['values'][0]['name'] == 'Sidebar', 'hive: Run key browse')
