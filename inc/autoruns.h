@@ -11,7 +11,14 @@
 // A transparent subset of what Sysinternals Autoruns inspects.
 // --sig verifies the signature of what each entry runs (Autoruns' "Verify
 // code signatures") and flags untrusted images and images whose file is gone.
+// Entries named like a core Windows binary but placed outside System32 (e.g.
+// System32\dllhost\svchost.exe) are flagged as masquerading.
+// Offline: --software / --system / --ntuser read hive FILES instead of the
+// live registry (any combination; Startup folders and --sig need the live
+// machine and are skipped / refused).
 // Usage: winspect autoruns [--flagged] [--sig] [--json | --csv]
+//        winspect autoruns [--software <SOFTWARE>] [--system <SYSTEM>] [--ntuser <NTUSER.DAT>]
+//                          [--flagged] [--json | --csv]
 int cmd_autoruns(int argc, char **argv);
 
 #endif

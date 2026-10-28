@@ -28,20 +28,13 @@
 #include "lnk.h"
 #include "sign.h"
 #include "artparse.h"
+#include "regsrc.h"
 
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
-
-static void w2u(const WCHAR *w, char *out, size_t n)
-{
-    out[0] = '\0';
-    if (w != NULL) {
-        WideCharToMultiByte(CP_UTF8, 0, w, -1, out, (int)n, NULL, NULL);
-    }
-}
 
 #define AR_SEEN_MAX 2048
 struct arctx {
@@ -53,6 +46,11 @@ struct arctx {
     // same entry twice; a WOW64 entry identical to one already shown is skipped.
     unsigned long long seen[AR_SEEN_MAX];
     unsigned nseen;
+    // Registry sources: live HKLM\SOFTWARE, HKLM\SYSTEM and HKCU, or the
+    // offline hive files given with --software / --system / --ntuser (NULL =
+    // that hive was not given, its locations are skipped).
+    regsrc *sw, *sys, *cu;
+    char cs[32];            // control set for SYSTEM paths
 };
 
 // FNV-1a over name + '\x01' + command.
@@ -154,7 +152,10 @@ static void emit_ex(struct arctx *c, const char *loc, const char *name, const ch
                     int always, default_fn is_default)
 {
     const char *reason = NULL;
+    char image[1024];
+    int masq = ioc_command_image(cmd, image, sizeof image) && asep_masquerade(image);
     if (ioc_user_writable(cmd))                        reason = "user-writable path";
+    else if (masq)                                     reason = "Windows system binary name outside System32 (masquerading)";
     else if (is_default != NULL && !is_default(cmd))   reason = "non-default value";
     else if (always)                                   reason = "rarely legitimate location";
     emit_reason(c, loc, name, cmd, reason);
@@ -190,7 +191,10 @@ static int def_userinit(const char *s)
     snprintf(got, sizeof got, "%s", s);
     size_t L = strlen(got);
     while (L > 0 && (got[L - 1] == ',' || got[L - 1] == ' ')) { got[--L] = '\0'; }
-    return _stricmp(got, want) == 0 || _stricmp(got, "userinit.exe") == 0;
+    // An offline hive comes from another machine: accept the stock path on any
+    // drive, not only this machine's system directory.
+    int other_drive = L == 31 && got[1] == ':' && _stricmp(got + 2, "\\Windows\\System32\\userinit.exe") == 0;
+    return _stricmp(got, want) == 0 || _stricmp(got, "userinit.exe") == 0 || other_drive;
 }
 
 static int def_bootexecute(const char *s)
@@ -232,172 +236,147 @@ static int def_netsh_helper(const char *s)
     return strchr(s, '\\') == NULL || ioc_contains_ci(s, "\\System32\\");
 }
 
-// Enumerates all values of one Run-style key (name -> command).
-static void enum_run_key(HKEY root, const WCHAR *subkey, const char *label, struct arctx *c)
+// Maps a location written the way the live registry names it - root HKEY +
+// "SOFTWARE\\...", "SYSTEM\\CurrentControlSet\\..." or an HKCU path - to the
+// registry source holding it and the path inside that source. NULL when that
+// hive is not available (offline run without that file).
+static regsrc *pick(struct arctx *c, HKEY root, const char *path, char *rel, size_t n)
 {
-    HKEY k = NULL;
-    if (RegOpenKeyExW(root, subkey, 0, KEY_READ | KEY_WOW64_64KEY, &k) != ERROR_SUCCESS) {
-        return;
+    if (root == HKEY_CURRENT_USER) {
+        snprintf(rel, n, "%s", path);
+        return c->cu;
     }
-    for (DWORD i = 0; ; i++) {
-        WCHAR wname[512];
-        DWORD namelen = 512;
-        BYTE data[4096];
-        DWORD datalen = sizeof data - sizeof(WCHAR);   // room for our terminator
-        DWORD type = 0;
-        LONG r = RegEnumValueW(k, i, wname, &namelen, NULL, &type, data, &datalen);
-        if (r == ERROR_NO_MORE_ITEMS) {
-            break;
-        }
-        if (r != ERROR_SUCCESS) {
-            continue;
-        }
-        if (type != REG_SZ && type != REG_EXPAND_SZ) {
-            continue;
-        }
-        data[datalen] = 0;          // registry strings may lack a NUL
-        data[datalen + 1] = 0;
-        char name[512], cmd[2048];
-        w2u(wname, name, sizeof name);
-        w2u((const WCHAR *)data, cmd, sizeof cmd);
-        emit(c, label, name[0] ? name : "(default)", cmd);
+    if (_strnicmp(path, "SOFTWARE\\", 9) == 0) {
+        snprintf(rel, n, "%s", path + 9);
+        return c->sw;
     }
-    RegCloseKey(k);
+    if (_strnicmp(path, "SYSTEM\\CurrentControlSet\\", 25) == 0) {
+        snprintf(rel, n, "%s\\%s", c->cs, path + 25);
+        return c->sys;
+    }
+    return NULL;
+}
+
+static int open_at(struct arctx *c, HKEY root, const char *path, regsrc **src, rkey *k)
+{
+    char rel[1024];
+    *src = pick(c, root, path, rel, sizeof rel);
+    return *src != NULL && rk_open(*src, rel, k) == 0;
+}
+
+struct valfwd { struct arctx *c; const char *label; int always; default_fn def; int dll; };
+
+static void run_value(const char *name, uint32_t type, const unsigned char *d, size_t len, void *vctx)
+{
+    struct valfwd *f = (struct valfwd *)vctx;
+    if ((type != REG_SZ && type != REG_EXPAND_SZ) || d == NULL) return;
+    char cmd[2048];
+    regsrc_u16(d, len, cmd, sizeof cmd);
+    if (f->dll) {
+        if (cmd[0] != '\0') emit_ex(f->c, f->label, name, cmd, f->always, f->def);
+    } else {
+        emit(f->c, f->label, name[0] ? name : "(default)", cmd);
+    }
+}
+
+// Enumerates all values of one Run-style key (name -> command).
+static void enum_run_key(HKEY root, const char *subkey, const char *label, struct arctx *c)
+{
+    regsrc *s;
+    rkey k;
+    if (!open_at(c, root, subkey, &s, &k)) return;
+    struct valfwd f = { c, label, 0, NULL, 0 };
+    rk_values(s, &k, run_value, &f);
+    rk_close(&k);
 }
 
 // Reads one named value (Winlogon Userinit / Shell) and reports it as an entry.
-static void read_value(HKEY root, const WCHAR *subkey, const WCHAR *value,
+static void read_value(HKEY root, const char *subkey, const char *value,
                        const char *label, int always, default_fn is_default,
                        struct arctx *c)
 {
-    HKEY k = NULL;
-    if (RegOpenKeyExW(root, subkey, 0, KEY_READ | KEY_WOW64_64KEY, &k) != ERROR_SUCCESS) {
-        return;
+    regsrc *s;
+    rkey k;
+    if (!open_at(c, root, subkey, &s, &k)) return;
+    char cmd[2048];
+    if (rk_get_str(s, &k, value, cmd, sizeof cmd) && cmd[0] != '\0') {   // empty persists nothing
+        emit_ex(c, label, value[0] ? value : "(default)", cmd, always, is_default);
     }
-    BYTE data[4096];
-    // Leave room for a terminator: registry strings are not guaranteed to be
-    // NUL-terminated, so we add one ourselves before converting.
-    DWORD datalen = sizeof data - sizeof(WCHAR), type = 0;
-    if (RegQueryValueExW(k, value, NULL, &type, data, &datalen) == ERROR_SUCCESS &&
-        (type == REG_SZ || type == REG_EXPAND_SZ)) {
-        data[datalen] = 0;
-        data[datalen + 1] = 0;
-        char name[256], cmd[2048];
-        w2u(value[0] ? value : L"(default)", name, sizeof name);
-        w2u((const WCHAR *)data, cmd, sizeof cmd);
-        if (cmd[0] != '\0') {          // an empty value persists nothing
-            emit_ex(c, label, name, cmd, always, is_default);
-        }
-    }
-    RegCloseKey(k);
+    rk_close(&k);
 }
 
 // For each subkey of `parent`, reads the string value `value` and reports it
 // with the subkey name as the entry name. This is the shape of the per-image
 // hijack points: IFEO\<image.exe>\Debugger and
 // SilentProcessExit\<image.exe>\MonitorProcess - "when X starts/exits, run Y".
-static void enum_subkey_value(HKEY root, const WCHAR *parent, const WCHAR *value,
+struct subnames { char n[1024][128]; int count; };
+static void collect_sub(const char *name, void *vctx)
+{
+    struct subnames *l = (struct subnames *)vctx;
+    if (l->count < 1024) snprintf(l->n[l->count++], sizeof l->n[0], "%s", name);
+}
+
+static void enum_subkey_value(HKEY root, const char *parent, const char *value,
                               const char *label, int always, default_fn is_default,
                               struct arctx *c)
 {
-    HKEY k = NULL;
-    if (RegOpenKeyExW(root, parent, 0, KEY_READ | KEY_WOW64_64KEY, &k) != ERROR_SUCCESS) {
-        return;
+    regsrc *s;
+    rkey k;
+    if (!open_at(c, root, parent, &s, &k)) return;
+    static struct subnames subs;
+    subs.count = 0;
+    rk_subkeys(s, &k, collect_sub, &subs);
+    rk_close(&k);
+    char rel[1024];
+    pick(c, root, parent, rel, sizeof rel);
+    for (int i = 0; i < subs.count; i++) {
+        char p[1200], cmd[2048];
+        snprintf(p, sizeof p, "%s\\%s", rel, subs.n[i]);
+        rkey sk;
+        if (rk_open(s, p, &sk) != 0) continue;
+        if (rk_get_str(s, &sk, value, cmd, sizeof cmd) && cmd[0] != '\0') {
+            emit_ex(c, label, subs.n[i], cmd, always, is_default);
+        }
+        rk_close(&sk);
     }
-    for (DWORD i = 0; ; i++) {
-        WCHAR sub[256];
-        DWORD sublen = 256;
-        LONG r = RegEnumKeyExW(k, i, sub, &sublen, NULL, NULL, NULL, NULL);
-        if (r == ERROR_NO_MORE_ITEMS) {
-            break;
-        }
-        if (r != ERROR_SUCCESS) {
-            continue;
-        }
-        HKEY sk = NULL;
-        if (RegOpenKeyExW(k, sub, 0, KEY_READ, &sk) != ERROR_SUCCESS) {
-            continue;
-        }
-        BYTE data[4096];
-        DWORD datalen = sizeof data - sizeof(WCHAR), type = 0;
-        if (RegQueryValueExW(sk, value, NULL, &type, data, &datalen) == ERROR_SUCCESS &&
-            (type == REG_SZ || type == REG_EXPAND_SZ)) {
-            data[datalen] = 0;
-            data[datalen + 1] = 0;
-            char name[256], cmd[2048];
-            w2u(sub, name, sizeof name);
-            w2u((const WCHAR *)data, cmd, sizeof cmd);
-            if (cmd[0] != '\0') {
-                emit_ex(c, label, name, cmd, always, is_default);
-            }
-        }
-        RegCloseKey(sk);
-    }
-    RegCloseKey(k);
 }
 
 // Reads a REG_MULTI_SZ value and reports each string as its own entry
 // (BootExecute, LSA package lists). A literal "" item - how Windows writes an
 // empty Security Packages list - is skipped.
-static void read_multi_sz(HKEY root, const WCHAR *subkey, const WCHAR *value,
+static void read_multi_sz(HKEY root, const char *subkey, const char *value,
                           const char *label, default_fn is_default, struct arctx *c)
 {
-    HKEY k = NULL;
-    if (RegOpenKeyExW(root, subkey, 0, KEY_READ | KEY_WOW64_64KEY, &k) != ERROR_SUCCESS) {
-        return;
+    regsrc *s;
+    rkey k;
+    if (!open_at(c, root, subkey, &s, &k)) return;
+    unsigned char data[8192];
+    uint32_t type = 0;
+    long len = rk_get(s, &k, value, &type, data, sizeof data);
+    rk_close(&k);
+    if (len <= 0 || (type != REG_MULTI_SZ && type != REG_SZ)) return;
+    size_t n = (size_t)len < sizeof data ? (size_t)len : sizeof data;
+    for (size_t i = 0; i + 1 < n; ) {
+        size_t j = i;
+        while (j + 1 < n && (data[j] | data[j + 1])) j += 2;
+        char item[1024];
+        regsrc_u16(data + i, j - i, item, sizeof item);
+        if (j == i) break;                              // empty string ends the list
+        if (item[0] != '\0' && strcmp(item, "\"\"") != 0) emit_ex(c, label, value, item, 0, is_default);
+        i = j + 2;
     }
-    WCHAR data[4096];
-    // Reserve two WCHARs so the list is always double-NUL terminated.
-    DWORD datalen = sizeof data - 2 * sizeof(WCHAR), type = 0;
-    if (RegQueryValueExW(k, value, NULL, &type, (BYTE *)data, &datalen) == ERROR_SUCCESS &&
-        (type == REG_MULTI_SZ || type == REG_SZ)) {
-        size_t nw = datalen / sizeof(WCHAR);
-        data[nw] = 0;
-        data[nw + 1] = 0;
-        char name[256];
-        w2u(value, name, sizeof name);
-        for (const WCHAR *p = data; *p != 0; p += wcslen(p) + 1) {
-            char item[1024];
-            w2u(p, item, sizeof item);
-            if (item[0] == '\0' || strcmp(item, "\"\"") == 0) {
-                continue;
-            }
-            emit_ex(c, label, name, item, 0, is_default);
-        }
-    }
-    RegCloseKey(k);
 }
 
 // Reports every value of a key whose value DATA is a DLL (NetSh helpers).
-static void enum_value_dlls(HKEY root, const WCHAR *subkey, const char *label,
+static void enum_value_dlls(HKEY root, const char *subkey, const char *label,
                             int always, default_fn is_default, struct arctx *c)
 {
-    HKEY k = NULL;
-    if (RegOpenKeyExW(root, subkey, 0, KEY_READ | KEY_WOW64_64KEY, &k) != ERROR_SUCCESS) {
-        return;
-    }
-    for (DWORD i = 0; ; i++) {
-        WCHAR wname[256];
-        DWORD namelen = 256;
-        BYTE data[2048];
-        DWORD datalen = sizeof data - sizeof(WCHAR), type = 0;
-        LONG r = RegEnumValueW(k, i, wname, &namelen, NULL, &type, data, &datalen);
-        if (r == ERROR_NO_MORE_ITEMS) {
-            break;
-        }
-        if (r != ERROR_SUCCESS || (type != REG_SZ && type != REG_EXPAND_SZ)) {
-            continue;
-        }
-        data[datalen] = 0;
-        data[datalen + 1] = 0;
-        char name[256], dll[1024];
-        w2u(wname, name, sizeof name);
-        w2u((const WCHAR *)data, dll, sizeof dll);
-        if (dll[0] != '\0') {
-            emit_ex(c, label, name, dll, always, is_default);
-        }
-    }
-    RegCloseKey(k);
+    regsrc *s;
+    rkey k;
+    if (!open_at(c, root, subkey, &s, &k)) return;
+    struct valfwd f = { c, label, always, is_default, 1 };
+    rk_values(s, &k, run_value, &f);
+    rk_close(&k);
 }
 
 // Lists the files in a Startup folder: anything dropped here runs at logon.
@@ -451,11 +430,15 @@ static void enum_startup_dir(const char *dir, const char *label, struct arctx *c
 int cmd_autoruns(int argc, char **argv)
 {
     int mode = AR_TEXT, only_flagged = 0, sig = 0;
+    const char *hsw = NULL, *hsys = NULL, *hcu = NULL;
     for (int a = 0; a < argc; a++) {
         if (strcmp(argv[a], "--json") == 0)      mode = AR_JSON;
         else if (strcmp(argv[a], "--flagged") == 0) only_flagged = 1;
         else if (strcmp(argv[a], "--sig") == 0) sig = 1;
         else if (strcmp(argv[a], "--csv") == 0)  mode = AR_CSV;
+        else if (strcmp(argv[a], "--software") == 0 && a + 1 < argc) hsw = argv[++a];
+        else if (strcmp(argv[a], "--system") == 0 && a + 1 < argc)   hsys = argv[++a];
+        else if (strcmp(argv[a], "--ntuser") == 0 && a + 1 < argc)   hcu = argv[++a];
         else {
             fprintf(stderr, "autoruns: unexpected argument '%s'\n", argv[a]);
             return 1;
@@ -466,18 +449,59 @@ int cmd_autoruns(int argc, char **argv)
     memset(&c, 0, sizeof c);
     c.mode = mode; c.first = 1; c.only_flagged = only_flagged; c.sig = sig;
 
+    // Offline mode: any of --software / --system / --ntuser switches to hive
+    // files; locations in a hive that was not given are skipped, and the
+    // Startup folders (files on the live disk) are not read. Signatures cannot
+    // be checked for another machine's files.
+    int offline = hsw || hsys || hcu;
+    static regsrc rs_sw, rs_sys, rs_cu;
+    const char *files[3] = { hsw, hsys, hcu };
+    regsrc *srcs[3] = { &rs_sw, &rs_sys, &rs_cu };
+    if (offline) {
+        if (sig) {
+            fputs("autoruns: --sig is not available with offline hives (the files are on another machine)\n", stderr);
+            return 1;
+        }
+        for (int i = 0; i < 3; i++) {
+            if (files[i] == NULL) continue;
+            char err[512];
+            if (regsrc_open_hive(srcs[i], files[i], err, sizeof err) != 0) {
+                fprintf(stderr, "autoruns: %s\n", err);
+                for (int j = 0; j < i; j++) if (files[j]) regsrc_close(srcs[j]);
+                return 1;
+            }
+            if (regsrc_dirty(srcs[i])) fprintf(stderr, "autoruns: note: %s is dirty (transaction logs not replayed)\n", files[i]);
+        }
+        c.sw = hsw ? &rs_sw : NULL;
+        c.sys = hsys ? &rs_sys : NULL;
+        c.cu = hcu ? &rs_cu : NULL;
+    } else {
+        regsrc_open_live(&rs_sw, HKEY_LOCAL_MACHINE, "SOFTWARE", "HKLM\\SOFTWARE");
+        regsrc_open_live(&rs_sys, HKEY_LOCAL_MACHINE, "SYSTEM", "HKLM\\SYSTEM");
+        regsrc_open_live(&rs_cu, HKEY_CURRENT_USER, NULL, "HKCU");
+        c.sw = rs_sw.live ? &rs_sw : NULL;
+        c.sys = rs_sys.live ? &rs_sys : NULL;
+        c.cu = &rs_cu;
+    }
+    if (c.sys) regsrc_control_set(c.sys, c.cs, sizeof c.cs);
+
     if (mode == AR_TEXT) {
-        puts("autoruns  (registry + Startup auto-start locations)\n");
+        if (offline) {
+            printf("autoruns  (offline hives:%s%s%s%s%s%s)\n\n", hsw ? " SOFTWARE=" : "", hsw ? hsw : "",
+                   hsys ? " SYSTEM=" : "", hsys ? hsys : "", hcu ? " NTUSER=" : "", hcu ? hcu : "");
+        } else {
+            puts("autoruns  (registry + Startup auto-start locations)\n");
+        }
     } else if (mode == AR_CSV) {
         puts("location,name,command,suspicious,reason,signature");
     } else if (mode == AR_JSON) {
         putchar('[');
     }
 
-    static const WCHAR RUN[]       = L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run";
-    static const WCHAR RUNONCE[]   = L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce";
-    static const WCHAR RUN_WOW[]   = L"SOFTWARE\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Run";
-    static const WCHAR WINLOGON[]  = L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon";
+    static const char RUN[]       = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run";
+    static const char RUNONCE[]   = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce";
+    static const char RUN_WOW[]   = "SOFTWARE\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Run";
+    static const char WINLOGON[]  = "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon";
 
     enum_run_key(HKEY_LOCAL_MACHINE, RUN,     "HKLM\\...\\Run",         &c);
     enum_run_key(HKEY_LOCAL_MACHINE, RUNONCE, "HKLM\\...\\RunOnce",     &c);
@@ -487,130 +511,130 @@ int cmd_autoruns(int argc, char **argv)
 
     // Winlogon Userinit / Shell: tampering here is a classic logon-persistence
     // technique, so we surface them even when they hold the default value.
-    read_value(HKEY_LOCAL_MACHINE, WINLOGON, L"Userinit", "HKLM\\...\\Winlogon", 0, def_userinit, &c);
-    read_value(HKEY_LOCAL_MACHINE, WINLOGON, L"Shell",    "HKLM\\...\\Winlogon", 0, def_shell, &c);
+    read_value(HKEY_LOCAL_MACHINE, WINLOGON, "Userinit", "HKLM\\...\\Winlogon", 0, def_userinit, &c);
+    read_value(HKEY_LOCAL_MACHINE, WINLOGON, "Shell",    "HKLM\\...\\Winlogon", 0, def_shell, &c);
     // A per-user Shell override replaces Explorer for that user only.
-    read_value(HKEY_CURRENT_USER,  WINLOGON, L"Shell",    "HKCU\\...\\Winlogon", 1, NULL, &c);
+    read_value(HKEY_CURRENT_USER,  WINLOGON, "Shell",    "HKCU\\...\\Winlogon", 1, NULL, &c);
 
     // Policy-driven Run keys: same effect as Run, but set via (Group) Policy and
     // easy to overlook.
-    static const WCHAR POL_RUN[] =
-        L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer\\Run";
+    static const char POL_RUN[] =
+        "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer\\Run";
     enum_run_key(HKEY_LOCAL_MACHINE, POL_RUN, "HKLM\\...\\Policies\\Explorer\\Run", &c);
     enum_run_key(HKEY_CURRENT_USER,  POL_RUN, "HKCU\\...\\Policies\\Explorer\\Run", &c);
 
     // Image File Execution Options "Debugger": when the named image starts, the
     // debugger command runs INSTEAD (MITRE T1546.012). Legitimate uses are rare
     // outside developer machines, so any entry here deserves a look.
-    static const WCHAR IFEO[] =
-        L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options";
-    static const WCHAR IFEO_WOW[] =
-        L"SOFTWARE\\Wow6432Node\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options";
-    enum_subkey_value(HKEY_LOCAL_MACHINE, IFEO,     L"Debugger", "IFEO Debugger",        1, NULL, &c);
-    enum_subkey_value(HKEY_LOCAL_MACHINE, IFEO_WOW, L"Debugger", "IFEO Debugger (WOW64)", 1, NULL, &c);
+    static const char IFEO[] =
+        "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options";
+    static const char IFEO_WOW[] =
+        "SOFTWARE\\Wow6432Node\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options";
+    enum_subkey_value(HKEY_LOCAL_MACHINE, IFEO,     "Debugger", "IFEO Debugger",        1, NULL, &c);
+    enum_subkey_value(HKEY_LOCAL_MACHINE, IFEO_WOW, "Debugger", "IFEO Debugger (WOW64)", 1, NULL, &c);
 
     // SilentProcessExit "MonitorProcess": runs a program when the named image
     // exits - the quieter sibling of the IFEO Debugger trick.
-    static const WCHAR SPE[] =
-        L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\SilentProcessExit";
-    static const WCHAR SPE_WOW[] =
-        L"SOFTWARE\\Wow6432Node\\Microsoft\\Windows NT\\CurrentVersion\\SilentProcessExit";
-    enum_subkey_value(HKEY_LOCAL_MACHINE, SPE,     L"MonitorProcess", "SilentProcessExit",         1, NULL, &c);
-    enum_subkey_value(HKEY_LOCAL_MACHINE, SPE_WOW, L"MonitorProcess", "SilentProcessExit (WOW64)", 1, NULL, &c);
+    static const char SPE[] =
+        "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\SilentProcessExit";
+    static const char SPE_WOW[] =
+        "SOFTWARE\\Wow6432Node\\Microsoft\\Windows NT\\CurrentVersion\\SilentProcessExit";
+    enum_subkey_value(HKEY_LOCAL_MACHINE, SPE,     "MonitorProcess", "SilentProcessExit",         1, NULL, &c);
+    enum_subkey_value(HKEY_LOCAL_MACHINE, SPE_WOW, "MonitorProcess", "SilentProcessExit (WOW64)", 1, NULL, &c);
 
     // AppInit_DLLs: DLLs loaded into every process that loads user32 (only
     // honoured when LoadAppInit_DLLs = 1, and blocked under Secure Boot on
     // modern Windows - but any value here is still a red flag).
-    static const WCHAR WINDOWS_NT[] = L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Windows";
-    static const WCHAR WINDOWS_NT_WOW[] =
-        L"SOFTWARE\\Wow6432Node\\Microsoft\\Windows NT\\CurrentVersion\\Windows";
-    read_value(HKEY_LOCAL_MACHINE, WINDOWS_NT,     L"AppInit_DLLs", "AppInit_DLLs",         1, NULL, &c);
-    read_value(HKEY_LOCAL_MACHINE, WINDOWS_NT_WOW, L"AppInit_DLLs", "AppInit_DLLs (WOW64)", 1, NULL, &c);
+    static const char WINDOWS_NT[] = "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Windows";
+    static const char WINDOWS_NT_WOW[] =
+        "SOFTWARE\\Wow6432Node\\Microsoft\\Windows NT\\CurrentVersion\\Windows";
+    read_value(HKEY_LOCAL_MACHINE, WINDOWS_NT,     "AppInit_DLLs", "AppInit_DLLs",         1, NULL, &c);
+    read_value(HKEY_LOCAL_MACHINE, WINDOWS_NT_WOW, "AppInit_DLLs", "AppInit_DLLs (WOW64)", 1, NULL, &c);
 
     // BootExecute: native programs smss.exe runs before Windows is up (stock:
     // "autocheck autochk *"). Anything else runs extremely early and privileged.
-    static const WCHAR SESSMGR[] = L"SYSTEM\\CurrentControlSet\\Control\\Session Manager";
-    read_multi_sz(HKEY_LOCAL_MACHINE, SESSMGR, L"BootExecute", "BootExecute", def_bootexecute, &c);
+    static const char SESSMGR[] = "SYSTEM\\CurrentControlSet\\Control\\Session Manager";
+    read_multi_sz(HKEY_LOCAL_MACHINE, SESSMGR, "BootExecute", "BootExecute", def_bootexecute, &c);
 
     // LSA packages: DLLs lsass.exe loads - authentication, password-change
     // notification and security support providers. An extra entry here can see
     // credentials (MITRE T1547.002/.005), so we compare against the stock lists.
-    static const WCHAR LSA[]     = L"SYSTEM\\CurrentControlSet\\Control\\Lsa";
-    static const WCHAR LSA_OSC[] = L"SYSTEM\\CurrentControlSet\\Control\\Lsa\\OSConfig";
-    read_multi_sz(HKEY_LOCAL_MACHINE, LSA,     L"Authentication Packages", "LSA", def_lsa_auth, &c);
-    read_multi_sz(HKEY_LOCAL_MACHINE, LSA,     L"Notification Packages",   "LSA", def_lsa_notify, &c);
-    read_multi_sz(HKEY_LOCAL_MACHINE, LSA,     L"Security Packages",       "LSA", def_lsa_security, &c);
-    read_multi_sz(HKEY_LOCAL_MACHINE, LSA_OSC, L"Security Packages",       "LSA\\OSConfig", def_lsa_security, &c);
+    static const char LSA[]     = "SYSTEM\\CurrentControlSet\\Control\\Lsa";
+    static const char LSA_OSC[] = "SYSTEM\\CurrentControlSet\\Control\\Lsa\\OSConfig";
+    read_multi_sz(HKEY_LOCAL_MACHINE, LSA,     "Authentication Packages", "LSA", def_lsa_auth, &c);
+    read_multi_sz(HKEY_LOCAL_MACHINE, LSA,     "Notification Packages",   "LSA", def_lsa_notify, &c);
+    read_multi_sz(HKEY_LOCAL_MACHINE, LSA,     "Security Packages",       "LSA", def_lsa_security, &c);
+    read_multi_sz(HKEY_LOCAL_MACHINE, LSA_OSC, "Security Packages",       "LSA\\OSConfig", def_lsa_security, &c);
 
     // Print monitors: DLLs the spooler (SYSTEM) loads at start (T1547.010).
-    static const WCHAR MONITORS[] = L"SYSTEM\\CurrentControlSet\\Control\\Print\\Monitors";
-    enum_subkey_value(HKEY_LOCAL_MACHINE, MONITORS, L"Driver", "Print Monitors", 0,
+    static const char MONITORS[] = "SYSTEM\\CurrentControlSet\\Control\\Print\\Monitors";
+    enum_subkey_value(HKEY_LOCAL_MACHINE, MONITORS, "Driver", "Print Monitors", 0,
                       def_print_monitor, &c);
 
     // NetSh helper DLLs: loaded whenever netsh.exe runs (T1546.007).
-    enum_value_dlls(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\NetSh", "NetSh helpers",
+    enum_value_dlls(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\NetSh", "NetSh helpers",
                     0, def_netsh_helper, &c);
 
     // AppCertDlls: loaded into every process that calls CreateProcess*
     // (T1546.009). Windows ships none, so any value is unusual.
     enum_value_dlls(HKEY_LOCAL_MACHINE,
-                    L"SYSTEM\\CurrentControlSet\\Control\\Session Manager\\AppCertDlls",
+                    "SYSTEM\\CurrentControlSet\\Control\\Session Manager\\AppCertDlls",
                     "AppCertDlls", 1, NULL, &c);
 
     // cmd.exe AutoRun: a command run every time cmd.exe starts (unless /D).
     // Not set by Windows; any value deserves a look.
-    static const WCHAR CMDPROC[] = L"SOFTWARE\\Microsoft\\Command Processor";
-    read_value(HKEY_LOCAL_MACHINE, CMDPROC, L"AutoRun", "HKLM\\...\\Command Processor", 1, NULL, &c);
-    read_value(HKEY_CURRENT_USER,  CMDPROC, L"AutoRun", "HKCU\\...\\Command Processor", 1, NULL, &c);
+    static const char CMDPROC[] = "SOFTWARE\\Microsoft\\Command Processor";
+    read_value(HKEY_LOCAL_MACHINE, CMDPROC, "AutoRun", "HKLM\\...\\Command Processor", 1, NULL, &c);
+    read_value(HKEY_CURRENT_USER,  CMDPROC, "AutoRun", "HKCU\\...\\Command Processor", 1, NULL, &c);
 
     // Logon script set per user in HKCU\Environment (T1037.001): runs at
     // logon without touching any Run key.
-    read_value(HKEY_CURRENT_USER, L"Environment", L"UserInitMprLogonScript",
+    read_value(HKEY_CURRENT_USER, "Environment", "UserInitMprLogonScript",
                "HKCU\\Environment", 1, NULL, &c);
 
     // Active Setup: StubPath commands run once per user at logon (T1547.014).
     // Windows and many installers use it, so only user-writable paths stand out.
     enum_subkey_value(HKEY_LOCAL_MACHINE,
-                      L"SOFTWARE\\Microsoft\\Active Setup\\Installed Components",
-                      L"StubPath", "Active Setup", 0, NULL, &c);
+                      "SOFTWARE\\Microsoft\\Active Setup\\Installed Components",
+                      "StubPath", "Active Setup", 0, NULL, &c);
     enum_subkey_value(HKEY_LOCAL_MACHINE,
-                      L"SOFTWARE\\Wow6432Node\\Microsoft\\Active Setup\\Installed Components",
-                      L"StubPath", "Active Setup (WOW64)", 0, NULL, &c);
+                      "SOFTWARE\\Wow6432Node\\Microsoft\\Active Setup\\Installed Components",
+                      "StubPath", "Active Setup (WOW64)", 0, NULL, &c);
 
     // Time providers: DLLs the W32Time service (svchost, LOCAL SERVICE) loads
     // (T1547.003). Stock: NtpClient/NtpServer -> System32\w32time.dll and the
     // Hyper-V provider vmictimeprovider.dll.
     enum_subkey_value(HKEY_LOCAL_MACHINE,
-                      L"SYSTEM\\CurrentControlSet\\Services\\W32Time\\TimeProviders",
-                      L"DllName", "Time Providers", 0, asep_time_provider_default, &c);
+                      "SYSTEM\\CurrentControlSet\\Services\\W32Time\\TimeProviders",
+                      "DllName", "Time Providers", 0, asep_time_provider_default, &c);
 
     // Screensaver: Windows runs SCRNSAVE.EXE after idle time (T1546.002); a
     // .scr is just a PE file. Flagged when it lives in a user-writable dir.
-    read_value(HKEY_CURRENT_USER, L"Control Panel\\Desktop", L"SCRNSAVE.EXE",
+    read_value(HKEY_CURRENT_USER, "Control Panel\\Desktop", "SCRNSAVE.EXE",
                "HKCU\\Control Panel\\Desktop", 0, NULL, &c);
 
     // Executable file association: how Explorer opens an .exe. Stock value is
     // "%1" %*; anything else wraps every program start (Autoruns' "Hijacks").
-    read_value(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Classes\\exefile\\shell\\open\\command", L"",
+    read_value(HKEY_LOCAL_MACHINE, "SOFTWARE\\Classes\\exefile\\shell\\open\\command", "",
                "HKLM\\Classes\\exefile", 0, asep_exefile_default, &c);
     // Per-user overrides of protocol / file handlers that elevated Windows
     // programs consult (ms-settings is read by fodhelper/computerdefaults,
     // exefile by many). Windows creates none of these under HKCU, so any
     // value is a documented UAC-bypass / hijack pattern (T1548.002, T1546.001).
-    read_value(HKEY_CURRENT_USER, L"Software\\Classes\\ms-settings\\Shell\\Open\\command", L"",
+    read_value(HKEY_CURRENT_USER, "Software\\Classes\\ms-settings\\Shell\\Open\\command", "",
                "HKCU\\Classes\\ms-settings", 1, NULL, &c);
-    read_value(HKEY_CURRENT_USER, L"Software\\Classes\\exefile\\shell\\open\\command", L"",
+    read_value(HKEY_CURRENT_USER, "Software\\Classes\\exefile\\shell\\open\\command", "",
                "HKCU\\Classes\\exefile", 1, NULL, &c);
 
     // "Office test" key: a DLL every Office application loads at start
     // (T1137.002). Not created by Office itself.
-    read_value(HKEY_CURRENT_USER,  L"Software\\Microsoft\\Office test\\Special\\Perf", L"",
+    read_value(HKEY_CURRENT_USER,  "Software\\Microsoft\\Office test\\Special\\Perf", "",
                "HKCU\\Office test", 1, NULL, &c);
-    read_value(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Office test\\Special\\Perf", L"",
+    read_value(HKEY_LOCAL_MACHINE, "Software\\Microsoft\\Office test\\Special\\Perf", "",
                "HKLM\\Office test", 1, NULL, &c);
 
     // Startup folders: per-user and all-users. Files here run at logon.
-    {
+    if (!offline) {
         char base[MAX_PATH], dir[MAX_PATH];
         if (GetEnvironmentVariableA("APPDATA", base, sizeof base) > 0) {
             snprintf(dir, sizeof dir, "%s\\Microsoft\\Windows\\Start Menu\\Programs\\Startup", base);
@@ -627,6 +651,9 @@ int cmd_autoruns(int argc, char **argv)
                c.count, c.count == 1 ? "y" : "ies", c.flagged);
     } else if (mode == AR_JSON) {
         puts("]");
+    }
+    for (int i = 0; i < 3; i++) {
+        if (offline ? files[i] != NULL : 1) regsrc_close(srcs[i]);
     }
     return 0;
 }

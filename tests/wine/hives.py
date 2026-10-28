@@ -104,6 +104,20 @@ rc, out = run('usb', '--hive', hive('SYSTEM'), '--json')
 u = json.loads(out)
 check(u and 'E:' in u[0]['mounted_as'] and u[0]['last_connected'] is None, 'usb (Win7): drive letter via MountedDevices, no devprop times')
 
+rc, out = run('autoruns', '--software', hive('SOFTWARE'), '--system', hive('SYSTEM'), '--ntuser', hive('NTUSER.DAT'), '--json')
+ar = json.loads(out)
+runs = [r['name'] for r in ar if r['location'] == 'HKLM\\...\\Run']
+check(runs == ['VMware Tools', 'VMware User Process', 'Adobe ARM', 'McAfeeUpdaterUI', 'ShStatEXE',
+               'McAfee Host Intrusion Prevention Tray', 'svchost'], 'autoruns offline: HKLM Run values as regipy lists them')
+sv = [r for r in ar if r['name'] == 'svchost']
+check(sv and 'masquerading' in sv[0]['reason'], 'autoruns: c:\\windows\\system32\\dllhost\\svchost.exe flagged as masquerading')
+check(any(r['name'] == 'Sidebar' and r['location'].startswith('HKCU') for r in ar), 'autoruns: HKCU Run from NTUSER.DAT')
+check(any(r['name'] == 'Userinit' and not r['suspicious'] for r in ar), 'autoruns: stock Userinit from another machine not flagged')
+lsa = [r['command'] for r in ar if r['location'] == 'LSA' and r['name'] == 'Security Packages']
+check(lsa == ['kerberos', 'msv1_0', 'schannel', 'wdigest', 'tspkg', 'pku2u'], 'autoruns: LSA Security Packages')
+rc, out = run('autoruns', '--software', hive('SOFTWARE'), '--sig')
+check(rc == 1, 'autoruns: --sig refused with offline hives')
+
 rc, out = run('hive', hive('NTUSER.DAT'), 'Software\\Microsoft\\Windows\\CurrentVersion\\Run', '--json')
 h = json.loads(out)
 check(h['checksum_ok'] and not h['dirty'] and h['keys'][0]['values'][0]['name'] == 'Sidebar', 'hive: Run key browse')

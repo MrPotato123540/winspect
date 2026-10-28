@@ -57,6 +57,13 @@ int asep_exefile_default(const char *cmd);
 // ("%systemroot%\system32\w32time.dll").
 int asep_time_provider_default(const char *dll);
 
+// 1 if an image path uses the name of a core Windows binary that only ever
+// lives directly in System32 / SysWOW64 (see lineage_system32_only) but sits
+// somewhere else - including a SUBdirectory of System32, a favourite trick:
+// "C:\Windows\System32\dllhost\svchost.exe". Bare names and
+// %SystemRoot%-style paths to the real folder are fine.
+int asep_masquerade(const char *image);
+
 // ---- Process lineage rules ("Hunt Evil") --------------------------------------
 // Known-good parent for core Windows processes, from the public SANS "Hunt
 // Evil" / "Find Evil" guidance: lsass and services are started by wininit,

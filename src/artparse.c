@@ -352,6 +352,18 @@ int lineage_started_late(const char *name, uint64_t seconds_after_boot)
     return 0;
 }
 
+int asep_masquerade(const char *image)
+{
+    const char *base = strrchr(image, '\\');
+    if (base == NULL) return 0;                        // bare name: search path
+    if (!lineage_system32_only(base + 1)) return 0;
+    // Directory part must END in \System32 or \SysWOW64.
+    size_t dl = (size_t)(base - image);
+    if (dl >= 9 && ieq_prefix(base - 9, "\\System32")) return 0;
+    if (dl >= 9 && ieq_prefix(base - 9, "\\SysWOW64")) return 0;
+    return 1;
+}
+
 // ---- posture rules ----------------------------------------------------------
 
 posture_status posture_judge(posture_op op, uint32_t arg, int present, uint32_t value,

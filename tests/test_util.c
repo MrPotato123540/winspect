@@ -591,6 +591,13 @@ int main(void)
             check_str("amc sha1 cleared", sh, "");
             check_int("amc sha1 bad prefix", amcache_sha1("1111056f4b9d9ec9b5dc548e1b460da889e44089d76f", sh), 0);
         }
+        check_int("masq subdir", asep_masquerade("c:\\windows\\system32\\dllhost\\svchost.exe"), 1);
+        check_int("masq real", asep_masquerade("C:\\Windows\\System32\\svchost.exe"), 0);
+        check_int("masq env", asep_masquerade("%SystemRoot%\\system32\\lsass.exe"), 0);
+        check_int("masq wow", asep_masquerade("C:\\Windows\\SysWOW64\\rundll32.exe"), 0);
+        check_int("masq bare", asep_masquerade("svchost.exe"), 0);
+        check_int("masq temp", asep_masquerade("C:\\Users\\a\\AppData\\Local\\Temp\\lsass.exe"), 1);
+        check_int("masq other name", asep_masquerade("C:\\Tools\\svc.exe"), 0);
         check_int("lin lsass ok", lineage_parent_ok("lsass.exe", "wininit.exe"), 1);
         check_int("lin lsass bad", lineage_parent_ok("LSASS.EXE", "explorer.exe"), 0);
         check_int("lin svchost ok", lineage_parent_ok("svchost.exe", "services.exe"), 1);

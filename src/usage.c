@@ -281,7 +281,14 @@ static const struct { const char *name, *text; } usage_table[] = {
         "A transparent subset of what Sysinternals Autoruns inspects.\n"
         "--sig verifies the signature of what each entry runs (Autoruns' \"Verify\n"
         "code signatures\") and flags untrusted images and images whose file is gone.\n"
-        "Usage: winspect autoruns [--flagged] [--sig] [--json | --csv]\n" },
+        "Entries named like a core Windows binary but placed outside System32 (e.g.\n"
+        "System32\\dllhost\\svchost.exe) are flagged as masquerading.\n"
+        "Offline: --software / --system / --ntuser read hive FILES instead of the\n"
+        "live registry (any combination; Startup folders and --sig need the live\n"
+        "machine and are skipped / refused).\n"
+        "Usage: winspect autoruns [--flagged] [--sig] [--json | --csv]\n"
+        "       winspect autoruns [--software <SOFTWARE>] [--system <SYSTEM>] [--ntuser <NTUSER.DAT>]\n"
+        "                         [--flagged] [--json | --csv]\n" },
     { "tasks",
         "winspect tasks - list scheduled tasks by reading their XML definitions under\n"
         "%SystemRoot%\\System32\\Tasks, pulling out the command, arguments and author,\n"
