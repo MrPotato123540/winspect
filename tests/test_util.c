@@ -20,6 +20,7 @@
 #include "imphash_ords.h"
 #include "pfparse.h"
 #include "artparse.h"
+#include "jsonmini.h"
 #include "capa.h"
 #include "lnkparse.h"
 #include "destlist.h"
@@ -828,6 +829,57 @@ int main(void)
                 check_int("acct nopw", account_reason("bob", 1001, 0, 1, 0) != NULL, 1);
                 check_int("acct normal", account_reason("bob", 1001, 0, 0, 0) == NULL, 1);
                 check_int("acct lone dollar", account_reason("$", 1001, 0, 0, 0) == NULL, 1);
+            }
+            {
+                const char *js = " {\"a\":[1,-2.5e2,true,false,null,\"x\\\"y\\\\z\\u00e9\\ud83d\\ude00\"],"
+                                 "\"o\":{\"k\":\"v\"},\"e\":[],\"eo\":{}} ";
+                jm_node *r = jm_parse(js, strlen(js));
+                check_int("jm parse", r != NULL, 1);
+                if (r) {
+                    const jm_node *arr = jm_get(r, "a");
+                    check_int("jm arr", arr && arr->type == JM_ARR, 1);
+                    const jm_node *e = arr ? arr->child : NULL;
+                    check_int("jm num", e && e->type == JM_NUM && e->num == 1.0, 1);
+                    e = e ? e->next : NULL;
+                    check_int("jm exp", e && e->num == -250.0, 1);
+                    e = e ? e->next : NULL;
+                    check_int("jm true", e && e->type == JM_BOOL && e->boolean == 1, 1);
+                    e = e ? e->next : NULL;
+                    check_int("jm false", e && e->type == JM_BOOL && e->boolean == 0, 1);
+                    e = e ? e->next : NULL;
+                    check_int("jm null", e && e->type == JM_NULL, 1);
+                    e = e ? e->next : NULL;
+                    check_str("jm escapes", e && e->str ? e->str : "", "x\"y\\z\xc3\xa9\xf0\x9f\x98\x80");
+                    check_str("jm nested", jm_gets(jm_get(r, "o"), "k") ? jm_gets(jm_get(r, "o"), "k") : "", "v");
+                    check_int("jm empty arr", jm_get(r, "e") && jm_get(r, "e")->child == NULL, 1);
+                    check_int("jm missing", jm_get(r, "zz") == NULL && jm_gets(r, "a") == NULL, 1);
+                    jm_free(r);
+                }
+                static const char *const bad[] = {
+                    "", "{", "[1,]", "{\"a\":}", "{\"a\" 1}", "[01]", "[1.]", "[.5]", "[1e]", "\"abc",
+                    "\"a\\x\"", "\"a\\u12G4\"", "[tru]", "nul", "{} x", "[\"\t\"]", "{1:2}", "[-]",
+                };
+                for (size_t i = 0; i < sizeof bad / sizeof bad[0]; i++) {
+                    jm_node *x = jm_parse(bad[i], strlen(bad[i]));
+                    char nm[64];
+                    snprintf(nm, sizeof nm, "jm reject %zu", i);
+                    check_int(nm, x == NULL, 1);
+                    jm_free(x);
+                }
+                char deep[200];
+                memset(deep, '[', 100); memset(deep + 100, ']', 100);
+                check_int("jm depth limit", jm_parse(deep, 200) == NULL, 1);
+                jm_node *ok = jm_parse(deep + 40, 120);         // 60 levels
+                check_int("jm depth ok", ok != NULL, 1);
+                jm_free(ok);
+                check_int("jm truncated len", jm_parse("[1,2]", 4) == NULL, 1);
+                // Found by tests/jm_diff.py: a broken escape after a high
+                // surrogate was replaced by '?' instead of being rejected.
+                const char *bh = "\"\\ud83d\\ude:0\"", *lh = "\"\\ud83d\\u0041\"";
+                check_int("jm bad escape after high", jm_parse(bh, strlen(bh)) == NULL, 1);
+                jm_node *lone = jm_parse(lh, strlen(lh));
+                check_str("jm lone high then char", lone && lone->str ? lone->str : "", "?A");
+                jm_free(lone);
             }
         }
         check_int("rmm office", rmm_tool_name("Microsoft Office Professional Plus 2010") == NULL, 1);

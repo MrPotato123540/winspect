@@ -593,6 +593,38 @@ except Exception as e:
     print('FAIL hidden check:', e, out[:200]); fails += 1
 wine(['reg', 'delete', skey, '/f'])
 
+# timeline: the fixtures above merged into one newest-first list; the
+# source's "suspicious" mark survives; --since / --sources filter.
+rc, out, err = wine([exe, 'timeline', '--json'], timeout=600)
+try:
+    tlr = json.loads(out)
+    times = [r['time'] for r in tlr]
+    evil = [r for r in tlr if r['source'] == 'prefetch' and 'EVIL.EXE' in r['event']]
+    drop = [r for r in tlr if r['source'] == 'recyclebin' and 'dropper.exe' in r['event']]
+    sc = [r for r in tlr if r['source'] == 'shimcache']
+    psr = [r for r in tlr if r['source'] == 'pshistory']
+    if times != sorted(times, reverse=True):
+        print('FAIL timeline: not newest first'); fails += 1
+    elif len(evil) != 2 or not all(r['suspicious'] for r in evil):
+        print(f'FAIL timeline: prefetch EVIL.EXE should give 2 flagged runs: {evil}'); fails += 1
+    elif not drop or not drop[0]['suspicious'] or drop[0]['time'] != '2023-11-14 22:13:20':
+        print(f'FAIL timeline: recyclebin deletion missing/wrong: {drop}'); fails += 1
+    elif not sc or not all('not a run time' in r['event'] for r in sc):
+        print(f'FAIL timeline: shimcache rows must say they are not run times: {sc[:1]}'); fails += 1
+    elif len(psr) != 1 or not psr[0]['suspicious']:
+        print(f'FAIL timeline: one flagged PowerShell history row expected: {psr}'); fails += 1
+    else:
+        rc2, out2, _ = wine([exe, 'timeline', '--sources', 'recyclebin,prefetch', '--since', '1', '--json'], timeout=300)
+        rc3, out3, _ = wine([exe, 'timeline', '--sources', 'recyclebin', '--json'], timeout=300)
+        rc4, _, _ = wine([exe, 'timeline', '--sources', 'nosuch'])
+        r3 = json.loads(out3)
+        if json.loads(out2) != [] or {r['source'] for r in r3} != {'recyclebin'} or len(r3) != 2 or rc4 == 0:
+            print(f'FAIL timeline filters: since={out2[:100]} sources={out3[:200]} rc_unknown={rc4}'); fails += 1
+        else:
+            print(f'checked timeline --json  ({len(tlr)} rows, order, marks, --since/--sources)')
+except Exception as e:
+    print('FAIL timeline check:', e, out[:200]); fails += 1
+
 # sweep: one valid JSON document with every check as a key; checks that
 # cannot run under wine (WMI, event logs) must be null or empty, not broken.
 rc, out, err = wine([exe, 'sweep', '--json'], timeout=600)

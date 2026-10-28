@@ -69,6 +69,9 @@ Sırayla oku. Her dosya bir öncekinin üstüne kurulu:
     PowerShell komut geçmişi (`pshistory`), Geri Dönüşüm Kutusu (`recyclebin`),
     BITS işleri (`bits`), COM hijacking (`comhijack`) ve yerel hesaplar (`users`):
     kurallar, doğrulama, sınırlar.
+22. **[21 — Zaman çizelgesi](21-zaman-cizelgesi.md)**
+    `timeline`: kanıt komutlarının zamanlarını tek sıralı listede birleştirmek;
+    hangi zaman ne anlama gelir; küçük JSON okuyucu ve diferansiyel testi.
 
 ## Aklında tut: tek cümlelik fikir
 

@@ -34,6 +34,7 @@ that shows it.
 | `winspect events [--max <n>] [--since <h>] [--summary] [--json\|--csv]` | high-signal event-log timeline (`--summary`: failed logons per source, flags guessing / spraying): services installed, logs cleared, failed logons, accounts created / added to admin groups, tasks created, Defender detections, RDP logons, PowerShell blocks Windows flagged as suspicious |
 | `winspect hidden [--json\|--csv]` | cross-view detection: processes missing from the Toolhelp snapshot but present natively / openable by PID, services in the registry that the SCM does not list (restrictive SDDL, or written straight into the registry) |
 | `winspect sweep [--json]` | **one-shot machine triage**: posture, hunt, hidden, net, flagged autoruns/services/tasks/taskcache/firewall/prefetch, Defender, WMI, flagged accounts / COM hijacks / BITS jobs / PowerShell history (all users) / Recycle Bin, and events in one report (one JSON object with `--json`; checks that cannot run are `null`) |
+| `winspect timeline [--since <hours>] [--sources a,b] [--flagged] [--json\|--csv]` | **merged timeline** (UTC, newest first) from prefetch, bam, userassist, shimcache (file mtime, labelled as such), jumplist, lnk, shellbags, recyclebin, usb, rdp, mru, PowerShell history, users, BITS, tasks, per-user COM and events; each source's suspicious mark is kept |
 | `winspect strings <path> [-n <len>] [--ioc] [--json\|--csv]` | printable ASCII + UTF-16 strings, tagging URLs, IPs, registry/file paths, base64 blobs and encoded PowerShell (`--ioc` shows only tagged ones) |
 | `winspect services [--drivers] [--flagged] [--sig] [--hive <SYSTEM>] [--json\|--csv]` | services with state, start type, account and binary path (+ svchost ServiceDll); flags unquoted paths with spaces and user-writable binaries; `--sig` verifies the binary / ServiceDll signature |
 | `winspect drivers [--sig] [--json\|--csv]` | loaded kernel drivers; flags missing/user-writable files, `--sig` checks each driver's signature |
@@ -93,6 +94,7 @@ winspect sign --scan C:\Tools --json       :: find untrusted executables in a fo
 winspect net --established                 :: live TCP connections + owning process
 winspect help <command>                    :: what a command does + its options
 winspect sweep                             :: everything system-wide, findings only
+winspect timeline --since 48 --flagged     :: what happened in the last two days, flagged rows only
 winspect autoruns                          :: registry auto-start entries
 winspect strings sample.bin --ioc          :: only the tagged (URL/IP/path/base64...) strings
 ```

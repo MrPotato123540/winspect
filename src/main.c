@@ -91,6 +91,7 @@
 #include "bitsjobs.h"
 #include "comhijack.h"
 #include "users.h"
+#include "timeline.h"
 #include "tasks.h"
 
 // cmd_modules lives in modules.c: a live process's loaded modules
@@ -230,6 +231,7 @@ static const struct {
     { "lnk",      cmd_lnk,      "shortcut files (default: Recent folder)",  "file" },
     { "streams",  cmd_streams,  "alternate data streams + Mark-of-the-Web", "file" },
     { "jumplist", cmd_jumplist, "Jump Lists: recent items per application",  "file" },
+    { "timeline", cmd_timeline, "merged, time-ordered evidence (UTC)",        "security" },
     { "users",    cmd_users,    "local accounts: admin, last logon, flags",  "security" },
     { "comhijack",cmd_comhijack,"per-user COM classes overriding HKLM ones",  "security" },
     { "bits",     cmd_bits,     "BITS jobs: files, owner, notify command",   "security" },

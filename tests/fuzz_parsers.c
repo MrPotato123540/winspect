@@ -14,6 +14,7 @@
 
 #include "pfparse.h"
 #include "artparse.h"
+#include "jsonmini.h"
 #include "lnkparse.h"
 #include "destlist.h"
 #include "regf.h"
@@ -337,6 +338,7 @@ int main(int argc, char **argv)
                 com_path_same(text, "shell32.dll");
                 com_path_same("C:\\Windows\\System32\\x.dll", text);
                 bits_reason(text, text, text);
+                jm_free(jm_parse(text, n));
             }
             ioc_command_image(text, out, sizeof out);
             ioc_user_writable(text);

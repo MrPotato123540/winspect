@@ -67,6 +67,9 @@ add_executable(winspect
     src/bitsjobs.c
     src/comhijack.c
     src/users.c
+    src/capture.c
+    src/jsonmini.c
+    src/timeline.c
     src/jumplist.c
     src/tasks.c
     src/modules.c

@@ -61,6 +61,18 @@ static const struct { const char *name, *text; } usage_table[] = {
         "each item also shows its target, arguments and timestamps. Flags items that\n"
         "launch a script host or point into a user-writable dir. Read-only. Usage:\n"
         "  winspect jumplist [<file | folder>] [--json | --csv]\n" },
+    { "timeline",
+        "winspect timeline - one time-ordered view of what the evidence commands\n"
+        "already know: program runs (prefetch, bam, userassist), files opened and\n"
+        "folders browsed (jumplist, lnk, shellbags), deletions (recyclebin), USB\n"
+        "devices, RDP connections, Run-box entries, PowerShell history, logons and\n"
+        "password changes (users), BITS jobs, scheduled task registrations,\n"
+        "per-user COM registrations and high-signal events. Each source command is\n"
+        "run with --json and its timestamps become rows (UTC, newest first); a row\n"
+        "keeps the source's \"suspicious\" mark. Per-user sources read the CURRENT\n"
+        "user. --since keeps the last <hours>; --sources picks a comma-separated\n"
+        "subset. Read-only (it only calls read-only commands). Usage:\n"
+        "  winspect timeline [--since <hours>] [--sources a,b,...] [--flagged] [--json | --csv]\n" },
     { "users",
         "winspect users - local accounts: name, RID, enabled, member of the local\n"
         "Administrators group, last logon, password last set, logon and bad-password\n"

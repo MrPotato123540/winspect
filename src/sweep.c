@@ -12,6 +12,7 @@
 // key gets null, otherwise the captured JSON is copied in.
 
 #include "sweep.h"
+#include "capture.h"
 #include "posture.h"
 #include "hunt.h"
 #include "hidden.h"
@@ -32,7 +33,6 @@
 #include "users.h"
 
 #include <windows.h>
-#include <io.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -80,41 +80,6 @@ static int build_args(const check *c, const char *extra, char **argv, int cap)
     return n;
 }
 
-// Runs fn with stdout redirected to a temp file; returns the captured text
-// (malloc'd, may be empty) and the command's exit code via *rc.
-static char *run_captured(cmd_fn fn, int argc, char **argv, int *rc)
-{
-    *rc = 1;
-    FILE *tmp = tmpfile();
-    if (tmp == NULL) return NULL;
-    fflush(stdout);
-    int saved = _dup(_fileno(stdout));
-    // _dup2 returns 0 on success, not a new descriptor (GCC's -fanalyzer models
-    // it as dup2 and reports a bogus fd leak here).
-    if (saved < 0 || _dup2(_fileno(tmp), _fileno(stdout)) != 0) {
-        if (saved >= 0) _close(saved);
-        fclose(tmp);
-        return NULL;
-    }
-    *rc = fn(argc, argv);
-    fflush(stdout);
-    _dup2(saved, _fileno(stdout));
-    _close(saved);
-
-    long len = 0;
-    char *text = NULL;
-    if (fseek(tmp, 0, SEEK_END) == 0 && (len = ftell(tmp)) >= 0 &&
-            fseek(tmp, 0, SEEK_SET) == 0) {
-        text = (char *)malloc((size_t)len + 1);
-        if (text != NULL) {
-            size_t got = fread(text, 1, (size_t)len, tmp);
-            text[got] = '\0';
-        }
-    }
-    fclose(tmp);
-    return text;
-}
-
 int cmd_sweep(int argc, char **argv)
 {
     int json = 0;
@@ -150,7 +115,7 @@ int cmd_sweep(int argc, char **argv)
         char *av[4];
         int ac = build_args(&checks[i], "--json", av, 4);
         int rc = 1;
-        char *text = run_captured(checks[i].fn, ac, av, &rc);
+        char *text = capture_stdout(checks[i].fn, ac, av, &rc);
         // Trim trailing whitespace so the captured document nests cleanly.
         size_t L = text ? strlen(text) : 0;
         while (L > 0 && (text[L - 1] == '\n' || text[L - 1] == '\r' || text[L - 1] == ' ')) {

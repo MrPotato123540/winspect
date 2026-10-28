@@ -90,7 +90,9 @@ cases += [['ssn','NtOpenProcess'], ['ssn','NtOpenProcess','--json'], ['modules',
           ['comhijack'], ['comhijack','--all','--csv'], ['comhijack','--flagged','--json'], ['comhijack','--software','x'],
           ['comhijack','--usrclass','C:\\nonexistent'], ['comhijack','--usrclass','C:\\windows\\win.ini'], ['comhijack','x'],
           ['users'], ['users','--csv'], ['users','--flagged','--json'], ['users','--sam','C:\\nonexistent'],
-          ['users','--sam','C:\\windows\\win.ini'], ['users','--sam'], ['users','x']]
+          ['users','--sam','C:\\windows\\win.ini'], ['users','--sam'], ['users','x'],
+          ['timeline'], ['timeline','--csv'], ['timeline','--flagged','--json'], ['timeline','--since','24'],
+          ['timeline','--since','-5'], ['timeline','--sources','bam,mru'], ['timeline','--sources','bogus'], ['timeline','--since']]
 
 bad = 0
 for args in cases:
