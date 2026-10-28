@@ -599,7 +599,7 @@ rc, out, err = wine([exe, 'sweep', '--json'], timeout=600)
 try:
     d = json.loads(out)
     want = ['posture', 'hunt', 'hidden', 'net', 'autoruns', 'services', 'tasks', 'taskcache',
-            'firewall', 'prefetch', 'defender', 'wmi', 'comhijack', 'bits', 'pshistory', 'recyclebin', 'events']
+            'firewall', 'prefetch', 'defender', 'wmi', 'users', 'comhijack', 'bits', 'pshistory', 'recyclebin', 'events']
     missing = [k for k in want if k not in d]
     if missing:
         print(f'FAIL sweep: missing keys {missing}'); fails += 1

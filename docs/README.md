@@ -67,7 +67,8 @@ Sırayla oku. Her dosya bir öncekinin üstüne kurulu:
     okumak; `hive` komutu ve `--hive` seçenekleri; gerçek hive'larla doğrulama.
 21. **[20 — Kullanıcı izleri ve sessiz kalıcılık](20-kullanici-izleri.md)**
     PowerShell komut geçmişi (`pshistory`), Geri Dönüşüm Kutusu (`recyclebin`),
-    BITS işleri (`bits`) ve COM hijacking (`comhijack`): kurallar, doğrulama, sınırlar.
+    BITS işleri (`bits`), COM hijacking (`comhijack`) ve yerel hesaplar (`users`):
+    kurallar, doğrulama, sınırlar.
 
 ## Aklında tut: tek cümlelik fikir
 

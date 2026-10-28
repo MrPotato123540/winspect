@@ -183,6 +183,19 @@ db = [r for r in sb if r['path'] == 'Dropbox' and r['slot'] == 9]
 check(db and db[0]['mru_position'] == 4 and db[0]['key_written'] == '2018-04-05 02:13:26', 'shellbags: Dropbox root slot 9, MRU position 4 (regipy)')
 check(any(r['path'] == 'D:\\AKMonitor\\logs\\pic' for r in sb), 'shellbags: drive root + directory chain')
 check(any(r['path'] == 'User Files\\Google Drive' and r['created'] for r in sb), 'shellbags: CFSF delegate item name + times')
+# users offline: regipy's samparse / local_sid validation cases for SAM.
+# Only names (Names\<user> value TYPE = RID) and the F record are read.
+rc, out = run('users', '--sam', hive('SAM'), '--json')
+us = json.loads(out) if rc == 0 else {}
+acc = {a['rid']: a for a in us.get('accounts', [])}
+a5, a1k = acc.get(500), acc.get(1000)
+check(us.get('machine_sid') == 'S-1-5-21-1760460187-1592185332-161725925', f"users --sam: machine SID {us.get('machine_sid')} (regipy local_sid)")
+check(len(acc) == 3 and a5 and a5['name'] == 'Administrator' and not a5['enabled'] and a5['password_never_expires']
+      and a5['last_logon'] == '2010-11-20 21:48:12' and a5['password_set'] == '2010-11-20 21:56:34' and a5['logons'] == 6,
+      'users --sam: RID 500 flags, times, logon count (regipy samparse)')
+check(a1k and a1k['enabled'] and a1k['last_logon'] == '2014-09-30 02:59:34' and a1k['password_set'] == '2014-09-24 03:35:45'
+      and a1k['logons'] == 4 and a1k['bad_passwords'] == 0, 'users --sam: RID 1000 times and counters (regipy samparse)')
+check(not any(a['suspicious'] for a in acc.values()), 'users --sam: nothing flagged (Guest disabled)')
 # comhijack offline: per-user COM classes in a real UsrClass.dat (OneDrive and
 # Dropbox register theirs per user, under AppData). Values were read from the
 # raw hive with tests/regf_dump.c; per-user-only classes must not be flagged.

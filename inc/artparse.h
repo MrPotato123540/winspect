@@ -286,4 +286,30 @@ int task_parse(const char *xml, task_info *t);
 // values, and a bare file name matches the same name in System32/SysWOW64.
 int com_path_same(const char *a, const char *b);
 
+// ---- SAM (local accounts) ---------------------------------------------------
+// The fixed-size "F" value of SAM\Domains\Account\Users\<RID>. It holds
+// times and counters only (the password hashes live in "V", which winspect
+// never reads):
+//   0x08 last logon | 0x18 password last set | 0x20 account expires |
+//   0x28 last failed logon (FILETIMEs) | 0x30 u32 RID | 0x38 u16 ACB flags |
+//   0x40 u16 bad password count | 0x42 u16 logon count
+typedef struct {
+    uint64_t last_logon, pw_set, expires, last_fail;
+    uint32_t rid;
+    uint16_t acb, bad, logons;
+} sam_f;
+#define SAM_ACB_DISABLED   0x0001
+#define SAM_ACB_PWNOTREQ   0x0004
+#define SAM_ACB_NORMAL     0x0010
+#define SAM_ACB_PWNOEXP    0x0200
+#define SAM_ACB_AUTOLOCK   0x0400
+int sam_parse_f(const unsigned char *d, size_t n, sam_f *f);
+// Machine SID from the LAST 12 bytes of SAM\Domains\Account's "V" value
+// (three sub-authorities of S-1-5-21-a-b-c). Returns 1 on success.
+int sam_machine_sid(const unsigned char *v, size_t n, char *out, size_t outn);
+// Reason to look at an account, or NULL: a name ending in '$' that is not a
+// machine/trust account (hidden from "net user"), an enabled Guest (RID 501),
+// an enabled account that needs no password.
+const char *account_reason(const char *name, uint32_t rid, int disabled, int pw_not_required, int machine);
+
 #endif

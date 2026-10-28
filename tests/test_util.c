@@ -797,6 +797,38 @@ int main(void)
             check_int("com x86 vs 64", com_path_same("%ProgramFiles(x86)%\\a.dll", "C:\\Program Files\\a.dll"), 0);
             check_int("com wow vs sys32", com_path_same("C:\\Windows\\SysWOW64\\a.dll", "C:\\Windows\\System32\\a.dll"), 0);
             check_int("com empty", com_path_same("", "a.dll"), 0);
+            {
+                unsigned char F[0x50];
+                memset(F, 0, sizeof F);
+                uint64_t ll = 129347632925692440ULL;     // F bytes as in regipy's SAM test hive
+                for (int k = 0; k < 8; k++) F[0x08 + k] = (unsigned char)(ll >> (8 * k));
+                F[0x30] = 0xF4; F[0x31] = 0x01; F[0x38] = 0x11; F[0x39] = 0x02; F[0x42] = 6;
+                sam_f sf;
+                char ts[32];
+                check_int("samf ok", sam_parse_f(F, sizeof F, &sf), 0);
+                check_int("samf rid", (int)sf.rid, 500);
+                check_int("samf acb", sf.acb, 529);
+                check_int("samf disabled", (sf.acb & SAM_ACB_DISABLED) != 0, 1);
+                check_int("samf logons", sf.logons, 6);
+                filetime_utc_str(sf.last_logon, ts, sizeof ts);
+                check_str("samf logon time", ts, "2010-11-20 21:48:12");
+                check_int("samf short", sam_parse_f(F, 0x43, &sf), -1);
+                unsigned char V[20] = { 0 };
+                V[8] = 0x9B; V[9] = 0x7D; V[10] = 0xEE; V[11] = 0x68;      // 1760460187
+                V[12] = 0xF4; V[13] = 0xD1; V[14] = 0xE6; V[15] = 0x5E;    // 1592185332
+                V[16] = 0xE5; V[17] = 0xBD; V[18] = 0xA3; V[19] = 0x09;    // 161725925
+                char sid[64];
+                check_int("sam sid ok", sam_machine_sid(V, sizeof V, sid, sizeof sid), 1);
+                check_str("sam sid", sid, "S-1-5-21-1760460187-1592185332-161725925");
+                check_int("sam sid short", sam_machine_sid(V, 11, sid, sizeof sid), 0);
+                check_int("acct dollar", account_reason("svc$", 1003, 1, 0, 0) != NULL, 1);
+                check_int("acct machine dollar", account_reason("PC01$", 1104, 0, 0, 1) == NULL, 1);
+                check_int("acct guest on", account_reason("Gast", 501, 0, 0, 0) != NULL, 1);
+                check_int("acct guest off", account_reason("Guest", 501, 1, 0, 0) == NULL, 1);
+                check_int("acct nopw", account_reason("bob", 1001, 0, 1, 0) != NULL, 1);
+                check_int("acct normal", account_reason("bob", 1001, 0, 0, 0) == NULL, 1);
+                check_int("acct lone dollar", account_reason("$", 1001, 0, 0, 0) == NULL, 1);
+            }
         }
         check_int("rmm office", rmm_tool_name("Microsoft Office Professional Plus 2010") == NULL, 1);
         check_int("rmm remote desktop conn", rmm_tool_name("Remote Desktop Connection") == NULL, 1);

@@ -88,7 +88,9 @@ cases += [['ssn','NtOpenProcess'], ['ssn','NtOpenProcess','--json'], ['modules',
           ['bits'], ['bits','--csv'], ['bits','--flagged','--json'], ['bits','x'],
           ['tasks','--dir','C:\\tasks_copy','--csv'], ['tasks','--dir','C:\\nonexistent'], ['tasks','--dir'],
           ['comhijack'], ['comhijack','--all','--csv'], ['comhijack','--flagged','--json'], ['comhijack','--software','x'],
-          ['comhijack','--usrclass','C:\\nonexistent'], ['comhijack','--usrclass','C:\\windows\\win.ini'], ['comhijack','x']]
+          ['comhijack','--usrclass','C:\\nonexistent'], ['comhijack','--usrclass','C:\\windows\\win.ini'], ['comhijack','x'],
+          ['users'], ['users','--csv'], ['users','--flagged','--json'], ['users','--sam','C:\\nonexistent'],
+          ['users','--sam','C:\\windows\\win.ini'], ['users','--sam'], ['users','x']]
 
 bad = 0
 for args in cases:

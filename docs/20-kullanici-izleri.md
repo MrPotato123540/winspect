@@ -1,4 +1,4 @@
-# 20 — Kullanıcı izleri ve sessiz kalıcılık: PowerShell geçmişi, Geri Dönüşüm Kutusu, BITS, COM hijacking
+# 20 — Kullanıcı izleri ve sessiz kalıcılık: PowerShell geçmişi, Geri Dönüşüm Kutusu, BITS, COM hijacking, yerel hesaplar
 
 Bu belge, bir kullanıcının (ya da onun hesabını kullanan birinin) bilgisayarda
 **ne yaptığını** gösteren düz dosya izlerini anlatır. İkisi de kayıt defteri
@@ -203,3 +203,52 @@ makinenin HKLM'siyle karşılaştırmak anlamsız olurdu.
   değeri ham hive dökümüyle aynı, hiçbiri işaretli değil.
 - Windows CI: Shortcut sınıfının kullanıcı başına kaydı oluşturulup işaretlenmesi
   beklenir, ardından silinir. Sınıf bu sürede hiç oluşturulmaz.
+
+## users — yerel hesaplar
+
+Saldırganlar kalıcılık için sık sık yerel hesap açar (T1136.001) ya da var olanı
+açar (Guest). `users` her yerel hesap için şunları gösterir:
+
+- RID, etkin mi, yerel **Administrators** üyesi mi;
+- son oturum, parolanın son değiştiği zaman, oturum ve hatalı parola sayısı;
+- makine SID'i.
+
+Administrators grubu adıyla değil, sabit SID'iyle (`S-1-5-32-544`) bulunur;
+grup adı dile göre değişir ("Administratoren", "Yöneticiler"…).
+
+İşaretler (`account_reason`, birim testli):
+
+| Gerekçe | Neden |
+|---|---|
+| name ends with `$` | `net user` listesinde görünmez (T1564.002). Bilgisayar/güven hesapları (`ACB_NORMAL` değil) hariç. |
+| Guest account is enabled | RID 501 etkin |
+| enabled account does not require a password | `UF_PASSWD_NOTREQD` / `ACB_PWNOTREQ` |
+
+### Çevrimdışı: `--sam`
+
+Kopyalanmış bir SAM hive'ından okunur. Burada **parola hash'lerine hiç
+dokunulmaz**; tasarım bunu garanti edecek şekilde seçildi:
+
+- Hesap adları `SAM\Domains\Account\Users\Names\<ad>` alt anahtarlarıdır.
+  Her birinin varsayılan değerinin verisi yoktur; değerin **tip alanı RID'dir**.
+  Böylece ad → RID eşlemesi için başka bir yapı okunmaz.
+- Zamanlar ve sayaçlar `Users\<RID>\F` değerindedir (sabit 0x50 bayt; şifreli
+  hiçbir şey yok). `sam_parse_f` ile okunur.
+- Hash'ler aynı anahtardaki `V` değerindedir. **`V` hiç okunmaz.**
+- Makine SID'i `SAM\Domains\Account` anahtarının `V` değerinin son 12
+  baytıdır. Bu, kullanıcı değil alan nesnesidir; parola içermez.
+- Grup üyeliği çevrimdışı gösterilmez (`admin: null`).
+
+**Doğrulama:**
+
+- 17 birim testi (F alanları, makine SID'i, `$` / Guest / parolasız kuralları,
+  makine hesabı ve tek `$` gibi negatifler).
+- regipy'nin SAM test hive'ı: `samparse` ve `local_sid` doğrulama
+  durumlarındaki değerlerin hepsi tuttu. 3 hesap; RID 500 devre dışı ve
+  "parola süresi dolmaz", son oturum 2010-11-20 21:48:12, parola 21:56:34, 6
+  oturum; RID 1000 son oturum 2014-09-30 02:59:34, 4 oturum; makine SID'i
+  S-1-5-21-1760460187-1592185332-161725925.
+- wine'ın NetUser API'si yalnızca level 0'ı destekliyor. Bu yüzden adlar level 0
+  ile listelenir, ayrıntı her hesap için level 3'ten (olmazsa 1'den) alınır.
+- Windows CI: devre dışı `wstest$` hesabı açılıp işaretlenmesi beklenir, sonra
+  silinir; en az bir Administrators üyesi ve makine SID'i beklenir.

@@ -1054,3 +1054,40 @@ int com_path_same(const char *a, const char *b)
     return strncmp(full, "c:\\windows\\system32\\", 20) == 0 ||
            strncmp(full, "c:\\windows\\syswow64\\", 20) == 0;
 }
+
+// ---- SAM (local accounts) ---------------------------------------------------
+
+int sam_parse_f(const unsigned char *d, size_t n, sam_f *f)
+{
+    memset(f, 0, sizeof *f);
+    if (n < 0x44) return -1;
+    f->last_logon = rd64(d + 0x08);
+    f->pw_set = rd64(d + 0x18);
+    f->expires = rd64(d + 0x20);
+    f->last_fail = rd64(d + 0x28);
+    f->rid = rd32(d + 0x30);
+    f->acb = (uint16_t)(d[0x38] | (d[0x39] << 8));
+    f->bad = (uint16_t)(d[0x40] | (d[0x41] << 8));
+    f->logons = (uint16_t)(d[0x42] | (d[0x43] << 8));
+    return 0;
+}
+
+int sam_machine_sid(const unsigned char *v, size_t n, char *out, size_t outn)
+{
+    out[0] = 0;
+    if (n < 12) return 0;
+    const unsigned char *t = v + n - 12;
+    snprintf(out, outn, "S-1-5-21-%u-%u-%u", (unsigned)rd32(t), (unsigned)rd32(t + 4), (unsigned)rd32(t + 8));
+    return 1;
+}
+
+const char *account_reason(const char *name, uint32_t rid, int disabled, int pw_not_required, int machine)
+{
+    size_t L = strlen(name);
+    if (L > 1 && name[L - 1] == '$' && !machine)
+        return "name ends with $ (hidden from \"net user\")";
+    if (disabled) return NULL;
+    if (rid == 501) return "Guest account is enabled";
+    if (pw_not_required) return "enabled account does not require a password";
+    return NULL;
+}

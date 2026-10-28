@@ -61,6 +61,16 @@ static const struct { const char *name, *text; } usage_table[] = {
         "each item also shows its target, arguments and timestamps. Flags items that\n"
         "launch a script host or point into a user-writable dir. Read-only. Usage:\n"
         "  winspect jumplist [<file | folder>] [--json | --csv]\n" },
+    { "users",
+        "winspect users - local accounts: name, RID, enabled, member of the local\n"
+        "Administrators group, last logon, password last set, logon and bad-password\n"
+        "counts, and the machine SID. Flags names ending in '$' that are not machine\n"
+        "accounts (hidden from \"net user\"), an enabled Guest and enabled accounts\n"
+        "that need no password. Live through the NetUser API; --sam reads a copied\n"
+        "SAM hive (only the account names and the fixed \"F\" record - the password\n"
+        "hashes are never read; group membership is not shown offline). Read-only.\n"
+        "Usage:\n"
+        "  winspect users [--sam <SAM>] [--flagged] [--json | --csv]\n" },
     { "comhijack",
         "winspect comhijack - per-user COM class registrations (HKCU\\Software\\Classes\n"
         "\\CLSID, also the WOW6432Node view) compared with the machine ones (HKLM).\n"
@@ -292,7 +302,7 @@ static const struct { const char *name, *text; } usage_table[] = {
     { "sweep",
         "winspect sweep - one-shot machine triage: runs the system-wide checks in\n"
         "\"findings only\" mode (posture --warn, hunt, hidden, net, autoruns/services/tasks/\n"
-        "taskcache/firewall/prefetch --flagged, defender, wmi, comhijack/bits/recyclebin --flagged,\n"
+        "taskcache/firewall/prefetch --flagged, defender, wmi, users/comhijack/bits/recyclebin --flagged,\n"
         "pshistory --all-users --flagged, events) and prints them as one\n"
         "report. With --json the result is a single object, one key per check; a\n"
         "check that could not run (e.g. needs elevation) is null instead of breaking\n"

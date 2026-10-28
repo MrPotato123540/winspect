@@ -459,7 +459,7 @@ kodu taşıyan **ServiceDll**'i doğrular.
 `winspect sweep` sistem çapındaki tüm kontrolleri **sadece bulgular** modunda
 sırayla çalıştırır: posture `--warn`, hunt, hidden, net `--flagged`, autoruns / services /
 tasks / taskcache / firewall `--flagged`, defender, wmi, bits / recyclebin
-`--flagged`, comhijack `--flagged`, pshistory `--all-users --flagged` (20.
+`--flagged`, users / comhijack `--flagged`, pshistory `--all-users --flagged` (20.
 belge), events. Böylece
 "bu makinede bakılması gereken ne var?" sorusunun cevabı tek sayfa olur.
 

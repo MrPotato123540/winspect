@@ -158,7 +158,7 @@ jobs:
           }
           Smoke @()
           foreach ($args in @(@("pe",$f), @("pe",$f,"--json"), @("sign",$f), @("hash",$f), @("strings",$f,"--ioc"))) { Smoke $args }
-          foreach ($c in "list","services","drivers","autoruns","pipes","hosts","net","arp","routes","sessions","shares","certstore","tasks","objects","defender","usb","prefetch","shimcache","bam","firewall","taskcache","wmi","lnk","hunt","posture","events","hidden","sweep","userassist","mru","jumplist","rdp","sysinfo","programs","shellbags","pshistory","recyclebin","bits","comhijack") { Smoke @($c); Smoke @($c,"--json") }
+          foreach ($c in "list","services","drivers","autoruns","pipes","hosts","net","arp","routes","sessions","shares","certstore","tasks","objects","defender","usb","prefetch","shimcache","bam","firewall","taskcache","wmi","lnk","hunt","posture","events","hidden","sweep","userassist","mru","jumplist","rdp","sysinfo","programs","shellbags","pshistory","recyclebin","bits","comhijack","users") { Smoke @($c); Smoke @($c,"--json") }
           foreach ($c in "inspect","threads","handles","regions","token","secinfo","modules","verify","triage") { Smoke @($c,"$p"); Smoke @($c,"$p","--json") }
           foreach ($args in @(@("modules","$p","--unsigned"), @("firewall","--inbound","--allow","--active","--csv"), @("autoruns","--csv"), @("objects","--global","--type","Mutant"), @("drivers","--sig"), @("services","--flagged"), @("prefetch","--dir","C:\Windows\Prefetch","--csv"), @("streams","C:\Windows\System32\drivers\etc"), @("lnk","--json"), @("autoruns","--sig"), @("services","--sig","--flagged"), @("events","--summary"), @("prefetch","--flagged"), @("hunt","--all"), @("handles","--find","ntdll","--type","File"), @("hive","C:\Windows\System32\config\SYSTEM"), @("amcache"), @("rdp"), @("rdp","--json"))) { Smoke $args }
           Write-Host "all commands ran without crashing"
@@ -271,6 +271,15 @@ jobs:
           Remove-Item -Path "HKCU:\Software\Classes\CLSID\{00021401-0000-0000-C000-000000000046}" -Recurse -Force
           if (-not ($chj | Where-Object { $_.clsid -eq "{00021401-0000-0000-C000-000000000046}" -and $_.machine_server -like "*shell32.dll" })) {
             throw "comhijack: per-user Shortcut override not flagged: $($chj | ConvertTo-Json -Compress)" }
+          # users: a throw-away local account whose name ends in '$' (hidden
+          # from "net user"), created disabled, must be flagged; then deleted.
+          net user 'wstest$' 'Wx-9f3!kq2-Lm' /add /active:no | Out-Null
+          $ua = & $exe users --json | ConvertFrom-Json
+          net user 'wstest$' /delete | Out-Null
+          $hid = $ua.accounts | Where-Object { $_.name -eq 'wstest$' }
+          if (-not $hid -or -not $hid.suspicious -or $hid.enabled) { throw "users: hidden-style account not flagged: $($hid | ConvertTo-Json -Compress)" }
+          if (-not ($ua.accounts | Where-Object { $_.admin -eq $true })) { throw "users: no Administrators member found" }
+          if ($ua.machine_sid -notlike "S-1-5-21-*") { throw "users: machine SID missing: $($ua.machine_sid)" }
           # Offline hive reader vs the live registry on the SAME data: save
           # HKLM\SYSTEM to a real regf file, then the shimcache / bam records
           # read through --hive must equal the ones read through the live API.
@@ -306,7 +315,7 @@ jobs:
           smoke() { "$exe" "$@" >/dev/null 2>&1; rc=$?; if [ $rc -gt 1 ]; then echo "crash: $* => $rc"; exit 1; fi; }
           smoke
           smoke pe "$f"; smoke pe "$f" --json; smoke sign "$f"; smoke hash "$f"; smoke strings "$f" --ioc
-          for c in list services drivers autoruns pipes hosts net arp routes sessions shares certstore tasks objects defender usb prefetch shimcache bam firewall taskcache wmi lnk hunt posture events hidden sweep userassist mru jumplist rdp sysinfo programs shellbags pshistory recyclebin bits comhijack; do smoke $c; smoke $c --json; done
+          for c in list services drivers autoruns pipes hosts net arp routes sessions shares certstore tasks objects defender usb prefetch shimcache bam firewall taskcache wmi lnk hunt posture events hidden sweep userassist mru jumplist rdp sysinfo programs shellbags pshistory recyclebin bits comhijack users; do smoke $c; smoke $c --json; done
           for c in inspect threads handles regions token secinfo modules verify triage; do smoke $c "$p"; smoke $c "$p" --json; done
           smoke modules "$p" --unsigned; smoke firewall --inbound --allow --active --csv; smoke autoruns --csv; smoke objects --global --type Mutant; smoke drivers --sig; smoke services --flagged; smoke streams /c/Windows/System32/drivers/etc; smoke lnk --json; smoke autoruns --sig; smoke services --sig --flagged; smoke events --summary; smoke prefetch --flagged; smoke hunt --all; smoke handles --find ntdll --type File; smoke hive /c/Windows/System32/config/SYSTEM; smoke amcache; smoke usb --csv; smoke rdp; smoke rdp --json
           echo "all commands ran without crashing"
