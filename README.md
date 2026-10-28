@@ -30,7 +30,7 @@ that shows it.
 | `winspect net [pid] [--tcp\|--udp] [--listening\|--established] [--external] [--exposed] [--flagged] [--json\|--csv]` | per-process TCP/UDP endpoints with process name and path, remote address scope; flags script hosts / user-writable programs talking to public addresses or listening on all interfaces |
 | `winspect triage <pid> [--json]` | one-shot suspicion score combining signature trust, masquerade, ntdll/IAT hooks, image tamper, unbacked threads, section permissions, private memory, dangerous privileges and token signals |
 | `winspect hunt [--all] [--json\|--csv]` | system-wide "Hunt Evil" checks: unexpected parent of core processes, duplicate lsass/services/wininit, core names outside System32, svchost without `-k`, core processes not running as SYSTEM, boot-time processes started long after boot |
-| `winspect posture [--warn] [--json\|--csv]` | host hardening audit: UAC, LSA protection, WDigest, NTLM level, SMBv1, RDP/NLA, LLMNR, Secure Boot, firewall profiles, AlwaysInstallElevated, AutoLogon password (presence only, never printed), PowerShell logging |
+| `winspect posture [--warn] [--software <S>] [--system <S>] [--ntuser <N>] [--json\|--csv]` | host hardening audit: UAC, LSA protection, WDigest, NTLM level, SMBv1, RDP/NLA, LLMNR, Secure Boot, firewall profiles, AlwaysInstallElevated, AutoLogon password (presence only, never printed), PowerShell logging |
 | `winspect events [--max <n>] [--since <h>] [--summary] [--json\|--csv]` | high-signal event-log timeline (`--summary`: failed logons per source, flags guessing / spraying): services installed, logs cleared, failed logons, accounts created / added to admin groups, tasks created, Defender detections, RDP logons, PowerShell blocks Windows flagged as suspicious |
 | `winspect hidden [--json\|--csv]` | cross-view detection: processes missing from the Toolhelp snapshot but present natively / openable by PID, services in the registry that the SCM does not list (restrictive SDDL, or written straight into the registry) |
 | `winspect sweep [--json]` | **one-shot machine triage**: posture, hunt, hidden, net, flagged autoruns/services/tasks/taskcache/firewall/prefetch, Defender, WMI and events in one report (one JSON object with `--json`; checks that cannot run are `null`) |
@@ -60,7 +60,7 @@ that shows it.
 | `winspect firewall [--inbound] [--allow] [--active] [--flagged] [--json\|--csv]` | firewall rules from the registry; flags active inbound ALLOW rules for programs in user-writable dirs |
 | `winspect taskcache [--flagged] [--json\|--csv]` | scheduled tasks from TaskCache\\Tree, flagging hidden ones: no SD value (Tarrask), deny-ACE SD, or no XML file (needs elevation) |
 | `winspect wmi [--json\|--csv]` | WMI permanent event subscriptions (filters, consumers, bindings); flags consumers that run commands/scripts |
-| `winspect defender [--json\|--csv]` | Microsoft Defender exclusions (local + policy) and policy switches that turn protection off (local lists need elevation) |
+| `winspect defender [--software <SOFTWARE>] [--json\|--csv]` | Microsoft Defender exclusions (local + policy) and policy switches that turn protection off (local lists need elevation) |
 | `winspect tasks [--flagged] [--json\|--csv]` | scheduled tasks (command/arguments/author), flagging user-writable image paths |
 | `winspect arp [--json\|--csv]` | IPv4 neighbour (ARP) cache: IP ↔ MAC, adapter, type |
 | `winspect routes [--json\|--csv]` | IPv4 routing table: destination/mask/gateway/metric |

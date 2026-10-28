@@ -211,6 +211,16 @@ long rk_get(regsrc *s, const rkey *k, const char *name, uint32_t *type, unsigned
     return g.len;
 }
 
+int rk_exists(regsrc *s, const rkey *k, const char *name)
+{
+    if (s->is_hive) {
+        return rk_get(s, k, name, NULL, NULL, 0) >= 0;      // n = 0: nothing copied
+    }
+    WCHAR w[512];
+    to_wide(name, w, 512);
+    return RegQueryValueExW(k->hk, w, NULL, NULL, NULL, NULL) == ERROR_SUCCESS;
+}
+
 int rk_get_str(regsrc *s, const rkey *k, const char *name, char *out, size_t n)
 {
     unsigned char buf[4096];

@@ -148,6 +148,17 @@ nw = [n for n in si['networks'] if n['name'] == 'shieldbase.local']
 check(nw and nw[0]['type'] == 'wired' and nw[0]['category'] == 'domain' and nw[0]['first_connected_local'] == '2010-11-10 11:23:43'
       and nw[0]['last_connected_local'] == '2012-04-04 07:48:39', 'sysinfo: NetworkList profile with SYSTEMTIME dates')
 
+rc, out = run('posture', '--software', hive('SOFTWARE'), '--system', hive('SYSTEM'), '--json')
+po = {r['check']: r for r in json.loads(out)}
+check(po['WDigest cleartext']['value'] == '1' and po['WDigest cleartext']['status'] == 'WARN',
+      'posture offline: WDigest UseLogonCredential=1 -> WARN (regipy reads 1)')
+check(po['Admin consent prompt']['value'] == '5' and po['UAC enabled']['value'] == '1', 'posture offline: UAC values as regipy')
+check('AlwaysInstallElevated (HKCU)' not in po, 'posture offline: HKCU rules skipped without --ntuser')
+rc, out = run('defender', '--software', hive('SOFTWARE'), '--json')
+df = json.loads(out)
+check(any(p['source'] == 'local' and p['name'] == 'DisableAntiSpyware' and p['protection_off'] for p in df['policies']),
+      'defender offline: local DisableAntiSpyware=1 (regipy antispyware_disabled) reported')
+
 rc, out = run('hive', hive('NTUSER.DAT'), 'Software\\Microsoft\\Windows\\CurrentVersion\\Run', '--json')
 h = json.loads(out)
 check(h['checksum_ok'] and not h['dirty'] and h['keys'][0]['values'][0]['name'] == 'Sidebar', 'hive: Run key browse')

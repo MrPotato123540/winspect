@@ -51,6 +51,9 @@ int rk_subkeys(regsrc *s, const rkey *k, rk_name_cb cb, void *ctx);
 int rk_values(regsrc *s, const rkey *k, rk_value_cb cb, void *ctx);
 // One value: copies up to n bytes, returns the full length or -1 if absent.
 long rk_get(regsrc *s, const rkey *k, const char *name, uint32_t *type, unsigned char *out, size_t n);
+// 1 if the value exists. Its DATA is never read (live: size query only;
+// hive: no copy) - for values that hold secrets, e.g. Winlogon DefaultPassword.
+int rk_exists(regsrc *s, const rkey *k, const char *name);
 // REG_SZ / REG_EXPAND_SZ value as UTF-8 ("" if absent or another type). Returns 1 if found.
 int rk_get_str(regsrc *s, const rkey *k, const char *name, char *out, size_t n);
 

@@ -199,8 +199,9 @@ static const struct { const char *name, *text; } usage_table[] = {
         "LLMNR, Secure Boot, firewall profiles, AlwaysInstallElevated, AutoLogon\n"
         "password presence, PowerShell logging. Each check prints OK / WARN / INFO\n"
         "with a one-line reason. Secrets are never printed (only \"present\").\n"
+        "Offline: the same rules on hive files from another machine.\n"
         "Read-only. Usage:\n"
-        "  winspect posture [--warn] [--json | --csv]\n" },
+        "  winspect posture [--warn] [--software <SOFTWARE>] [--system <SYSTEM>] [--ntuser <NTUSER.DAT>] [--json | --csv]\n" },
     { "events",
         "winspect events - a short, high-signal timeline from the Windows event logs:\n"
         "services installed (7045/4697), logs cleared (104/1102), failed logons\n"
@@ -408,11 +409,12 @@ static const struct { const char *name, *text; } usage_table[] = {
     { "defender",
         "winspect defender - read-only view of Microsoft Defender exclusions (paths,\n"
         "extensions, processes, IPs) from both the local settings and the Group Policy\n"
-        "keys, plus the policy values that switch protection off. An exclusion added by\n"
+        "keys, plus the policy AND local values that switch protection off (offline:\n"
+        "--software). An exclusion added by\n"
         "an intruder is a classic way to make a folder invisible to the scanner, so\n"
         "these lists are worth reviewing. Reading the local lists needs elevation on\n"
         "current Windows; an access-denied key is reported, never treated as empty.\n"
-        "Usage: winspect defender [--json | --csv]\n" },
+        "Usage: winspect defender [--software <SOFTWARE>] [--json | --csv]\n" },
 };
 
 const char *command_usage(const char *name)

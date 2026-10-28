@@ -11,12 +11,17 @@
 // unit-tested) and what to report when the value is absent - Windows defaults
 // differ per setting, so the "missing" verdict is explicit per rule.
 //
-// Read-only: only RegGetValue. The AutoLogon check reports whether a
-// DefaultPassword value EXISTS and never reads or prints its content.
+// Offline: --software / --system / --ntuser judge hive FILES from another
+// machine (or an image) with the same rules; rules whose hive was not given
+// are skipped.
+//
+// Read-only. The AutoLogon check reports whether a DefaultPassword value
+// EXISTS and never reads or prints its content (live or offline).
 
 #include "posture.h"
 #include "artparse.h"
 #include "jsonutil.h"
+#include "regsrc.h"
 
 #include <windows.h>
 #include <stdio.h>
@@ -80,7 +85,7 @@ static const posture_rule rules[] = {
       "SYSTEM\\CurrentControlSet\\Services\\LanmanServer\\Parameters", "SMB1",
       PR_BAD_IF_EQ, 1, POSTURE_INFO,
       "SMBv1 server not enabled", "SMBv1 server is enabled",
-      "not set - Windows 10 1709+ ships without SMBv1 server" },
+      "not set - default ON up to Windows 8.1 / 10 1703, removed from 10 1709+" },
     { "Network", "LLMNR", HKEY_LOCAL_MACHINE,
       "SOFTWARE\\Policies\\Microsoft\\Windows NT\\DNSClient", "EnableMulticast",
       PR_GOOD_IF_EQ, 0, POSTURE_INFO,
@@ -125,16 +130,38 @@ static const char *status_name(posture_status s)
     return s == POSTURE_OK ? "OK" : s == POSTURE_WARN ? "WARN" : "INFO";
 }
 
-static int read_dword(HKEY root, const char *key, const char *value, DWORD *out)
+typedef struct { regsrc *sw, *sys, *cu; char cs[32]; } psrc;
+
+// HKLM\SOFTWARE\..., HKLM\SYSTEM\CurrentControlSet\... or HKCU path -> the
+// source holding it and the path inside it (NULL if that hive is absent).
+static regsrc *pick(psrc *p, HKEY root, const char *key, char *rel, size_t n)
 {
-    DWORD sz = sizeof *out;
-    HKEY k;
-    if (RegOpenKeyExA(root, key, 0, KEY_READ | KEY_WOW64_64KEY, &k) != ERROR_SUCCESS) {
-        return 0;
+    if (root == HKEY_CURRENT_USER) {
+        snprintf(rel, n, "%s", key);        // HKCU rules are written "SOFTWARE\..." too
+        return p->cu;
     }
-    LONG rc = RegGetValueA(k, NULL, value, RRF_RT_REG_DWORD, NULL, out, &sz);
-    RegCloseKey(k);
-    return rc == ERROR_SUCCESS;
+    if (_strnicmp(key, "SOFTWARE\\", 9) == 0) { snprintf(rel, n, "%s", key + 9); return p->sw; }
+    if (_strnicmp(key, "SYSTEM\\CurrentControlSet\\", 25) == 0) {
+        snprintf(rel, n, "%s\\%s", p->cs, key + 25);
+        return p->sys;
+    }
+    return NULL;
+}
+
+// 1 = value present (in *out), 0 = absent, -1 = that hive is not available.
+static int read_dword(psrc *p, HKEY root, const char *key, const char *value, DWORD *out)
+{
+    char rel[512];
+    regsrc *s = pick(p, root, key, rel, sizeof rel);
+    if (s == NULL) return -1;
+    rkey k;
+    if (rk_open(s, rel, &k) != 0) return 0;
+    unsigned char d[4];
+    uint32_t type = 0;
+    int ok = rk_get(s, &k, value, &type, d, 4) == 4 && type == REG_DWORD;
+    rk_close(&k);
+    if (ok) *out = (DWORD)d[0] | ((DWORD)d[1] << 8) | ((DWORD)d[2] << 16) | ((DWORD)d[3] << 24);
+    return ok;
 }
 
 typedef struct { int mode, only_warn, first; unsigned ok, warn, info; } pctx;
@@ -170,18 +197,49 @@ int cmd_posture(int argc, char **argv)
     pctx c;
     memset(&c, 0, sizeof c);
     c.first = 1;
+    const char *files[3] = { NULL, NULL, NULL };
     for (int a = 0; a < argc; a++) {
         if (strcmp(argv[a], "--json") == 0)      c.mode = 1;
         else if (strcmp(argv[a], "--csv") == 0)  c.mode = 2;
         else if (strcmp(argv[a], "--warn") == 0) c.only_warn = 1;
+        else if (strcmp(argv[a], "--software") == 0 && a + 1 < argc) files[0] = argv[++a];
+        else if (strcmp(argv[a], "--system") == 0 && a + 1 < argc)   files[1] = argv[++a];
+        else if (strcmp(argv[a], "--ntuser") == 0 && a + 1 < argc)   files[2] = argv[++a];
         else {
             fprintf(stderr, "posture: unexpected argument '%s'\n", argv[a]);
             return 1;
         }
     }
 
+    static regsrc srcs[3];
+    psrc ps = { NULL, NULL, NULL, "" };
+    int offline = files[0] || files[1] || files[2];
+    if (offline) {
+        for (int i = 0; i < 3; i++) {
+            if (files[i] == NULL) continue;
+            char err[512];
+            if (regsrc_open_hive(&srcs[i], files[i], err, sizeof err) != 0) {
+                fprintf(stderr, "posture: %s\n", err);
+                for (int j = 0; j < i; j++) if (files[j]) regsrc_close(&srcs[j]);
+                return 1;
+            }
+        }
+        ps.sw = files[0] ? &srcs[0] : NULL;
+        ps.sys = files[1] ? &srcs[1] : NULL;
+        ps.cu = files[2] ? &srcs[2] : NULL;
+    } else {
+        if (regsrc_open_live(&srcs[0], HKEY_LOCAL_MACHINE, "SOFTWARE", "HKLM\\SOFTWARE") == 0) ps.sw = &srcs[0];
+        if (regsrc_open_live(&srcs[1], HKEY_LOCAL_MACHINE, "SYSTEM", "HKLM\\SYSTEM") == 0) ps.sys = &srcs[1];
+        regsrc_open_live(&srcs[2], HKEY_CURRENT_USER, NULL, "HKCU");
+        ps.cu = &srcs[2];
+    }
+    if (ps.sys) regsrc_control_set(ps.sys, ps.cs, sizeof ps.cs);
+
     if (c.mode == 0) {
-        puts("posture  (host hardening checks, read-only)\n");
+        if (offline) printf("posture  (offline hives:%s%s%s%s%s%s)\n\n", files[0] ? " SOFTWARE=" : "",
+                            files[0] ? files[0] : "", files[1] ? " SYSTEM=" : "", files[1] ? files[1] : "",
+                            files[2] ? " NTUSER=" : "", files[2] ? files[2] : "");
+        else puts("posture  (host hardening checks, read-only)\n");
         printf("  %-4s  %-12s %-32s %-10s %s\n", "", "area", "check", "value", "meaning");
     } else if (c.mode == 2) {
         puts("status,area,check,value,detail");
@@ -192,7 +250,8 @@ int cmd_posture(int argc, char **argv)
     for (size_t i = 0; i < sizeof rules / sizeof rules[0]; i++) {
         const posture_rule *r = &rules[i];
         DWORD v = 0;
-        int present = read_dword(r->root, r->key, r->value, &v);
+        int present = read_dword(&ps, r->root, r->key, r->value, &v);
+        if (present < 0) continue;                  // that hive was not given (offline)
         posture_status st = posture_judge(r->op, r->arg, present, v, r->missing);
         char val[24];
         if (present) snprintf(val, sizeof val, "%lu", (unsigned long)v);
@@ -204,24 +263,24 @@ int cmd_posture(int argc, char **argv)
 
     // AutoLogon: Winlogon may hold a plaintext DefaultPassword. We only check
     // that the value EXISTS; its content is never read into this program.
-    {
-        HKEY k;
+    if (ps.sw) {
+        rkey k;
         int autologon = 0, has_pw = 0;
-        if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon",
-                          0, KEY_READ | KEY_WOW64_64KEY, &k) == ERROR_SUCCESS) {
+        if (rk_open(ps.sw, "Microsoft\\Windows NT\\CurrentVersion\\Winlogon", &k) == 0) {
             char al[8] = "";
-            DWORD sz = sizeof al;
-            if (RegGetValueA(k, NULL, "AutoAdminLogon", RRF_RT_REG_SZ, NULL, al, &sz) == ERROR_SUCCESS) {
+            if (rk_get_str(ps.sw, &k, "AutoAdminLogon", al, sizeof al)) {
                 autologon = (strcmp(al, "1") == 0);
             }
-            // Query only the size (NULL data buffer): the password is never read.
-            has_pw = RegQueryValueExA(k, "DefaultPassword", NULL, NULL, NULL, NULL) == ERROR_SUCCESS;
-            RegCloseKey(k);
+            has_pw = rk_exists(ps.sw, &k, "DefaultPassword");
+            rk_close(&k);
         }
         posture_status st = has_pw ? POSTURE_WARN : (autologon ? POSTURE_INFO : POSTURE_OK);
         emit(&c, "Credentials", "AutoLogon password", has_pw ? "present" : (autologon ? "on" : "off"), st,
              has_pw ? "Winlogon DefaultPassword holds a PLAINTEXT password"
                     : (autologon ? "AutoAdminLogon on (password stored elsewhere)" : "no AutoLogon password in the registry"));
+    }
+    for (int i = 0; i < 3; i++) {
+        if (offline ? files[i] != NULL : 1) regsrc_close(&srcs[i]);
     }
 
     if (c.mode == 0) {
