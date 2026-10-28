@@ -82,7 +82,9 @@ cases += [['ssn','NtOpenProcess'], ['ssn','NtOpenProcess','--json'], ['modules',
           ['sysinfo','--software','C:\\nonexistent'], ['services','--hive','C:\\nonexistent'],
           ['autoruns','--ntuser','C:\\nonexistent'], ['usb','--hive','C:\\nonexistent'],
           ['shellbags','--csv'], ['shellbags','--usrclass','C:\\nonexistent'], ['programs','--flagged'], ['pshistory'], ['pshistory','--csv'], ['pshistory','--all-users','--flagged'],
-          ['pshistory','C:\\nonexistent'], ['pshistory','a','b']]
+          ['pshistory','C:\\nonexistent'], ['pshistory','a','b'],
+          ['recyclebin'], ['recyclebin','--csv'], ['recyclebin','--flagged','--json'], ['recyclebin','C:\\$Recycle.Bin'],
+          ['recyclebin','C:\\windows\\win.ini'], ['recyclebin','C:\\nonexistent'], ['recyclebin','a','b']]
 
 bad = 0
 for args in cases:

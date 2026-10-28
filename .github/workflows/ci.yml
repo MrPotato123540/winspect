@@ -56,6 +56,18 @@ jobs:
           cc -I inc -std=c11 -g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all \
              src/cfb.c src/destlist.c src/jsonutil.c tests/destlist_dump.c -o destlist_dump
           python3 -I tests/destlist_check.py ./destlist_dump jlref/JumpList.Test/TestFiles
+      - name: Recycle Bin parser vs plaso test data
+        # $I (Vista, Windows 10) and XP INFO2 files from plaso's test data
+        # (data only, no code run), pinned to a commit; expected values are
+        # the ones plaso's own recycler parser tests assert.
+        run: |
+          mkdir rbref
+          for f in '$II3DF3L.zip' '$I103S5F.jpg' INFO2; do
+            curl -sSfL -o "rbref/$f" "https://raw.githubusercontent.com/log2timeline/plaso/ee5a0ab4f7af07f61b0554ba8edc0700514efc5a/test_data/recycler/$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1]))' "$f")"
+          done
+          cc -I inc -std=c11 -g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all \
+             src/artparse.c tests/rb_dump.c -o rb_dump
+          python3 -I tests/rb_check.py ./rb_dump rbref
       - name: Registry hive reader vs real hives (regipy test data)
         # Real NTUSER.DAT / SYSTEM / SOFTWARE / Amcache.hve files from the
         # regipy project (data only, pinned commit). Header fields, key/value
@@ -146,7 +158,7 @@ jobs:
           }
           Smoke @()
           foreach ($args in @(@("pe",$f), @("pe",$f,"--json"), @("sign",$f), @("hash",$f), @("strings",$f,"--ioc"))) { Smoke $args }
-          foreach ($c in "list","services","drivers","autoruns","pipes","hosts","net","arp","routes","sessions","shares","certstore","tasks","objects","defender","usb","prefetch","shimcache","bam","firewall","taskcache","wmi","lnk","hunt","posture","events","hidden","sweep","userassist","mru","jumplist","rdp","sysinfo","programs","shellbags","pshistory") { Smoke @($c); Smoke @($c,"--json") }
+          foreach ($c in "list","services","drivers","autoruns","pipes","hosts","net","arp","routes","sessions","shares","certstore","tasks","objects","defender","usb","prefetch","shimcache","bam","firewall","taskcache","wmi","lnk","hunt","posture","events","hidden","sweep","userassist","mru","jumplist","rdp","sysinfo","programs","shellbags","pshistory","recyclebin") { Smoke @($c); Smoke @($c,"--json") }
           foreach ($c in "inspect","threads","handles","regions","token","secinfo","modules","verify","triage") { Smoke @($c,"$p"); Smoke @($c,"$p","--json") }
           foreach ($args in @(@("modules","$p","--unsigned"), @("firewall","--inbound","--allow","--active","--csv"), @("autoruns","--csv"), @("objects","--global","--type","Mutant"), @("drivers","--sig"), @("services","--flagged"), @("prefetch","--dir","C:\Windows\Prefetch","--csv"), @("streams","C:\Windows\System32\drivers\etc"), @("lnk","--json"), @("autoruns","--sig"), @("services","--sig","--flagged"), @("events","--summary"), @("prefetch","--flagged"), @("hunt","--all"), @("handles","--find","ntdll","--type","File"), @("hive","C:\Windows\System32\config\SYSTEM"), @("amcache"), @("rdp"), @("rdp","--json"))) { Smoke $args }
           Write-Host "all commands ran without crashing"
@@ -267,7 +279,7 @@ jobs:
           smoke() { "$exe" "$@" >/dev/null 2>&1; rc=$?; if [ $rc -gt 1 ]; then echo "crash: $* => $rc"; exit 1; fi; }
           smoke
           smoke pe "$f"; smoke pe "$f" --json; smoke sign "$f"; smoke hash "$f"; smoke strings "$f" --ioc
-          for c in list services drivers autoruns pipes hosts net arp routes sessions shares certstore tasks objects defender usb prefetch shimcache bam firewall taskcache wmi lnk hunt posture events hidden sweep userassist mru jumplist rdp sysinfo programs shellbags pshistory; do smoke $c; smoke $c --json; done
+          for c in list services drivers autoruns pipes hosts net arp routes sessions shares certstore tasks objects defender usb prefetch shimcache bam firewall taskcache wmi lnk hunt posture events hidden sweep userassist mru jumplist rdp sysinfo programs shellbags pshistory recyclebin; do smoke $c; smoke $c --json; done
           for c in inspect threads handles regions token secinfo modules verify triage; do smoke $c "$p"; smoke $c "$p" --json; done
           smoke modules "$p" --unsigned; smoke firewall --inbound --allow --active --csv; smoke autoruns --csv; smoke objects --global --type Mutant; smoke drivers --sig; smoke services --flagged; smoke streams /c/Windows/System32/drivers/etc; smoke lnk --json; smoke autoruns --sig; smoke services --sig --flagged; smoke events --summary; smoke prefetch --flagged; smoke hunt --all; smoke handles --find ntdll --type File; smoke hive /c/Windows/System32/config/SYSTEM; smoke amcache; smoke usb --csv; smoke rdp; smoke rdp --json
           echo "all commands ran without crashing"

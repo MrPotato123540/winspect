@@ -61,6 +61,15 @@ static const struct { const char *name, *text; } usage_table[] = {
         "each item also shows its target, arguments and timestamps. Flags items that\n"
         "launch a script host or point into a user-writable dir. Read-only. Usage:\n"
         "  winspect jumplist [<file | folder>] [--json | --csv]\n" },
+    { "recyclebin",
+        "winspect recyclebin - what was deleted, by whom and when. Reads the \"$I\"\n"
+        "metadata files in <drive>:\\$Recycle.Bin\\<user SID>\\ on every local drive\n"
+        "(Vista..8.1 and Windows 10+ formats) and XP's RECYCLER\\<SID>\\INFO2: the\n"
+        "original path, size and deletion time, the owning account, and whether the\n"
+        "\"$R\" copy of the content is still there. Deleted programs and scripts are\n"
+        "flagged. Other users' folders need admin. A file or folder argument reads a\n"
+        "copy (e.g. from a disk image). Read-only. Usage:\n"
+        "  winspect recyclebin [<$I file | INFO2 | folder>] [--flagged] [--json | --csv]\n" },
     { "pshistory",
         "winspect pshistory - PowerShell command history kept by PSReadLine\n"
         "(%APPDATA%\\Microsoft\\Windows\\PowerShell\\PSReadLine\\ConsoleHost_history.txt):\n"

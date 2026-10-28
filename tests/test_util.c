@@ -685,6 +685,60 @@ int main(void)
         check_str("rmm sc", rmm_tool_name("ScreenConnect Client (5e3b2c)") ? rmm_tool_name("ScreenConnect Client (5e3b2c)") : "", "ConnectWise ScreenConnect");
         check_str("rmm tv case", rmm_tool_name("TEAMVIEWER 15") ? rmm_tool_name("TEAMVIEWER 15") : "", "TeamViewer");
         check_int("rmm zoom", rmm_tool_name("Zoom") == NULL, 1);
+        {
+            // Recycle Bin $I v2 (hand-built): size 1234, 2020-01-02 03:04:05 UTC.
+            unsigned char v2[28 + 2 * 8];
+            memset(v2, 0, sizeof v2);
+            v2[0] = 2; v2[8] = 0xD2; v2[9] = 0x04;
+            uint64_t ft = (1577934245ULL + 11644473600ULL) * 10000000ULL;
+            for (int k = 0; k < 8; k++) v2[16 + k] = (unsigned char)(ft >> (8 * k));
+            v2[24] = 8;
+            const char *nm = "C:\\a.ps1";
+            for (int k = 0; nm[k]; k++) v2[28 + 2 * k] = (unsigned char)nm[k];
+            rb_entry e;
+            char ts[32];
+            check_int("rb v2 ok", rb_parse_i(v2, sizeof v2, &e), 0);
+            check_int("rb v2 ver", e.version, 2);
+            check_int("rb v2 size", (int)e.size, 1234);
+            check_str("rb v2 path", e.path, "C:\\a.ps1");
+            filetime_utc_str(e.deleted, ts, sizeof ts);
+            check_str("rb v2 time", ts, "2020-01-02 03:04:05");
+            check_str("rb reason", rb_reason(e.path) ? rb_reason(e.path) : "", "deleted program or script");
+            check_int("rb v2 short", rb_parse_i(v2, 40, &e), -1);      // length says 8 chars, 6 present
+            v2[24] = 0;
+            check_int("rb v2 zero len", rb_parse_i(v2, sizeof v2, &e), -1);
+            v2[0] = 3;
+            check_int("rb bad ver", rb_parse_i(v2, sizeof v2, &e), -1);
+            // v1: fixed 520-byte name field, also accepted when truncated.
+            unsigned char v1[24 + 520];
+            memset(v1, 0, sizeof v1);
+            v1[0] = 1;
+            for (int k = 0; nm[k]; k++) v1[24 + 2 * k] = (unsigned char)nm[k];
+            check_int("rb v1 ok", rb_parse_i(v1, sizeof v1, &e), 0);
+            check_str("rb v1 path", e.path, "C:\\a.ps1");
+            check_int("rb v1 trunc", rb_parse_i(v1, 30, &e), 0);
+            check_str("rb v1 trunc path", e.path, "C:\\");
+            check_int("rb no reason doc", rb_reason("C:\\x\\report.docx") == NULL, 1);
+            check_int("rb no reason dir dot", rb_reason("C:\\v1.exe\\readme") == NULL, 1);
+            check_int("rb reason case", rb_reason("D:\\TOOL.EXE") != NULL, 1);
+            check_int("rb exe prefix", rb_reason("D:\\a.exeX") == NULL, 1);
+            // INFO2: header + one purged record without a Unicode path.
+            unsigned char i2[20 + 800];
+            memset(i2, 0, sizeof i2);
+            i2[0] = 5; i2[12] = 0x20; i2[13] = 0x03;
+            memcpy(i2 + 20, "C:\\t.exe", 8);
+            i2[20] = 0;                    // emptied: first byte cleared
+            i2[20 + 260] = 7; i2[20 + 264] = 2;
+            check_int("info2 count", (int)rb_info2_count(i2, sizeof i2), 1);
+            check_int("info2 rec", rb_info2_record(i2, sizeof i2, 0, &e), 0);
+            check_int("info2 idx", (int)e.index, 7);
+            check_int("info2 purged", e.purged, 1);
+            check_str("info2 ansi", e.path, "C:\\t.exe");     // letter from drive 2
+            check_int("info2 oob", rb_info2_record(i2, sizeof i2, 1, &e), -1);
+            check_int("info2 bad", (int)rb_info2_count(i2, 19), 0);
+            filetime_utc_str(0, ts, sizeof ts);
+            check_str("ft zero", ts, "-");
+        }
         check_int("rmm office", rmm_tool_name("Microsoft Office Professional Plus 2010") == NULL, 1);
         check_int("rmm remote desktop conn", rmm_tool_name("Remote Desktop Connection") == NULL, 1);
         {

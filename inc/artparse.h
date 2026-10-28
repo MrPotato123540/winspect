@@ -225,4 +225,34 @@ void runmru_clean(char *s);
 // if a terminated name was found inside the buffer.
 int recentdocs_name(const unsigned char *d, size_t n, char *out, size_t outn);
 
+// ---- Recycle Bin ----------------------------------------------------------
+// Vista+ keeps, per deleted file, a "$I" metadata file next to the "$R" copy
+// of the content in <drive>:\$Recycle.Bin\<user SID>\ (same random suffix):
+//   u64 version (1 = Vista..8.1, 2 = Windows 10+) | u64 original size |
+//   FILETIME deletion time | v1: 260 UTF-16 chars, fixed |
+//                            v2: u32 name length in chars (with NUL), name
+// Windows XP used one INFO2 file per user instead: 20-byte header (u32 @12 =
+// record size, 800), then records: ANSI path[260] | u32 index | u32 drive
+// number (0 = A:) | FILETIME deleted | u32 size | UTF-16 path[260]. A record
+// whose ANSI path starts with NUL has been removed from the bin.
+typedef struct {
+    int version;            // 1, 2 or 5 (INFO2)
+    uint64_t size;          // original size in bytes
+    uint64_t deleted;       // FILETIME (UTC)
+    uint32_t index, drive;  // INFO2 only
+    int purged;             // INFO2: record emptied from the bin
+    char path[1100];        // original full path, UTF-8
+} rb_entry;
+
+// Parse a $I file. Returns 0, or -1 when it is not a valid one.
+int rb_parse_i(const unsigned char *d, size_t n, rb_entry *e);
+// Number of records in an INFO2 file (0 when invalid) and record i of it.
+size_t rb_info2_count(const unsigned char *d, size_t n);
+int rb_info2_record(const unsigned char *d, size_t n, size_t i, rb_entry *e);
+// FILETIME -> "YYYY-MM-DD hh:mm:ss" UTC ("-" for 0 / out of range).
+void filetime_utc_str(uint64_t ft, char *out, size_t n);
+// Reason when a deleted file is worth a look (program or script content), or
+// NULL. Deleting the dropped tool is a common clean-up step after an intrusion.
+const char *rb_reason(const char *path);
+
 #endif

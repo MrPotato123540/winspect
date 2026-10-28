@@ -51,3 +51,55 @@ Bypass` yazar. Gerekçe, analistin satıra neden bakması gerektiğini söyler.
 **Doğrulama:** 13 birim testi (her kural için pozitif, sıradan komutlar için
 negatif) ve wine'da indirme + Defender satırı içeren bir geçmiş dosyası;
 sıradan iki satırın işaretlenmemesi de kontrol edilir.
+
+## recyclebin — Geri Dönüşüm Kutusu
+
+Bir dosya Geri Dönüşüm Kutusu'na atılınca Windows (Vista ve sonrası) iki dosya
+yazar, ikisi de `<sürücü>:\$Recycle.Bin\<kullanıcı SID'i>\` altında ve aynı
+rastgele ekle:
+
+- `$R……` dosyanın içeriği,
+- `$I……` küçük bir kayıt: orijinal tam yol, boyut, **silinme zamanı** (UTC).
+
+`$I` biçimi:
+
+| Ofset | Alan | v1 (Vista – 8.1) | v2 (Windows 10+) |
+|---|---|---|---|
+| 0 | sürüm (u64) | 1 | 2 |
+| 8 | orijinal boyut (u64) | ✓ | ✓ |
+| 16 | silinme zamanı (FILETIME) | ✓ | ✓ |
+| 24 | yol | sabit 260 UTF-16 karakter | u32 uzunluk (NUL dahil), ardından yol |
+
+Windows XP ise kullanıcı başına tek bir `RECYCLER\<SID>\INFO2` dizini tutardı:
+20 baytlık başlık ve 800 baytlık kayıtlar (ANSI yol, sıra no, sürücü no,
+FILETIME, boyut, UTF-16 yol). Kutudan çıkan kaydın ANSI yolunun ilk baytı
+sıfırlanır; sürücü harfi sürücü numarasından geri kazanılır.
+
+Neden önemli?
+
+- **Kim, ne zaman, ne sildi:** SID klasörü sahibi verir (`LookupAccountSid`
+  ile ada çevrilir), `$I` zamanı verir.
+- **`content: gone`:** `$I` var ama `$R` yok. İçerik kutudan elle silinmiş,
+  ama silme kaydı kalmış. Temizlik yapan biri genelde `$I` dosyalarını unutur.
+- Silinen **program ve betikler** (`.exe .dll .ps1 .bat .vbs .js .hta …`)
+  işaretlenir: saldırganın bıraktığı aracı silmesi bilinen bir temizlik
+  adımıdır (T1070.004). Bu da bir ipucudur; kurulum dosyası silmek suçsuzdur.
+
+```
+winspect recyclebin                       # tüm yerel sürücüler (başkalarının klasörü: yönetici)
+winspect recyclebin E:\imaj\$Recycle.Bin  # kopyalanmış bir kutu
+winspect recyclebin '$IAB12CD.exe' --json # tek bir kayıt
+```
+
+**Doğrulama:**
+
+- Ayrıştırıcı taşınabilir koddadır (`rb_parse_i`, `rb_info2_*`); yaklaşık 30
+  birim testi: v1/v2, kesik dosya, yanlış uzunluk, bilinmeyen sürüm, boşaltılmış
+  INFO2 kaydı.
+- plaso projesinin test verisindeki üç gerçek dosya (Vista `$I`, Windows 10
+  `$I`, XP `INFO2`) yalnızca **veri** olarak indirilir; plaso'nun kendi
+  testlerinde yazan yol, boyut ve zamanlarla karşılaştırılır (CI'da, sabit
+  commit'e iğnelenmiş). Dört INFO2 kaydı dahil hepsi eşleşti.
+- ASan/UBSan altında 300 bin fuzz turu.
+- wine'da: bir kullanıcının kutusunda içeriği duran bir v2 program kaydı
+  (işaretli) ve içeriği gitmiş bir v1 belge kaydı (işaretsiz).

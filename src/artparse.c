@@ -750,3 +750,110 @@ int recentdocs_name(const unsigned char *d, size_t n, char *out, size_t outn)
     }
     return 0;
 }
+
+// ---- Recycle Bin ($I / INFO2) ----------------------------------------------
+
+// Characters before the first NUL, at most max.
+static size_t u16_len(const unsigned char *s, size_t max)
+{
+    size_t i = 0;
+    while (i < max && (s[2 * i] | s[2 * i + 1]) != 0) i++;
+    return i;
+}
+
+int rb_parse_i(const unsigned char *d, size_t n, rb_entry *e)
+{
+    memset(e, 0, sizeof *e);
+    if (n < 28) return -1;
+    uint64_t ver = rd64(d);
+    if (ver != 1 && ver != 2) return -1;
+    e->version = (int)ver;
+    e->size = rd64(d + 8);
+    e->deleted = rd64(d + 16);
+    size_t chars;
+    const unsigned char *name;
+    if (ver == 1) {
+        // Fixed 520-byte field; tolerate a truncated copy.
+        name = d + 24;
+        chars = (n - 24) / 2;
+        if (chars > 260) chars = 260;
+    } else {
+        uint32_t len = rd32(d + 24);
+        name = d + 28;
+        if (len == 0 || len > 32768 || (size_t)len > (n - 28) / 2) return -1;
+        chars = len;
+    }
+    u16_to_u8(name, u16_len(name, chars), e->path, sizeof e->path);
+    return e->path[0] ? 0 : -1;
+}
+
+#define INFO2_HDR 20
+#define INFO2_REC 800
+
+size_t rb_info2_count(const unsigned char *d, size_t n)
+{
+    if (n < INFO2_HDR || rd32(d) != 5 || rd32(d + 12) != INFO2_REC) return 0;
+    return (n - INFO2_HDR) / INFO2_REC;
+}
+
+int rb_info2_record(const unsigned char *d, size_t n, size_t i, rb_entry *e)
+{
+    memset(e, 0, sizeof *e);
+    if (i >= rb_info2_count(d, n)) return -1;
+    const unsigned char *r = d + INFO2_HDR + i * INFO2_REC;
+    e->version = 5;
+    e->index = rd32(r + 260);
+    e->drive = rd32(r + 264);
+    e->deleted = rd64(r + 268);
+    e->size = rd32(r + 276);
+    e->purged = r[0] == 0;
+    u16_to_u8(r + 280, u16_len(r + 280, 260), e->path, sizeof e->path);
+    if (e->path[0] == 0) {
+        // Older records have no Unicode copy; fall back to the ANSI one. Its
+        // first byte (the drive letter) is cleared once the file leaves the
+        // bin; the drive number still says which letter it was.
+        size_t k = 0;
+        if (e->purged && e->drive < 26) e->path[k++] = (char)('A' + e->drive);
+        for (size_t j = e->purged ? 1 : 0; j < 260 && r[j] && k + 1 < sizeof e->path; j++)
+            e->path[k++] = (char)r[j];
+        e->path[k] = 0;
+    }
+    return 0;
+}
+
+void filetime_utc_str(uint64_t ft, char *out, size_t n)
+{
+    // 100 ns ticks since 1601-01-01; days -> civil date (Howard Hinnant).
+    if (ft < 116444736000000000ULL || ft > 2650467743990000000ULL) {
+        snprintf(out, n, "-");
+        return;
+    }
+    int64_t secs = (int64_t)(ft / 10000000ULL) - 11644473600LL;
+    int64_t days = secs / 86400, rem = secs % 86400;
+    int64_t z = days + 719468, era = z / 146097;
+    int64_t doe = z - era * 146097;
+    int64_t yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    int64_t y = yoe + era * 400, doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    int64_t mp = (5 * doy + 2) / 153, dd = doy - (153 * mp + 2) / 5 + 1;
+    int64_t mm = mp < 10 ? mp + 3 : mp - 9;
+    if (mm <= 2) y++;
+    snprintf(out, n, "%04d-%02d-%02d %02d:%02d:%02d", (int)y, (int)mm, (int)dd,
+             (int)(rem / 3600), (int)(rem / 60 % 60), (int)(rem % 60));
+}
+
+const char *rb_reason(const char *path)
+{
+    static const char *const ext[] = {
+        ".exe", ".dll", ".scr", ".sys", ".ps1", ".bat", ".cmd", ".vbs", ".vbe", ".js", ".jse",
+        ".hta", ".wsf", ".msi", ".jar", ".com", ".cpl"
+    };
+    const char *dot = strrchr(path, '.');
+    const char *sl = strrchr(path, '\\');
+    if (dot == NULL || (sl != NULL && dot < sl)) return NULL;
+    for (size_t i = 0; i < sizeof ext / sizeof ext[0]; i++) {
+        const char *a = dot, *b = ext[i];
+        while (*a && *b && (*a | 0x20) == *b) { a++; b++; }
+        if (*a == 0 && *b == 0) return "deleted program or script";
+    }
+    return NULL;
+}

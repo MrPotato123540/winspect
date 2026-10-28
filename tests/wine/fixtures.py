@@ -457,6 +457,37 @@ if upx and cc:
 else:
     print('skipped pe UPX check (upx or mingw not installed)')
 
+# recyclebin: two deleted items in a made-up user's bin - a v2 record for a
+# program from Temp whose $R content is still there (flagged), and a v1 record
+# for a document whose content is gone (not flagged).
+import struct
+rbd = os.path.join(pfx, 'drive_c', '$Recycle.Bin', 'S-1-5-21-1111-2222-3333-1001')
+os.makedirs(rbd, exist_ok=True)
+ft = (1700000000 + 11644473600) * 10000000          # 2023-11-14 22:13:20 UTC
+p2 = 'C:\\Users\\bob\\AppData\\Local\\Temp\\dropper.exe'
+with open(os.path.join(rbd, '$IAB12CD.exe'), 'wb') as f:
+    f.write(struct.pack('<QQQI', 2, 4096, ft, len(p2) + 1) + (p2 + '\0').encode('utf-16-le'))
+with open(os.path.join(rbd, '$RAB12CD.exe'), 'wb') as f:
+    f.write(b'MZ' + b'\0' * 62)
+p1 = 'C:\\Users\\bob\\Documents\\notes.docx'
+with open(os.path.join(rbd, '$IEF34GH.docx'), 'wb') as f:
+    f.write(struct.pack('<QQQ', 1, 777, ft) + p1.encode('utf-16-le').ljust(520, b'\0'))
+rc, out, err = wine([exe, 'recyclebin', '--json'])
+try:
+    rows = {r['path']: r for r in json.loads(out)}
+    a, b = rows.get(p2), rows.get(p1)
+    if not a or not b:
+        print(f'FAIL recyclebin: records missing: {list(rows)[:4]}'); fails += 1
+    elif not (a['suspicious'] and a['content'] == 'present' and a['size'] == 4096 and a['format'] == 2
+              and a['deleted'] == '2023-11-14 22:13:20'):
+        print(f'FAIL recyclebin: v2 record wrong: {a}'); fails += 1
+    elif b['suspicious'] or b['content'] != 'gone' or b['size'] != 777 or b['format'] != 1:
+        print(f'FAIL recyclebin: v1 record wrong: {b}'); fails += 1
+    else:
+        print('checked recyclebin --json  (v1 + v2, $R present/gone, program flagged)')
+except Exception as e:
+    print('FAIL recyclebin check:', e, out[:200]); fails += 1
+
 # hidden: a service key written straight into the registry (after the SCM has
 # started) is unknown to the SCM - the cross-view must report it. A unique name
 # per run, deleted afterwards, keeps re-runs independent.

@@ -7,8 +7,8 @@
 // header fields. Built with AddressSanitizer + UndefinedBehaviorSanitizer, so
 // a single out-of-bounds read or overflow aborts the run with a report.
 //
-// Build: cc -std=c11 -g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all \
-//          -I inc src/ioc.c src/pfparse.c src/artparse.c src/lnkparse.c src/rights.c \
+// Build (one line): cc -std=c11 -g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all
+//          -I inc src/ioc.c src/pfparse.c src/artparse.c src/lnkparse.c src/rights.c
 //          src/capa.c src/cfb.c src/destlist.c src/regf.c src/shellitem.c tests/fuzz_parsers.c -o fuzz_parsers
 // Run:   ./fuzz_parsers [iterations]      (exit 0 = no sanitizer findings)
 
@@ -211,6 +211,21 @@ static size_t seed_shellitem(unsigned char *d)
 static void nop_key(uint32_t k, void *ctx) { (void)k; (void)ctx; }
 static void nop_val(const regf_value *v, void *ctx) { (void)v; (void)ctx; }
 
+// Recycle Bin: a $I v2 record followed by an INFO2 with two records; the
+// mutator decides which one the parsers see (both are tried on every input).
+static size_t seed_rb(unsigned char *s)
+{
+    memset(s, 0, 20 + 2 * 800);
+    s[0] = 5; s[12] = 0x20; s[13] = 0x03;
+    for (int r = 0; r < 2; r++) {
+        unsigned char *p = s + 20 + r * 800;
+        memcpy(p, "C:\\x\\a.exe", 10);
+        p[260] = (unsigned char)(r + 1); p[264] = 2; p[275] = 0x01;
+        for (int k = 0; k < 10; k++) p[280 + 2 * k] = (unsigned char)"C:\\x\\a.exe"[k];
+    }
+    return 20 + 2 * 800;
+}
+
 int main(int argc, char **argv)
 {
     long iters = argc > 1 ? atol(argv[1]) : 20000;
@@ -249,7 +264,21 @@ int main(int argc, char **argv)
                 pf_parse(buf, n, &pi); pf_filenames(buf, n, nop_name, NULL);
                 pf_volumes(buf, n, nop_vol, NULL); break;
         case 1: n = seed_mam(seed); n = mutate(seed, n, buf, sizeof buf);
-                pf_mam_header(buf, n, &fmt, &us, &off); break;
+                pf_mam_header(buf, n, &fmt, &us, &off);
+                {
+                    rb_entry re;
+                    char ts[32];
+                    n = seed_rb(seed);
+                    if (rnd() & 1) {             // turn the seed into a $I v2 file
+                        memset(seed, 0, 28);
+                        seed[0] = 2; seed[24] = (unsigned char)(rnd() % 40);
+                    }
+                    n = mutate(seed, n, buf, sizeof buf);
+                    if (rb_parse_i(buf, n, &re) == 0) rb_reason(re.path);
+                    for (size_t i = 0, c = rb_info2_count(buf, n); i < c && i < 64; i++)
+                        if (rb_info2_record(buf, n, i, &re) == 0) filetime_utc_str(re.deleted, ts, sizeof ts);
+                }
+                break;
         case 2: n = seed_shim(seed); n = mutate(seed, n, buf, sizeof buf);
                 shim_parse(buf, n, nop_shim, NULL);
                 {
@@ -297,6 +326,7 @@ int main(int argc, char **argv)
             fw_field(text, "App", out, sizeof out);
             ioc_classify(text);
             ioc_script_host(text);
+            ioc_ps_reason(text);
             ioc_command_image(text, out, sizeof out);
             ioc_user_writable(text);
             ioc_pipe_known(text);

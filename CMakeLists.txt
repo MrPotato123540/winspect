@@ -63,6 +63,7 @@ add_executable(winspect
     src/shellitem.c
     src/shellbags.c
     src/pshistory.c
+    src/recyclebin.c
     src/jumplist.c
     src/tasks.c
     src/modules.c
