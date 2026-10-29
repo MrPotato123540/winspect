@@ -9,8 +9,10 @@
 // earlier than their $FN creation time - a timestomping CANDIDATE list, not
 // a verdict: files from install media and archives look the same (on a real
 // XP image a third of all files did). --find filters by path text,
-// --deleted keeps records that are no longer in use. Read-only. Usage:
-//   winspect mft <$MFT file> [--find <text>] [--deleted] [--timestomp] [--json | --csv]
+// --deleted keeps records that are no longer in use. --live <drive> reads
+// the running system's $MFT through a read-only volume handle (boot sector
+// -> the $MFT's own record -> its data runs; administrator). Read-only. Usage:
+//   winspect mft <$MFT file> | --live <drive> [--find <text>] [--deleted] [--timestomp] [--json | --csv]
 int cmd_mft(int argc, char **argv);
 
 #endif

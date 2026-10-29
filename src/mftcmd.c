@@ -23,6 +23,122 @@ typedef struct {
     uint8_t has_fn, has_objid, extension;
 } rowinfo;
 
+// ---- MFT byte sources ---------------------------------------------------------
+
+#define CHUNK (1u << 20)            // multiple of every sector and record size
+
+typedef struct {
+    HANDLE h;
+    int live;
+    size_t record_size;
+    uint64_t total;                 // bytes of MFT available
+    // live: the $MFT extents and where reading has got to
+    mft_run runs[512];
+    int nruns, run;
+    uint64_t run_done, done;
+    uint32_t cluster;
+} mftsrc;
+
+static int src_open_file(mftsrc *s, const char *file, char *err, size_t en)
+{
+    memset(s, 0, sizeof *s);
+    s->h = CreateFileA(file, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
+                       OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+    if (s->h == INVALID_HANDLE_VALUE) { snprintf(err, en, "cannot open '%s' (error %lu)", file, (unsigned long)GetLastError()); return -1; }
+    LARGE_INTEGER sz;
+    static unsigned char first[65536];
+    DWORD got = 0;
+    if (!GetFileSizeEx(s->h, &sz) || sz.QuadPart < 1024 || !ReadFile(s->h, first, sizeof first, &got, NULL) ||
+            (s->record_size = mft_file_record_size(first, got)) == 0) {
+        CloseHandle(s->h);
+        snprintf(err, en, "'%s' has no FILE record near its start (not an $MFT copy?)", file);
+        return -1;
+    }
+    s->total = (uint64_t)sz.QuadPart;
+    LARGE_INTEGER zero = { 0 };
+    SetFilePointerEx(s->h, zero, NULL, FILE_BEGIN);
+    return 0;
+}
+
+// Live: \\.\C: opened read-only; boot sector -> $MFT's first record ->
+// its $DATA runs. Reads go through the volume handle in aligned chunks.
+static int src_open_live(mftsrc *s, const char *drive, char *err, size_t en)
+{
+    memset(s, 0, sizeof *s);
+    s->live = 1;
+    char d = (char)(drive[0] & ~0x20);
+    if (d < 'A' || d > 'Z' || (drive[1] && drive[1] != ':')) { snprintf(err, en, "--live takes a drive letter such as C:"); return -1; }
+    char vp[8] = { '\\', '\\', '.', '\\', d, ':', 0 };
+    s->h = CreateFileA(vp, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+    if (s->h == INVALID_HANDLE_VALUE) {
+        DWORD er = GetLastError();
+        snprintf(err, en, "cannot open volume %c: (%s, error %lu)", d, er == ERROR_ACCESS_DENIED ? "run as administrator" : "not available",
+                 (unsigned long)er);
+        return -1;
+    }
+    unsigned char *buf = (unsigned char *)VirtualAlloc(NULL, 65536, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    DWORD got = 0;
+    ntfs_boot nb;
+    if (buf == NULL || !ReadFile(s->h, buf, 4096, &got, NULL) || ntfs_parse_boot(buf, got, &nb) != 0) {
+        snprintf(err, en, "%c: is not an NTFS volume", d);
+        goto fail;
+    }
+    LARGE_INTEGER pos;
+    pos.QuadPart = (LONGLONG)(nb.mft_lcn * nb.cluster_size);
+    if (!SetFilePointerEx(s->h, pos, NULL, FILE_BEGIN) || !ReadFile(s->h, buf, 65536, &got, NULL) || got < nb.record_size) {
+        snprintf(err, en, "cannot read the $MFT of %c: (error %lu)", d, (unsigned long)GetLastError());
+        goto fail;
+    }
+    mft_entry e0;
+    uint64_t real = 0;
+    if (mft_parse(buf, nb.record_size, 0, &e0) != 0 ||
+            (s->nruns = mft_data_runs(buf, nb.record_size, s->runs, 512, &real)) <= 0) {
+        snprintf(err, en, "the $MFT record of %c: could not be decoded", d);
+        goto fail;
+    }
+    s->record_size = nb.record_size;
+    s->cluster = nb.cluster_size;
+    s->total = real;
+    VirtualFree(buf, 0, MEM_RELEASE);
+    return 0;
+fail:
+    if (buf) VirtualFree(buf, 0, MEM_RELEASE);
+    CloseHandle(s->h);
+    return -1;
+}
+
+// Next bytes of the MFT into buf (cap: a multiple of the cluster size).
+static size_t src_read(mftsrc *s, unsigned char *buf, size_t cap)
+{
+    DWORD got = 0;
+    if (!s->live) return ReadFile(s->h, buf, (DWORD)cap, &got, NULL) ? got : 0;
+    while (s->run < s->nruns) {
+        mft_run *r = &s->runs[s->run];
+        uint64_t run_bytes = r->clusters * s->cluster;
+        if (s->run_done >= run_bytes || r->lcn < 0) { s->run++; s->run_done = 0; continue; }
+        uint64_t want = run_bytes - s->run_done;
+        if (want > cap) want = cap;
+        if (s->done + want > s->total) want = s->total - s->done;
+        if (want == 0) return 0;
+        LARGE_INTEGER pos;
+        pos.QuadPart = (LONGLONG)((uint64_t)r->lcn * s->cluster + s->run_done);
+        // Volume reads must cover whole sectors: round the length up.
+        DWORD len = (DWORD)((want + 4095) & ~(uint64_t)4095);
+        if (len > cap) len = (DWORD)cap;
+        if (!SetFilePointerEx(s->h, pos, NULL, FILE_BEGIN) || !ReadFile(s->h, buf, len, &got, NULL) || got == 0) return 0;
+        if (got > want) got = (DWORD)want;
+        s->run_done += got;
+        s->done += got;
+        return got;
+    }
+    return 0;
+}
+
+static void src_close(mftsrc *s)
+{
+    if (s->h && s->h != INVALID_HANDLE_VALUE) CloseHandle(s->h);
+}
+
 static int ci_contains(const char *h, const char *n)
 {
     size_t L = strlen(n);
@@ -33,59 +149,46 @@ static int ci_contains(const char *h, const char *n)
 int cmd_mft(int argc, char **argv)
 {
     int mode = 0, deleted = 0, only_hint = 0;
-    const char *file = NULL, *find = NULL;
+    const char *file = NULL, *find = NULL, *live = NULL;
     for (int a = 0; a < argc; a++) {
         if (strcmp(argv[a], "--json") == 0)                     mode = 1;
         else if (strcmp(argv[a], "--csv") == 0)                 mode = 2;
         else if (strcmp(argv[a], "--deleted") == 0)             deleted = 1;
         else if (strcmp(argv[a], "--timestomp") == 0)           only_hint = 1;
         else if (strcmp(argv[a], "--find") == 0 && a + 1 < argc) find = argv[++a];
+        else if (strcmp(argv[a], "--live") == 0 && a + 1 < argc) live = argv[++a];
         else if (file == NULL && argv[a][0] != '-')             file = argv[a];
         else {
             fprintf(stderr, "mft: unexpected argument '%s'\n", argv[a]);
             return 1;
         }
     }
-    if (file == NULL) {
-        fputs("mft: give a copied $MFT file (the live one is not readable as a file)\n", stderr);
+    if (file == NULL && live == NULL) {
+        fputs("mft: give a copied $MFT file, or --live <drive> (administrator)\n", stderr);
         return 1;
     }
-    HANDLE h = CreateFileA(file, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
-                           OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
-    if (h == INVALID_HANDLE_VALUE) {
-        fprintf(stderr, "mft: cannot open '%s' (error %lu)\n", file, (unsigned long)GetLastError());
+    // A source of consecutive MFT bytes: the copied file, or the extents
+    // (data runs) of the live volume's $MFT read through the volume handle.
+    mftsrc src;
+    char err[256] = "";
+    if ((live ? src_open_live(&src, live, err, sizeof err) : src_open_file(&src, file, err, sizeof err)) != 0) {
+        fprintf(stderr, "mft: %s\n", err);
         return 1;
     }
-    LARGE_INTEGER sz;
-    if (!GetFileSizeEx(h, &sz) || sz.QuadPart < 1024) {
-        CloseHandle(h);
-        fprintf(stderr, "mft: '%s' is too small to be an $MFT\n", file);
-        return 1;
-    }
-    static unsigned char first[65536];
-    DWORD got = 0;
-    size_t rs = 0;
-    if (!ReadFile(h, first, sizeof first, &got, NULL) || (rs = mft_file_record_size(first, got)) == 0) {
-        CloseHandle(h);
-        fprintf(stderr, "mft: '%s' has no FILE record near its start (not an $MFT copy?)\n", file);
-        return 1;
-    }
-    size_t count = (size_t)(sz.QuadPart / (LONGLONG)rs);
-    mft_node *nodes = (mft_node *)calloc(count, sizeof *nodes);
-    rowinfo *info = (rowinfo *)calloc(count, sizeof *info);
-    unsigned char *chunk = (unsigned char *)malloc(rs * 1024);
+    size_t rs = src.record_size, count = (size_t)(src.total / rs);
+    mft_node *nodes = (mft_node *)calloc(count ? count : 1, sizeof *nodes);
+    rowinfo *info = (rowinfo *)calloc(count ? count : 1, sizeof *info);
+    unsigned char *chunk = (unsigned char *)VirtualAlloc(NULL, CHUNK, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     if (nodes == NULL || info == NULL || chunk == NULL) {
-        CloseHandle(h);
-        free(nodes); free(info); free(chunk);
+        src_close(&src);
+        free(nodes); free(info);
+        if (chunk) VirtualFree(chunk, 0, MEM_RELEASE);
         fputs("mft: out of memory\n", stderr);
         return 1;
     }
-    LARGE_INTEGER zero = { 0 };
-    SetFilePointerEx(h, zero, NULL, FILE_BEGIN);
-    size_t rec = 0, bad = 0;
+    size_t rec = 0, bad = 0, got;
     static mft_entry e;
-    while (rec < count) {
-        if (!ReadFile(h, chunk, (DWORD)(rs * 1024), &got, NULL) || got < rs) break;
+    while (rec < count && (got = src_read(&src, chunk, CHUNK)) >= rs) {
         for (size_t k = 0; k + rs <= got && rec < count; k += rs, rec++) {
             if (mft_parse(chunk + k, rs, (uint32_t)rec, &e) != 0) {
                 if (memcmp(chunk + k, "FILE", 4) == 0) bad++;
@@ -108,8 +211,9 @@ int cmd_mft(int argc, char **argv)
             memcpy(ri->objid, e.objid, 16);
         }
     }
-    CloseHandle(h);
-    free(chunk);
+    src_close(&src);
+    VirtualFree(chunk, 0, MEM_RELEASE);
+    if (live) file = live;
 
     if (mode == 0) {
         printf("mft  %s  (%zu records of %zu bytes, times UTC)\n\n", file, rec, rs);

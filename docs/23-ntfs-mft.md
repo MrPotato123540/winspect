@@ -140,6 +140,32 @@ Bu sırada `mft` / `usn` daha dayanıklı oldu. Kayıt boyutu artık 0. kayıtta
 değil, ilk 64 KB içindeki ilk geçerli `FILE` kaydından bulunuyor; başı bozuk
 bir kopya geri kalanını gizlemiyor.
 
+### Canlı makinede: mft --live C:
+
+`$MFT` çalışan sistemde kilitli olduğu için normal dosya gibi kopyalanamaz.
+`--live`, birimi `\\.\C:` olarak **salt-okunur** açar (yönetici hakkı
+gerekir) ve dosyayı kendi yapısından bulur:
+
+1. Önyükleme kesimi (ilk 512 bayt): `NTFS    ` imzası, kesim ve küme boyutu,
+   `$MFT`'nin başladığı küme (LCN) ve kayıt boyutu (`ntfs_parse_boot`).
+2. O kümedeki ilk kayıt `$MFT`'nin kendisidir. Düzeltme dizisi uygulanır ve
+   `$DATA` özniteliğinin veri dizileri (data runs) çözülür
+   (`mft_data_runs`): her dizi bir uzunluk ve öncekine göre işaretli bir
+   küme farkı taşır; farkı olmayan dizi seyrek (sparse) kabul edilir.
+3. Diziler sırayla, kesim hizalı 1 MB parçalarla okunur ve kopya dosyadaki
+   ile **aynı** ayrıştırma döngüsünden geçer.
+
+Sınır: `$MFT`'nin `$DATA`'sı bir öznitelik listesine bölünmüşse (çok parçalı,
+çok büyük birimlerde olabilir) yalnızca ilk kayıttaki diziler okunur; bu
+durumda sonuç eksik kalabilir, yanlış olmaz.
+
+Birim hiçbir zaman yazma için açılmaz. wine'da `C:` bir NTFS birimi olmadığı
+için komut "is not an NTFS volume" diye temiz çıkar. Windows CI'da gerçek
+deneme: oluşturulup silinen bir dosya kullanımda olmayan kayıt olarak tam
+yoluyla, tutulan dosya ise kullanımda olarak görünmelidir (henüz gerçek koşu
+görmedi). Çözücüler plaso'nun `MFT` dosyasıyla doğrulandı: 0. kaydın 4 dizisi
+6544 küme × 2048 bayt = 13 402 112 bayt verir, bu da dosya boyutunun aynısı.
+
 ### Canlı makinede: usn --live C:
 
 Kopya almaya gerek yok: Windows günlüğü belgelenmiş, salt-okunur denetim

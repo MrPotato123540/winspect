@@ -37,6 +37,7 @@
 #include "browser.h"
 #include "pca.h"
 #include "activities.h"
+#include "webcache.h"
 #include "imgpaths.h"
 
 #include <windows.h>
@@ -309,6 +310,13 @@ static void x_activities(tl *t, const jm_node *r)
     add(t, S(r, "start"), w, S(r, "reason"), B(r, "suspicious"));
 }
 
+static void x_webcache(tl *t, const jm_node *r)
+{
+    char w[2400];
+    snprintf(w, sizeof w, "WebCache %s: %s", strcmp(S(r, "container"), "iedownload") == 0 ? "download" : "visit (last)", S(r, "url"));
+    add(t, S(r, "accessed"), w, S(r, "reason"), B(r, "suspicious"));
+}
+
 // sysinfo prints one object, not a list. Network first/last-connected times
 // are LOCAL time in the registry, so they are left out of this UTC view.
 static void x_sysinfo(tl *t, const jm_node *doc)
@@ -409,6 +417,7 @@ static size_t image_sources(const img_paths *ip, source *out, size_t cap)
             if (sl) *sl = 0;
             ADD("browser", cmd_browser, x_browser, NULL, p->name, "--home", homes[u]);
             ADD("activities", cmd_activities, x_activities, NULL, p->name, "--home", homes[u]);
+            ADD("webcache", cmd_webcache, x_webcache, NULL, p->name, "--home", homes[u]);
         }
         if (p->usrclass[0] && ip->software[0])
             ADD("comhijack", cmd_comhijack, x_comhijack, NULL, p->name, "--usrclass", p->usrclass, "--software", ip->software, "--all");
@@ -479,6 +488,7 @@ int cmd_timeline(int argc, char **argv)
             for (size_t i = 0; i < sizeof sources / sizeof sources[0]; i++)
                 if (strlen(sources[i].name) == n && _strnicmp(p, sources[i].name, n) == 0) ok = 1;
             if (n == 7 && _strnicmp(p, "amcache", 7) == 0) ok = 1;      // image only
+            if (n == 8 && _strnicmp(p, "webcache", 8) == 0) ok = 1;     // image only (locked live)
             if (!ok) {
                 fprintf(stderr, "timeline: unknown source '%.*s'\n", (int)n, p);
                 return 1;

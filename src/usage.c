@@ -163,8 +163,10 @@ static const struct { const char *name, *text; } usage_table[] = {
         "earlier than their $FN creation time - a timestomping CANDIDATE list, not\n"
         "a verdict: files from install media and archives look the same (on a real\n"
         "XP image a third of all files did). --find filters by path text,\n"
-        "--deleted keeps records that are no longer in use. Read-only. Usage:\n"
-        "  winspect mft <$MFT file> [--find <text>] [--deleted] [--timestomp] [--json | --csv]\n" },
+        "--deleted keeps records that are no longer in use. --live <drive> reads\n"
+        "the running system's $MFT through a read-only volume handle (boot sector\n"
+        "-> the $MFT's own record -> its data runs; administrator). Read-only. Usage:\n"
+        "  winspect mft <$MFT file> | --live <drive> [--find <text>] [--deleted] [--timestomp] [--json | --csv]\n" },
     { "activities",
         "winspect activities - Windows 10 Timeline (ActivitiesCache.db under\n"
         "%LOCALAPPDATA%\\ConnectedDevicesPlatform\\<account>\\): which application was\n"
@@ -176,6 +178,17 @@ static const struct { const char *name, *text; } usage_table[] = {
         "folder (e.g. in a mounted image); a file argument reads a copied\n"
         "database. Windows 11 no longer records new activity. Read-only. Usage:\n"
         "  winspect activities [<ActivitiesCache.db> | --home <user folder>] [--flagged] [--json | --csv]\n" },
+    { "webcache",
+        "winspect webcache - Internet Explorer / legacy Edge WebCache\n"
+        "(WebCacheV01.dat, an ESE database read with winspect's own reader): the\n"
+        "History containers (pages visited, and local files opened as\n"
+        "\"file:///...\" - Windows records those even without a browser in use) and\n"
+        "the iedownload containers, with the user, access count and times; --all\n"
+        "adds the Content (cache) containers. Flags visits to and downloads from\n"
+        "bare IP addresses and downloaded programs. The live file\n"
+        "(%LOCALAPPDATA%\\Microsoft\\Windows\\WebCache\\WebCacheV01.dat) is locked:\n"
+        "pass a copy, or --home <user folder> of a mounted image. Read-only. Usage:\n"
+        "  winspect webcache <WebCacheV01.dat> | --home <user folder> [--all] [--flagged] [--json | --csv]\n" },
     { "browser",
         "winspect browser - web history and downloads from Chrome, Edge, Brave\n"
         "(Chromium \"History\" databases, every profile) and Firefox (places.sqlite\n"

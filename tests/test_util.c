@@ -905,6 +905,48 @@ int main(void)
                 torn[48] = 0x07;
                 check_int("mft torn", mft_parse(torn, sizeof torn, 41, &me), -1);
                 check_int("mft not file", mft_parse((unsigned char *)"BAAD", 4, 0, &me), -1);
+                // Boot sector: 512-byte sectors, 8 per cluster, MFT at cluster 786432, 1 KiB records.
+                unsigned char boot[512];
+                memset(boot, 0, sizeof boot);
+                memcpy(boot + 3, "NTFS    ", 8);
+                boot[11] = 0x00; boot[12] = 0x02; boot[13] = 8;
+                boot[48] = 0x00; boot[49] = 0x00; boot[50] = 0x0C;     // 0x0C0000 = 786432
+                boot[64] = 0xF6;                                        // -10 -> 2^10
+                ntfs_boot nbt;
+                check_int("boot ok", ntfs_parse_boot(boot, sizeof boot, &nbt), 0);
+                check_int("boot cluster", (int)nbt.cluster_size, 4096);
+                check_int("boot mft lcn", (int)nbt.mft_lcn, 786432);
+                check_int("boot record", (int)nbt.record_size, 1024);
+                boot[13] = 0xF4;                                        // 2^12 sectors per cluster (64K-cluster volumes use this form)
+                check_int("boot big cluster", ntfs_parse_boot(boot, sizeof boot, &nbt) == 0 && nbt.cluster_size == 512u * 4096u, 1);
+                memcpy(boot + 3, "FAT32   ", 8);
+                check_int("boot not ntfs", ntfs_parse_boot(boot, sizeof boot, &nbt), -1);
+                // A record whose non-resident $DATA has three runs: +0x100000 x 0x40,
+                // -0x10 (relative) x 0x20, and a sparse run of 8 clusters.
+                unsigned char dr[1024];
+                memset(dr, 0, sizeof dr);
+                memcpy(dr, "FILE", 4);
+                dr[20] = 56;
+                size_t ao = 56;
+                dr[ao] = 0x80; dr[ao + 4] = 96; dr[ao + 8] = 1;        // $DATA, length 96, non-resident
+                dr[ao + 32] = 64;                                      // run list @64
+                dr[ao + 48] = 0x00; dr[ao + 49] = 0x60;                // real size 0x6000
+                const unsigned char runs_bytes[] = { 0x31, 0x40, 0x00, 0x00, 0x10,   // len 1 byte 0x40, off 3 bytes +0x100000
+                                                     0x11, 0x20, 0xF0,                // len 0x20, off -16
+                                                     0x01, 0x08,                      // sparse, 8 clusters
+                                                     0x00 };
+                memcpy(dr + ao + 64, runs_bytes, sizeof runs_bytes);
+                dr[ao + 96] = 0xFF; dr[ao + 97] = 0xFF; dr[ao + 98] = 0xFF; dr[ao + 99] = 0xFF;
+                mft_run mr[8];
+                uint64_t rsz = 0;
+                int nr = mft_data_runs(dr, sizeof dr, mr, 8, &rsz);
+                check_int("runs count", nr, 3);
+                check_int("runs first", nr == 3 && mr[0].lcn == 0x100000 && mr[0].clusters == 0x40, 1);
+                check_int("runs relative negative", nr == 3 && mr[1].lcn == 0x100000 - 16 && mr[1].clusters == 0x20, 1);
+                check_int("runs sparse", nr == 3 && mr[2].lcn == -1 && mr[2].clusters == 8, 1);
+                check_int("runs real size", (int)rsz, 0x6000);
+                dr[ao + 64] = 0x9F;                                    // length field 15 bytes: invalid
+                check_int("runs bad header", mft_data_runs(dr, sizeof dr, mr, 8, &rsz), -1);
             }
             {
                 char rs[256];

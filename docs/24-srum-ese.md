@@ -82,3 +82,30 @@ Downloads'tan çalışmış iki kurulum programını gösteriyor.
 **Sınır:** sıkıştırılmış değerler (Windows 8+ ESE, büyük metin / ikili
 sütunlarda 7-bit / XPRESS) çözülmez, "sıkıştırılmış" olarak bildirilir. Test
 veritabanında hiç yok; gerçek bir örnekle doğrulanmadan çözücü eklenmeyecek.
+
+## webcache — Internet Explorer / eski Edge önbelleği
+
+Aynı ESE okuyucusuyla gelen ikinci kanıt: `WebCacheV01.dat`
+(`%LOCALAPPDATA%\Microsoft\Windows\WebCache\`).
+
+- `Containers` tablosu her kapsayıcıyı adıyla listeler: `History`
+  (ziyaretler), `iedownload` (indirmeler), `Content` (önbellek), çerezler…
+- Her kapsayıcı bir `Container_<no>` tablosudur: `Url`, `Filename`,
+  `AccessCount` ve oluşturma / değiştirme / erişim / sona erme zamanları
+  (FILETIME).
+- `History` satırlarında URL `Visited: <kullanıcı>@<adres>` biçimindedir;
+  kullanıcı ve adres ayrıştırılır.
+
+Önemi: Windows, Explorer'dan açılan **yerel dosyaları** da buraya
+`file:///C:/...` olarak yazar. Tarayıcı hiç kullanılmasa bile "hangi belge
+açıldı" sorusuna cevap olabilir.
+
+**Doğrulama:**
+
+- plaso'nun iki test dosyası (yalnızca veri). `PartitionsEx-WebCacheV01.dat`'ta
+  14. kapsayıcının 63. girdisi plaso'nun testindeki değerlerle aynı (Bing SVG
+  URL'si, `b83d57c0[1].svg`, 726 bayt, 5 erişim, değiştirilme 2019-03-20
+  17:22:14). `WebCacheV01.dat`'ta `Visited: test@…` satırları kullanıcı ve
+  adrese ayrılıyor.
+- `image` ve `timeline --root` her kullanıcı için `webcache --home`
+  çalıştırır. Canlı dosya kilitli olduğu için canlı `timeline`'da yer almaz.
