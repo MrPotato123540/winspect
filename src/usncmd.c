@@ -14,6 +14,8 @@
 #include "jsonutil.h"
 
 #include <windows.h>
+#include <winioctl.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -62,18 +64,84 @@ static uint32_t reason_mask(const char *words)
     return m;
 }
 
+// ---- live volumes ------------------------------------------------------------
+// The documented V0 request layouts, declared here because SDKs name them
+// differently (READ_USN_JOURNAL_DATA vs ..._V0).
+typedef struct { uint64_t journal_id; int64_t first, next, lowest, max; uint64_t max_size, delta; } jdata_v0;
+typedef struct { int64_t start; uint32_t mask, only_on_close; uint64_t timeout, bytes_to_wait, journal_id; } jread_v0;
+typedef struct { uint64_t start_frn; int64_t low, high; } menum_v0;
+
+typedef struct { uint64_t frn, parent; char *name; } lnode;
+typedef struct { lnode *v; size_t n, cap; } ltab;
+
+static int lnode_cmp(const void *a, const void *b)
+{
+    uint64_t x = ((const lnode *)a)->frn, y = ((const lnode *)b)->frn;
+    return x < y ? -1 : x > y;
+}
+
+static const lnode *lfind(const ltab *t, uint64_t frn)
+{
+    lnode key = { frn & 0xFFFFFFFFFFFFULL, 0, NULL };
+    return (const lnode *)bsearch(&key, t->v, t->n, sizeof *t->v, lnode_cmp);
+}
+
+// Every file / folder of the volume (FSCTL_ENUM_USN_DATA): number -> parent + name.
+static void live_names(HANDLE vol, ltab *t)
+{
+    static unsigned char buf[1 << 16];
+    menum_v0 med = { 0, 0, INT64_MAX };
+    DWORD got = 0;
+    while (DeviceIoControl(vol, FSCTL_ENUM_USN_DATA, &med, sizeof med, buf, sizeof buf, &got, NULL) && got > 8) {
+        size_t off = 8;
+        usn_rec r;
+        while (usn_next(buf, got, &off, &r)) {
+            if (t->n == t->cap) {
+                size_t nc = t->cap ? t->cap * 2 : 65536;
+                lnode *nv = (lnode *)realloc(t->v, nc * sizeof *nv);
+                if (nv == NULL) return;
+                t->v = nv;
+                t->cap = nc;
+            }
+            t->v[t->n++] = (lnode){ r.file_ref & 0xFFFFFFFFFFFFULL, r.parent_ref & 0xFFFFFFFFFFFFULL, _strdup(r.name) };
+        }
+        med.start_frn = *(uint64_t *)buf;                 // the next file reference to ask for
+    }
+    qsort(t->v, t->n, sizeof *t->v, lnode_cmp);
+}
+
+static void live_path(const ltab *t, char drive, uint64_t frn, char *out, size_t n)
+{
+    const char *parts[64];
+    int np = 0;
+    uint64_t cur = frn & 0xFFFFFFFFFFFFULL;
+    for (int d = 0; d < 64; d++) {
+        const lnode *e = lfind(t, cur);
+        if (e == NULL || e->parent == cur) break;          // the root's parent is itself
+        parts[np++] = e->name;
+        cur = e->parent;
+    }
+    size_t o = (size_t)snprintf(out, n, "%c:", drive);
+    for (int k = np - 1; k >= 0 && o + 2 < n; k--) {
+        int w = snprintf(out + o, n - o, "\\%s", parts[k]);
+        if (w < 0) break;
+        o += (size_t)w;
+    }
+}
+
 #define OLD_SLOTS 4096
 typedef struct { uint64_t ref; char name[260]; } oldname;
 
 int cmd_usn(int argc, char **argv)
 {
     int mode = 0, only_flagged = 0;
-    const char *file = NULL, *mftfile = NULL, *find = NULL, *rwords = NULL;
+    const char *file = NULL, *mftfile = NULL, *find = NULL, *rwords = NULL, *live = NULL;
     for (int a = 0; a < argc; a++) {
         if (strcmp(argv[a], "--json") == 0)                       mode = 1;
         else if (strcmp(argv[a], "--csv") == 0)                   mode = 2;
         else if (strcmp(argv[a], "--flagged") == 0)               only_flagged = 1;
         else if (strcmp(argv[a], "--mft") == 0 && a + 1 < argc)   mftfile = argv[++a];
+        else if (strcmp(argv[a], "--live") == 0 && a + 1 < argc)  live = argv[++a];
         else if (strcmp(argv[a], "--find") == 0 && a + 1 < argc)  find = argv[++a];
         else if (strcmp(argv[a], "--reason") == 0 && a + 1 < argc) rwords = argv[++a];
         else if (file == NULL && argv[a][0] != '-')               file = argv[a];
@@ -82,8 +150,8 @@ int cmd_usn(int argc, char **argv)
             return 1;
         }
     }
-    if (file == NULL) {
-        fputs("usn: give a copied $UsnJrnl:$J file\n", stderr);
+    if (file == NULL && live == NULL) {
+        fputs("usn: give a copied $UsnJrnl:$J file, or --live <drive> (needs administrator)\n", stderr);
         return 1;
     }
     uint32_t want = rwords ? reason_mask(rwords) : 0;
@@ -92,8 +160,56 @@ int cmd_usn(int argc, char **argv)
         return 1;
     }
     size_t n = 0;
-    unsigned char *d = slurp(file, &n);
-    if (d == NULL) {
+    unsigned char *d = NULL;
+    static ltab lt;
+    char drive = 0;
+    if (live) {
+        // Read the live journal through the documented FSCTLs: the records
+        // come back in the same USN_RECORD layout as a copied $J.
+        drive = (char)(live[0] & ~0x20);
+        if (drive < 'A' || drive > 'Z' || (live[1] && live[1] != ':')) {
+            fprintf(stderr, "usn: --live takes a drive letter such as C:\n");
+            return 1;
+        }
+        char vp[8] = { '\\', '\\', '.', '\\', drive, ':', 0 };
+        HANDLE vol = CreateFileA(vp, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+        if (vol == INVALID_HANDLE_VALUE) {
+            DWORD er = GetLastError();
+            fprintf(stderr, "usn: cannot open volume %c: (%s, error %lu)\n", drive,
+                    er == ERROR_ACCESS_DENIED ? "run as administrator" : "not available", (unsigned long)er);
+            return 1;
+        }
+        jdata_v0 jd;
+        DWORD got = 0;
+        if (!DeviceIoControl(vol, FSCTL_QUERY_USN_JOURNAL, NULL, 0, &jd, sizeof jd, &got, NULL)) {
+            fprintf(stderr, "usn: %c: has no change journal (error %lu)\n", drive, (unsigned long)GetLastError());
+            CloseHandle(vol);
+            return 1;
+        }
+        size_t cap = 1 << 22;
+        d = (unsigned char *)malloc(cap);
+        static unsigned char buf[1 << 16];
+        jread_v0 rq = { jd.first, 0xFFFFFFFF, 0, 0, 0, jd.journal_id };
+        while (d && DeviceIoControl(vol, FSCTL_READ_USN_JOURNAL, &rq, sizeof rq, buf, sizeof buf, &got, NULL) && got > 8) {
+            if (n + got > cap) {
+                size_t nc = cap * 2;
+                while (nc < n + got) nc *= 2;
+                unsigned char *nd = (unsigned char *)realloc(d, nc);
+                if (nd == NULL) break;
+                d = nd;
+                cap = nc;
+            }
+            // First 8 bytes: the USN to continue from; records follow, 8-aligned.
+            memcpy(d + n, buf + 8, got - 8);
+            n += (got - 8 + 7) & ~(size_t)7;
+            int64_t next = *(int64_t *)buf;
+            if (next <= rq.start) break;
+            rq.start = next;
+        }
+        live_names(vol, &lt);
+        CloseHandle(vol);
+        if (d == NULL) { fputs("usn: out of memory\n", stderr); return 1; }
+    } else if ((d = slurp(file, &n)) == NULL) {
         fprintf(stderr, "usn: cannot read '%s'\n", file);
         return 1;
     }
@@ -119,7 +235,7 @@ int cmd_usn(int argc, char **argv)
             nodes[i] = (mft_node){ e.parent, e.seq, 1, (uint8_t)e.in_use, (uint8_t)e.dir, e.name[0] ? _strdup(e.name) : NULL };
         }
     }
-    if (mode == 0) printf("usn  %s  (oldest first, UTC)\n\n", file);
+    if (mode == 0) printf("usn  %s%s  (oldest first, UTC)\n\n", live ? "live journal of " : "", live ? live : file);
     else if (mode == 2) puts("usn,time,file_ref,parent_ref,reasons,name,folder,reason");
     else putchar('[');
     static oldname olds[OLD_SLOTS];
@@ -140,7 +256,9 @@ int cmd_usn(int argc, char **argv)
         if (want && !(r.reason & want)) continue;
         if (find && !ci_contains(r.name, find)) continue;
         folder[0] = 0;
-        if (nodes) {
+        if (live) {
+            live_path(&lt, drive, r.parent_ref, folder, sizeof folder);
+        } else if (nodes) {
             uint32_t p = (uint32_t)(r.parent_ref & 0xFFFFFFFFFFFFULL);
             uint16_t ps = (uint16_t)(r.parent_ref >> 48);
             if (p < nn && nodes[p].valid && (nodes[p].seq == ps || (!nodes[p].in_use && nodes[p].seq == (uint16_t)(ps + 1))))
@@ -178,6 +296,9 @@ int cmd_usn(int argc, char **argv)
     }
     if (mode == 1) puts("]");
     else if (mode == 0) printf("\n%lu record(s), %lu shown, %lu flagged\n", count, shown, flagged);
+    for (size_t i = 0; i < lt.n; i++) free(lt.v[i].name);
+    free(lt.v);
+    lt.v = NULL; lt.n = lt.cap = 0;
     for (size_t i = 0; nodes && i < nn; i++) free((void *)nodes[i].name);
     free(nodes);
     free(md);

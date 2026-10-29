@@ -137,8 +137,11 @@ static const struct { const char *name, *text; } usage_table[] = {
         "rebuilt from a copy of the same volume's $MFT. Flags deleted programs /\n"
         "scripts and files renamed into a program / script name (pdf -> exe).\n"
         "--find filters by name, --reason by reason words (create, delete, rename,\n"
-        "data, security, close...). Read-only. Usage:\n"
-        "  winspect usn <$J file> [--mft <$MFT>] [--find <text>] [--reason <words>] [--flagged] [--json | --csv]\n" },
+        "data, security, close...). --live <drive> reads the running system's\n"
+        "journal and folder names through the documented FSCTL_QUERY_USN_JOURNAL /\n"
+        "FSCTL_READ_USN_JOURNAL / FSCTL_ENUM_USN_DATA (administrator). Read-only.\n"
+        "Usage:\n"
+        "  winspect usn <$J file> [--mft <$MFT>] | --live <drive> [--find <text>] [--reason <words>] [--flagged] [--json | --csv]\n" },
     { "mft",
         "winspect mft - files from a copied NTFS $MFT (collected with a triage tool\n"
         "or taken from a mounted image): full path (deleted files included, broken\n"

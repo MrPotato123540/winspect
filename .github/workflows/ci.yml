@@ -321,6 +321,20 @@ jobs:
           $ok = ($off  | ForEach-Object { "$($_.time)|$($_.id)|$($_.summary)" }) -join "`n"
           if ($lk -ne $ok) { throw "events --evtx differs from live: $(@($live).Count) live vs $(@($off).Count) offline" }
           Write-Host "events --evtx matches live ($(@($live).Count) System rows)"
+          # usn --live: a file renamed from .txt to .exe and a deleted .ps1
+          # must show up flagged in the live change journal of C:.
+          $ud = Join-Path $env:TEMP "wsusn"
+          New-Item -ItemType Directory -Force -Path $ud | Out-Null
+          Set-Content (Join-Path $ud "wsusn_note.txt") "x"
+          Rename-Item (Join-Path $ud "wsusn_note.txt") "wsusn_note.exe"
+          Set-Content (Join-Path $ud "wsusn_tool.ps1") "x"
+          Remove-Item (Join-Path $ud "wsusn_tool.ps1")
+          $uj = & $exe usn --live C: --find wsusn_ --flagged --json | ConvertFrom-Json
+          Remove-Item -Recurse -Force $ud
+          if (-not ($uj | Where-Object { $_.name -eq "wsusn_note.exe" -and $_.reason -like "*renamed into*" -and $_.old_name -eq "wsusn_note.txt" })) {
+            throw "usn --live: rename into .exe not flagged: $($uj | ConvertTo-Json -Compress)" }
+          if (-not ($uj | Where-Object { $_.name -eq "wsusn_tool.ps1" -and $_.folder -like "*\wsusn" })) {
+            throw "usn --live: deleted .ps1 not flagged with its folder: $($uj | ConvertTo-Json -Compress)" }
           # bits: a helper creates a SUSPENDED job (bare-IP source, notify
           # command line), never resumed, cancelled when it reads a line. The
           # notify command must be the reason given.

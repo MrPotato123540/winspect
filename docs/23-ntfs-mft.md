@@ -139,3 +139,22 @@ Eski ve yeni ad, dosya referansıyla eşleştirilir.
 Bu sırada `mft` / `usn` daha dayanıklı oldu. Kayıt boyutu artık 0. kayıttan
 değil, ilk 64 KB içindeki ilk geçerli `FILE` kaydından bulunuyor; başı bozuk
 bir kopya geri kalanını gizlemiyor.
+
+### Canlı makinede: usn --live C:
+
+Kopya almaya gerek yok: Windows günlüğü belgelenmiş, salt-okunur denetim
+kodlarıyla verir (yönetici hakkı gerekir):
+
+- `FSCTL_QUERY_USN_JOURNAL`: günlüğün kimliği ve ilk kaydı,
+- `FSCTL_READ_USN_JOURNAL`: kayıtlar, kopyalanmış `$J` ile **aynı**
+  `USN_RECORD` biçiminde (aynı `usn_next` ayrıştırıcısından geçer),
+- `FSCTL_ENUM_USN_DATA`: birimdeki her dosyanın numarası, ebeveyni ve adı.
+  Bundan klasör tablosu kurulur ve her kaydın tam yolu çıkarılır.
+
+İstek yapıları belgelenmiş V0 düzeniyle kodda tanımlıdır, çünkü SDK'lar bunlara
+farklı adlar veriyor (`READ_USN_JOURNAL_DATA` / `..._V0`).
+
+wine bu denetim kodlarını desteklemiyor; komut "no change journal" diye temiz
+çıkar. Windows CI'da gerçek bir deneme yapılır: `.txt` → `.exe` yeniden
+adlandırılan dosya ve silinen bir `.ps1` canlı günlükte işaretli ve klasörüyle
+görünmelidir (henüz gerçek koşu görmedi).

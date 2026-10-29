@@ -107,7 +107,7 @@ cases += [['ssn','NtOpenProcess'], ['ssn','NtOpenProcess','--json'], ['modules',
           ['mft'], ['mft','C:\\windows\\win.ini'], ['mft','C:\\nonexistent'], ['mft','C:\\mftref\\MFT','--timestomp','--csv'],
           ['mft','C:\\mftref\\MFT','--deleted','--find','zzz_none'], ['mft','C:\\mftref\\MFT','--find'],
           ['usn'], ['usn','C:\\ntfs\\J'], ['usn','C:\\ntfs\\J','--csv','--flagged'], ['usn','C:\\ntfs\\J','--reason','bogus'],
-          ['usn','C:\\ntfs\\J','--mft','C:\\windows\\win.ini'], ['usn','C:\\nonexistent']]
+          ['usn','C:\\ntfs\\J','--mft','C:\\windows\\win.ini'], ['usn','C:\\nonexistent'], ['usn','--live','C:'], ['usn','--live','7'], ['usn','--live']]
 
 bad = 0
 for args in cases:
