@@ -92,22 +92,26 @@ static void live_names(HANDLE vol, ltab *t)
     static unsigned char buf[1 << 16];
     menum_v0 med = { 0, 0, INT64_MAX };
     DWORD got = 0;
-    while (DeviceIoControl(vol, FSCTL_ENUM_USN_DATA, &med, sizeof med, buf, sizeof buf, &got, NULL) && got > 8) {
+    int full = 0;
+    while (!full && DeviceIoControl(vol, FSCTL_ENUM_USN_DATA, &med, sizeof med, buf, sizeof buf, &got, NULL) && got > 8) {
         size_t off = 8;
         usn_rec r;
         while (usn_next(buf, got, &off, &r)) {
             if (t->n == t->cap) {
                 size_t nc = t->cap ? t->cap * 2 : 65536;
                 lnode *nv = (lnode *)realloc(t->v, nc * sizeof *nv);
-                if (nv == NULL) return;
+                if (nv == NULL) { full = 1; break; }       // keep what we have; still sorted below
                 t->v = nv;
                 t->cap = nc;
             }
-            t->v[t->n++] = (lnode){ r.file_ref & 0xFFFFFFFFFFFFULL, r.parent_ref & 0xFFFFFFFFFFFFULL, _strdup(r.name) };
+            char *nm = _strdup(r.name);
+            if (nm == NULL) { full = 1; break; }
+            t->v[t->n++] = (lnode){ r.file_ref & 0xFFFFFFFFFFFFULL, r.parent_ref & 0xFFFFFFFFFFFFULL, nm };
         }
         med.start_frn = *(uint64_t *)buf;                 // the next file reference to ask for
     }
-    qsort(t->v, t->n, sizeof *t->v, lnode_cmp);
+    // bsearch in live_path needs the table sorted, whatever happened above.
+    if (t->n > 1) qsort(t->v, t->n, sizeof *t->v, lnode_cmp);
 }
 
 static void live_path(const ltab *t, char drive, uint64_t frn, char *out, size_t n)
