@@ -252,3 +252,32 @@ dokunulmaz**; tasarım bunu garanti edecek şekilde seçildi:
   ile listelenir, ayrıntı her hesap için level 3'ten (olmazsa 1'den) alınır.
 - Windows CI: devre dışı `wstest$` hesabı açılıp işaretlenmesi beklenir, sonra
   silinir; en az bir Administrators üyesi ve makine SID'i beklenir.
+
+## setupapi: aygıt ve sürücü kurulum günlükleri
+
+`%SystemRoot%\INF\setupapi.dev.log` (ve `setupapi.setup.log`, döndürülmüş
+`setupapi.dev.YYYYMMDD_hhmmss.log` kopyaları) her aygıt/sürücü kurulumunu
+bölüm bölüm yazan düz bir metin günlüğüdür:
+
+```
+[Boot Session: 2016/10/05 11:12:57.496]
+>>>  [Device Install (Hardware initiated) - USBSTOR\Disk&Ven_...]
+>>>  Section start 2016/10/05 11:16:16.471
+     ...  ("!!!  " hata, "!    " uyarı satırları)
+<<<  Section end 2016/10/05 11:16:26.388
+<<<  [Exit status: SUCCESS]
+```
+
+`winspect setupapi` her bölümü bir satır yapar: başlangıç/bitiş, tür, aygıt
+kimliği ya da INF yolu, çıkış durumu, bölümde geçen imzalayan
+(`sig: Signer Name`) ve hata/uyarı sayısı. Bir USB belleğin ilk
+`Device Install` bölümü, klasik "ilk takıldığı an" kanıtıdır.
+
+Saatler **yerel** saattir. Canlı günlükte bu makinenin saat dilimiyle UTC'ye
+çevrilir; kopyalanmış bir dosyada `--utc-offset +03:00` verilmezse
+`time_utc` boş kalır (tahmin edilmez). Hedefi olmayan bölümler (politika
+denetimi, temizlik) yalnızca `--all` ile görünür. İşaret tek: kullanıcının
+yazabildiği bir klasörden kurulan sürücü paketi. Ayrıştırıcı birim
+testlidir; plaso'nun `setupapi.dev.log` / `setupapi.setup.log` örneklerinde
+194 + 16 bölümün hepsi okunur.
+

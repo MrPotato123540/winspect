@@ -848,6 +848,53 @@ int main(void)
                 check_int("pca empty", pca_parse_line("   ", &pr), -1);
             }
             {
+                // setupapi: header, a boot session, a complete section with
+                // an error, a warning and a signer, one cut off by the next
+                // section, and one with a CR/LF ending and no target.
+                static const char *log =
+                    "\xEF\xBB\xBF[Device Install Log]\n     OS Version = 10.0\n[BeginLog]\n\n"
+                    "[Boot Session: 2023/01/02 03:04:05.678]\n\n"
+                    ">>>  [Device Install (Hardware initiated) - USBSTOR\\Disk&Ven_X&Prod_Y\\0123&0]\n"
+                    ">>>  Section start 2023/01/02 03:05:06.789\n"
+                    "     sig:      Signer Name  = ACME Inc - Drivers\n"
+                    "!    inf:      a warning\n!!!  dvi:      an error\n"
+                    "<<<  Section end 2023/01/02 03:05:07.000\n<<<  [Exit status: SUCCESS (REBOOT_REQUIRED)]\n\n"
+                    ">>>  [Setup Import Driver Package - C:\\Users\\u\\Downloads\\x.inf]\n"
+                    ">>>  Section start 2023/01/02 04:00:00.000\n"
+                    ">>>  [Enable Device Install]\r\n>>>  Section start 2023/01/03 05:00:00.001\r\n"
+                    "<<<  [Exit status: FAILURE(0xe0000219)]\r\n";
+                sa_iter it;
+                sa_sec sc;
+                sa_init(&it, log);
+                check_int("sa 1", sa_next(&it, &sc), 1);
+                check_str("sa 1 title", sc.title, "Device Install (Hardware initiated)");
+                check_str("sa 1 target", sc.target, "USBSTOR\\Disk&Ven_X&Prod_Y\\0123&0");
+                check_str("sa 1 boot", sc.boot, "2023-01-02 03:04:05");
+                check_str("sa 1 start", sc.start, "2023-01-02 03:05:06.789");
+                check_str("sa 1 end", sc.end, "2023-01-02 03:05:07.000");
+                check_str("sa 1 status", sc.status, "SUCCESS (REBOOT_REQUIRED)");
+                check_str("sa 1 signer", sc.signer, "ACME Inc - Drivers");
+                check_int("sa 1 err", (int)sc.errors, 1);
+                check_int("sa 1 warn", (int)sc.warnings, 1);
+                check_str("sa kind", sa_device_kind(sc.target), "USB storage");
+                check_int("sa 2", sa_next(&it, &sc), 1);
+                check_str("sa 2 target", sc.target, "C:\\Users\\u\\Downloads\\x.inf");
+                check_str("sa 2 cut", sc.status, "");
+                check_int("sa 3", sa_next(&it, &sc), 1);
+                check_str("sa 3 title", sc.title, "Enable Device Install");
+                check_str("sa 3 target", sc.target, "");
+                check_str("sa 3 start", sc.start, "2023-01-03 05:00:00.001");
+                check_str("sa 3 status", sc.status, "FAILURE(0xe0000219)");
+                check_int("sa end", sa_next(&it, &sc), 0);
+                check_int("sa kind usb", sa_device_kind("usb\\VID_1&PID_2") != NULL && strcmp(sa_device_kind("usb\\VID_1&PID_2"), "USB") == 0, 1);
+                check_int("sa kind none", sa_device_kind("PCI\\VEN_1") == NULL, 1);
+                sa_init(&it, NULL);
+                check_int("sa null", sa_next(&it, &sc), 0);
+                sa_init(&it, ">>>  Section start 2023/01/02 03:05:06.789\n[Boot Session: garbage]\n>>>  [X]");
+                check_int("sa last open", sa_next(&it, &sc), 1);
+                check_str("sa bad boot", sc.boot, "");
+            }
+            {
                 uint64_t si[4] = { 130000000000000000ULL, 130000000000000000ULL, 1, 1 };
                 uint64_t fn[4] = { 132000000001234567ULL, 132000000001234567ULL, 1, 1 };
                 check_int("ts whole", mft_timestomp_reason(si, fn) != NULL && strstr(mft_timestomp_reason(si, fn), "whole-second") != NULL, 1);

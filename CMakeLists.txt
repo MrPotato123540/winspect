@@ -76,6 +76,8 @@ add_executable(winspect
     src/sqlite.c
     src/browser.c
     src/pca.c
+    src/textfile.c
+    src/setupapi.c
     src/activities.c
     src/mft.c
     src/mftcmd.c
