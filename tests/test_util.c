@@ -798,6 +798,12 @@ int main(void)
             check_int("com x86 vs 64", com_path_same("%ProgramFiles(x86)%\\a.dll", "C:\\Program Files\\a.dll"), 0);
             check_int("com wow vs sys32", com_path_same("C:\\Windows\\SysWOW64\\a.dll", "C:\\Windows\\System32\\a.dll"), 0);
             check_int("com empty", com_path_same("", "a.dll"), 0);
+            check_int("np stock", asep_netprovider_default("%SystemRoot%\\System32\\ntlanman.dll"), 1);
+            check_int("np stock bare", asep_netprovider_default("drprov.dll"), 1);
+            check_int("np wsl", asep_netprovider_default("C:\\Windows\\system32\\P9NP.dll"), 1);
+            check_int("np extra", asep_netprovider_default("%SystemRoot%\\System32\\nppspy.dll"), 0);
+            check_int("np stock name elsewhere", asep_netprovider_default("C:\\Users\\Public\\ntlanman.dll"), 0);
+            check_int("tp still ok", asep_time_provider_default("%systemroot%\\system32\\w32time.dll"), 1);
             {
                 unsigned char F[0x50];
                 memset(F, 0, sizeof F);

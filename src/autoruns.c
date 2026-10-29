@@ -15,7 +15,10 @@
 //     there, not a shortcut), because the folder itself is under AppData.
 //   * Newer locations (Autoruns' other tabs, by concept): AppCertDlls, cmd.exe
 //     AutoRun, logon scripts, Active Setup, time providers, screensaver,
-//     exefile / ms-settings handler hijacks and the "Office test" key.
+//     exefile / ms-settings handler hijacks and the "Office test" key; then
+//     network providers (clear-text logon passwords), SecurityProviders,
+//     print processors, the RDP InitialProgram / StartupPrograms values and
+//     RunOnceEx.
 //   * With --sig, an entry whose image path does not exist is reported as
 //     "image file not found" (Autoruns' yellow "File not found" rows): a
 //     leftover - or a dropper that already deleted its payload.
@@ -227,6 +230,23 @@ static int def_print_monitor(const char *s)
     static const char *const d[] = { "localspl.dll", "tcpmon.dll", "usbmon.dll", "WSDMon.dll",
                                      "APMon.dll", "AppMon.dll", "FXSMON.DLL", NULL };
     return in_list_ci(s, d);
+}
+
+static int def_security_providers(const char *s)
+{
+    static const char *const d[] = { "credssp.dll", "msapsspc.dll", "schannel.dll", "digest.dll",
+                                     "msnsspc.dll", NULL };
+    return in_list_ci(s, d);
+}
+
+static int def_print_processor(const char *s)
+{
+    return _stricmp(s, "winprint.dll") == 0;
+}
+
+static int def_rdp_startup(const char *s)
+{
+    return _stricmp(s, "rdpclip") == 0 || _stricmp(s, "rdpclip.exe") == 0;
 }
 
 static int def_netsh_helper(const char *s)
@@ -607,6 +627,90 @@ int cmd_autoruns(int argc, char **argv)
     enum_subkey_value(HKEY_LOCAL_MACHINE,
                       "SYSTEM\\CurrentControlSet\\Services\\W32Time\\TimeProviders",
                       "DllName", "Time Providers", 0, asep_time_provider_default, &c);
+
+    // Network providers: every provider DLL in the order list is handed the
+    // user's name and password IN CLEAR TEXT at logon (NPLogonNotify) - the
+    // "NPPSPY" credential theft (T1556.008). The order list names services;
+    // each one's NetworkProvider\ProviderPath is the DLL.
+    {
+        regsrc *s;
+        rkey k;
+        char order[2048] = "";
+        if (open_at(&c, HKEY_LOCAL_MACHINE, "SYSTEM\\CurrentControlSet\\Control\\NetworkProvider\\Order", &s, &k)) {
+            rk_get_str(s, &k, "ProviderOrder", order, sizeof order);
+            rk_close(&k);
+        }
+        for (char *p = order, *e; p && *p; p = e ? e + 1 : NULL) {
+            e = strchr(p, ',');
+            if (e) *e = '\0';
+            while (*p == ' ') p++;
+            if (*p == '\0') continue;
+            char key[400];
+            snprintf(key, sizeof key, "SYSTEM\\CurrentControlSet\\Services\\%s\\NetworkProvider", p);
+            regsrc *ps;
+            rkey pk;
+            char dll[1024];
+            if (open_at(&c, HKEY_LOCAL_MACHINE, key, &ps, &pk)) {
+                if (rk_get_str(ps, &pk, "ProviderPath", dll, sizeof dll) && dll[0])
+                    emit_ex(&c, "Network Providers", p, dll, 0, asep_netprovider_default);
+                rk_close(&pk);
+            }
+        }
+    }
+
+    // SSP list read by the SSPI on load (T1547.005); stock on Windows 7..11 is
+    // "credssp.dll" (older systems listed a few more Microsoft packages).
+    {
+        regsrc *s;
+        rkey k;
+        char list[2048] = "";
+        if (open_at(&c, HKEY_LOCAL_MACHINE, "SYSTEM\\CurrentControlSet\\Control\\SecurityProviders", &s, &k)) {
+            rk_get_str(s, &k, "SecurityProviders", list, sizeof list);
+            rk_close(&k);
+        }
+        for (char *p = list, *e; p && *p; p = e ? e + 1 : NULL) {
+            e = strchr(p, ',');
+            if (e) *e = '\0';
+            while (*p == ' ') p++;
+            if (*p) emit_ex(&c, "SecurityProviders", "SecurityProviders", p, 0, def_security_providers);
+        }
+    }
+
+    // Print processors: DLLs the spooler (SYSTEM) loads (T1547.012). Stock:
+    // winprint.dll for both environments.
+    enum_subkey_value(HKEY_LOCAL_MACHINE,
+                      "SYSTEM\\CurrentControlSet\\Control\\Print\\Environments\\Windows x64\\Print Processors",
+                      "Driver", "Print Processors", 0, def_print_processor, &c);
+    enum_subkey_value(HKEY_LOCAL_MACHINE,
+                      "SYSTEM\\CurrentControlSet\\Control\\Print\\Environments\\Windows NT x86\\Print Processors",
+                      "Driver", "Print Processors (x86)", 0, def_print_processor, &c);
+
+    // Remote Desktop: InitialProgram runs instead of the shell for RDP logons
+    // (empty by default); StartupPrograms runs at the start of every RDP
+    // session (stock "rdpclip").
+    read_value(HKEY_LOCAL_MACHINE, "SYSTEM\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\RDP-Tcp",
+               "InitialProgram", "Terminal Server RDP-Tcp", 1, NULL, &c);
+    read_value(HKEY_LOCAL_MACHINE, "SYSTEM\\CurrentControlSet\\Control\\Terminal Server\\Wds\\rdpwd",
+               "StartupPrograms", "Terminal Server rdpwd", 0, def_rdp_startup, &c);
+
+    // RunOnceEx: like RunOnce, one subkey per section; still processed by
+    // Windows and rarely used legitimately today (T1547.001).
+    {
+        static const char ROX[] = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnceEx";
+        regsrc *s;
+        rkey k;
+        if (open_at(&c, HKEY_LOCAL_MACHINE, ROX, &s, &k)) {
+            static struct subnames rox;
+            rox.count = 0;
+            rk_subkeys(s, &k, collect_sub, &rox);
+            rk_close(&k);
+            for (int i = 0; i < rox.count; i++) {
+                char sub[400];
+                snprintf(sub, sizeof sub, "%s\\%s", ROX, rox.n[i]);
+                enum_run_key(HKEY_LOCAL_MACHINE, sub, "HKLM\\...\\RunOnceEx", &c);
+            }
+        }
+    }
 
     // Screensaver: Windows runs SCRNSAVE.EXE after idle time (T1546.002); a
     // .scr is just a PE file. Flagged when it lives in a user-writable dir.

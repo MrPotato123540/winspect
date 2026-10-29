@@ -56,6 +56,12 @@ int asep_exefile_default(const char *cmd);
 // vmictimeprovider.dll, either bare or under a System32 directory
 // ("%systemroot%\system32\w32time.dll").
 int asep_time_provider_default(const char *dll);
+// 1 if a network provider's ProviderPath is a stock one: drprov.dll (RDPNP),
+// ntlanman.dll (LanmanWorkstation), davclnt.dll (WebClient) or p9np.dll (WSL),
+// bare or under System32. Every provider receives the user's password in clear
+// text at logon (NPLogonNotify), so an extra one is a credential-theft point
+// (T1556.008).
+int asep_netprovider_default(const char *dll);
 
 // 1 if an image path uses the name of a core Windows binary that only ever
 // lives directly in System32 / SysWOW64 (see lineage_system32_only) but sits

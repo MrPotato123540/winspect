@@ -253,18 +253,33 @@ int asep_exefile_default(const char *cmd)
     return n == 7 && memcmp(cmd, "\"%1\" %*", 7) == 0;
 }
 
-int asep_time_provider_default(const char *dll)
+// 1 if dll names one of `names`, bare (System32 search) or under a directory
+// ending in "\system32" (any drive, or %systemroot%).
+static int sys32_dll_in(const char *dll, const char *const *names)
 {
     const char *base = strrchr(dll, '\\');
     if (base == NULL) {
         base = dll;                                    // bare name: System32 search
     } else {
-        // Directory part must end in "\system32" (any drive / %systemroot%).
         size_t dl = (size_t)(base - dll);
         if (dl < 9 || !ieq_prefix(base - 9, "\\system32")) return 0;
         base++;
     }
-    return ieq(base, "w32time.dll") || ieq(base, "vmictimeprovider.dll");
+    for (; *names; names++) if (ieq(base, *names)) return 1;
+    return 0;
+}
+
+int asep_time_provider_default(const char *dll)
+{
+    static const char *const stock[] = { "w32time.dll", "vmictimeprovider.dll", NULL };
+    return sys32_dll_in(dll, stock);
+}
+
+int asep_netprovider_default(const char *dll)
+{
+    // RDPNP, LanmanWorkstation, webclient (WebDAV) and P9NP (WSL file access).
+    static const char *const stock[] = { "drprov.dll", "ntlanman.dll", "davclnt.dll", "p9np.dll", NULL };
+    return sys32_dll_in(dll, stock);
 }
 
 struct lineage_rule {
