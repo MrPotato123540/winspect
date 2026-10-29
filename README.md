@@ -118,7 +118,7 @@ takes. The tables below are a map, not the full reference.
 | `strings <file>` | ASCII and UTF-16 strings with URLs, IPs, paths and encoded PowerShell tagged. |
 | `hash <file>` | MD5, SHA-1 and SHA-256. |
 | `streams <path>` | Alternate data streams and Mark-of-the-Web (zone and download URL). |
-| `mft <$MFT>` | Files from a copied `$MFT`: full paths (deleted files too, broken chains under `$Orphan`), sizes, `$STANDARD_INFORMATION` and `$FILE_NAME` times, Object ID creation time and MAC. `--timestomp` lists files whose `$SI` creation time precedes `$FN`'s, as candidates rather than findings. |
+| `mft <$MFT>` / `mft --live C:` | Files from a copied `$MFT`: full paths (deleted files too, broken chains under `$Orphan`), sizes, `$STANDARD_INFORMATION` and `$FILE_NAME` times, Object ID creation time and MAC. `--timestomp` lists files whose `$SI` creation time precedes `$FN`'s, as candidates rather than findings. `--live C:` reads the running volume's `$MFT` directly (read-only, administrator). |
 | `usn <$J>` | The NTFS change journal (`$UsnJrnl:$J` copy): every create, delete, rename and data change with time and reasons; `--mft` adds each file's folder; `--live C:` reads the running system's journal through the documented FSCTLs. Flags deleted programs and files renamed into program names (`.pdf` to `.exe`). |
 | `hive <file> [key]` | Browse an offline registry hive. |
 | `pipes`, `objects`, `hosts`, `arp`, `routes`, `sessions`, `shares` | Named pipes (known tool defaults flagged), Object Manager names, hosts file, neighbour cache, routing table, logon sessions, SMB shares. |

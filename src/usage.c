@@ -163,8 +163,10 @@ static const struct { const char *name, *text; } usage_table[] = {
         "earlier than their $FN creation time - a timestomping CANDIDATE list, not\n"
         "a verdict: files from install media and archives look the same (on a real\n"
         "XP image a third of all files did). --find filters by path text,\n"
-        "--deleted keeps records that are no longer in use. Read-only. Usage:\n"
-        "  winspect mft <$MFT file> [--find <text>] [--deleted] [--timestomp] [--json | --csv]\n" },
+        "--deleted keeps records that are no longer in use. --live <drive> reads\n"
+        "the running system's $MFT through a read-only volume handle (boot sector\n"
+        "-> the $MFT's own record -> its data runs; administrator). Read-only. Usage:\n"
+        "  winspect mft <$MFT file> | --live <drive> [--find <text>] [--deleted] [--timestomp] [--json | --csv]\n" },
     { "activities",
         "winspect activities - Windows 10 Timeline (ActivitiesCache.db under\n"
         "%LOCALAPPDATA%\\ConnectedDevicesPlatform\\<account>\\): which application was\n"

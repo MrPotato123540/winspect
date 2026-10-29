@@ -351,6 +351,20 @@ jobs:
             throw "usn --live: rename into .exe not flagged: $($uj | ConvertTo-Json -Compress)" }
           if (-not ($uj | Where-Object { $_.name -eq "wsusn_tool.ps1" -and $_.folder -like "*\wsusn" })) {
             throw "usn --live: deleted .ps1 not flagged with its folder: $($uj | ConvertTo-Json -Compress)" }
+          # mft --live: a file created and then deleted must still be in the
+          # live $MFT as a not-in-use record with its full path; a kept file
+          # is listed as in use.
+          $md = Join-Path $env:TEMP "wsmft"
+          New-Item -ItemType Directory -Force -Path $md | Out-Null
+          Set-Content (Join-Path $md "wsmft_keep.txt") "x"
+          Set-Content (Join-Path $md "wsmft_gone.txt") "x"
+          Remove-Item (Join-Path $md "wsmft_gone.txt")
+          $mj = & $exe mft --live C: --deleted --find wsmft_ --json | ConvertFrom-Json
+          Remove-Item -Recurse -Force $md
+          if (-not ($mj | Where-Object { $_.path -like "*\wsmft\wsmft_gone.txt" -and -not $_.in_use })) {
+            throw "mft --live: deleted file not found: $($mj | ConvertTo-Json -Compress)" }
+          if (-not ($mj | Where-Object { $_.path -like "*\wsmft\wsmft_keep.txt" -and $_.in_use })) {
+            throw "mft --live: kept file not found: $($mj | ConvertTo-Json -Compress)" }
           # bits: a helper creates a SUSPENDED job (bare-IP source, notify
           # command line), never resumed, cancelled when it reads a line. The
           # notify command must be the reason given.
