@@ -22,7 +22,7 @@ typedef struct {
 typedef struct {
     char root[MAX_PATH];
     char system[MAX_PATH * 2], software[MAX_PATH * 2], sam[MAX_PATH * 2], amcache[MAX_PATH * 2];
-    char prefetch[MAX_PATH * 2], tasks[MAX_PATH * 2], recycle[MAX_PATH * 2];
+    char prefetch[MAX_PATH * 2], tasks[MAX_PATH * 2], recycle[MAX_PATH * 2], pca[MAX_PATH * 2];
     char evtx[IMG_MAX_LOGS][MAX_PATH * 2];
     int nevtx;
     img_user users[IMG_MAX_USERS];

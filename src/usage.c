@@ -346,7 +346,7 @@ static const struct { const char *name, *text; } usage_table[] = {
     { "sweep",
         "winspect sweep - one-shot machine triage: runs the system-wide checks in\n"
         "\"findings only\" mode (posture --warn, hunt, hidden, net, autoruns/services/tasks/\n"
-        "taskcache/firewall/prefetch --flagged, defender, wmi, users/comhijack/bits/recyclebin --flagged,\n"
+        "taskcache/firewall/prefetch/pca --flagged, defender, wmi, users/comhijack/bits/recyclebin --flagged,\n"
         "pshistory / browser --all-users --flagged, events) and prints them as one\n"
         "report. With --json the result is a single object, one key per check; a\n"
         "check that could not run (e.g. needs elevation) is null instead of breaking\n"
@@ -465,6 +465,15 @@ static const struct { const char *name, *text; } usage_table[] = {
         "tied to the serial. A standard DFIR question (\"which USB sticks were\n"
         "plugged in, and when?\"). Read-only.\n"
         "Usage: winspect usb [--hive <SYSTEM>] [--json | --csv]\n" },
+    { "pca",
+        "winspect pca - Program Compatibility Assistant records (Windows 11 22H2+):\n"
+        "C:\\Windows\\appcompat\\pca\\PcaAppLaunchDic.txt (full path + last launch time,\n"
+        "UTC) and PcaGeneralDb0/1.txt (time, run status, path, description, vendor,\n"
+        "version, program id). Execution evidence that survives Prefetch being\n"
+        "disabled. Lines whose shape does not match the documented layout are shown\n"
+        "raw instead of being guessed at. Flags programs in user-writable folders.\n"
+        "A folder argument reads a copy (e.g. from a disk image). Read-only. Usage:\n"
+        "  winspect pca [<folder>] [--flagged] [--json | --csv]\n" },
     { "prefetch",
         "winspect prefetch - evidence of execution from %SystemRoot%\\Prefetch\\*.pf:\n"
         "executable name, run count, last run time(s) and - from the file's own\n"

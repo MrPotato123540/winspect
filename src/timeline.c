@@ -35,6 +35,7 @@
 #include "sysinfo.h"
 #include "amcache.h"
 #include "browser.h"
+#include "pca.h"
 #include "imgpaths.h"
 
 #include <windows.h>
@@ -289,6 +290,16 @@ static void x_browser(tl *t, const jm_node *r)
     add(t, S(r, "time"), w, S(r, "reason"), B(r, "suspicious"));
 }
 
+static void x_pca(tl *t, const jm_node *r)
+{
+    char w[1200];
+    const char *kind = S(r, "kind");
+    if (strcmp(kind, "raw") == 0) return;                      // no reliable time
+    snprintf(w, sizeof w, "%s (PCA %s record): %s", strcmp(kind, "launch") == 0 ? "program launched" : "program seen",
+             kind, S(r, "path"));
+    add(t, S(r, "time"), w, S(r, "file"), B(r, "suspicious"));
+}
+
 // sysinfo prints one object, not a list. Network first/last-connected times
 // are LOCAL time in the registry, so they are left out of this UTC view.
 static void x_sysinfo(tl *t, const jm_node *doc)
@@ -335,6 +346,7 @@ static const source sources[] = {
     { "events",     cmd_events,     { "--max", "200", NULL }, NULL, x_events, NULL },
     { "sysinfo",    cmd_sysinfo,    { NULL },               NULL, x_sysinfo, NULL },
     { "browser",    cmd_browser,    { NULL },               NULL, x_browser, NULL },
+    { "pca",        cmd_pca,        { NULL },               NULL, x_pca, NULL },
 };
 
 // The same sources for an offline installation under root (timeline --root):
@@ -347,6 +359,7 @@ static size_t image_sources(const img_paths *ip, source *out, size_t cap)
         const char *a_[] = { __VA_ARGS__, NULL }; \
         for (int i_ = 0; a_[i_] && i_ < 12; i_++) s_->args[i_] = a_[i_]; } } while (0)
     if (ip->prefetch[0]) ADD("prefetch", cmd_prefetch, x_prefetch, NULL, NULL, "--dir", ip->prefetch);
+    if (ip->pca[0]) ADD("pca", cmd_pca, x_pca, NULL, NULL, ip->pca);
     if (ip->system[0]) {
         ADD("bam", cmd_bam, x_bam, NULL, NULL, "--hive", ip->system);
         ADD("shimcache", cmd_shimcache, x_shimcache, NULL, NULL, "--hive", ip->system);

@@ -75,6 +75,7 @@ takes. The tables below are a map, not the full reference.
 | Command | What it does |
 | --- | --- |
 | `prefetch` | Programs that ran: full path, run count, last eight run times. Handles Windows 10/11 compressed files. |
+| `pca` | Windows 11 22H2+ Program Compatibility Assistant logs (`appcompat\pca`): programs launched, with the last launch time. Still there when Prefetch is off. |
 | `amcache` | File inventory from Amcache.hve with SHA-1, publisher and version. Look up a hash with `--sha1`. |
 | `shimcache` | AppCompatCache entries (Windows 7, 10 and 11 layouts). |
 | `bam` | Background Activity Moderator: last run per program and user. |
@@ -128,7 +129,7 @@ takes. The tables below are a map, not the full reference.
 | `--usrclass` with `--software` | `comhijack` |
 | `--sam <SAM>` | `users` (account names and the fixed `F` record only) |
 | `--evtx <file>` (repeatable) | `events`, including `--summary` |
-| a copied file or folder | `prefetch` (file or `--dir`), `amcache`, `lnk`, `jumplist`, `recyclebin`, `pshistory`, `tasks --dir`, `browser` (database file or `--home <user folder>`) |
+| a copied file or folder | `prefetch` (file or `--dir`), `pca`, `amcache`, `lnk`, `jumplist`, `recyclebin`, `pshistory`, `tasks --dir`, `browser` (database file or `--home <user folder>`) |
 
 ## Building
 

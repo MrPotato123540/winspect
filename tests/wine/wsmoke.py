@@ -100,7 +100,8 @@ cases += [['ssn','NtOpenProcess'], ['ssn','NtOpenProcess','--json'], ['modules',
           ['image'], ['image','C:\\nonexistent'], ['image','C:\\windows'], ['image','C:\\img2'], ['image','a','b'],
           ['timeline','--root','C:\\img2','--csv'], ['timeline','--root','C:\\nonexistent'], ['timeline','--root','C:\\img2','--sources','amcache,prefetch'],
           ['browser'], ['browser','--csv'], ['browser','--downloads','--json'], ['browser','--all-users','--flagged'], ['browser','--since','5'],
-          ['browser','--home','C:\\img2\\Users\\bob'], ['browser','C:\\windows\\win.ini'], ['browser','C:\\nonexistent'], ['browser','--since','0']]
+          ['browser','--home','C:\\img2\\Users\\bob'], ['browser','C:\\windows\\win.ini'], ['browser','C:\\nonexistent'], ['browser','--since','0'],
+          ['pca'], ['pca','--csv'], ['pca','--flagged','--json'], ['pca','C:\\nonexistent'], ['pca','a','b']]
 
 bad = 0
 for args in cases:

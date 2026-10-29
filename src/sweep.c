@@ -32,6 +32,7 @@
 #include "comhijack.h"
 #include "users.h"
 #include "browser.h"
+#include "pca.h"
 
 #include <windows.h>
 #include <stdio.h>
@@ -58,6 +59,7 @@ static const check checks[] = {
     { "taskcache", "scheduled tasks hidden from tools",      cmd_taskcache, { "--flagged", NULL } },
     { "firewall",  "risky inbound allow rules",              cmd_firewall,  { "--flagged", NULL } },
     { "prefetch",  "programs that ran from user-writable dirs", cmd_prefetch, { "--flagged", NULL } },
+    { "pca",       "PCA launches from user-writable dirs (Win11)", cmd_pca, { "--flagged", NULL } },
     { "defender",  "Defender exclusions / disabled protection", cmd_defender, { NULL } },
     { "wmi",       "WMI permanent subscriptions",            cmd_wmi,       { NULL } },
     { "users",     "hidden-looking / guest / password-less accounts", cmd_users, { "--flagged", NULL } },

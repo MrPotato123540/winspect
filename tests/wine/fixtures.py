@@ -365,6 +365,17 @@ con.close()
 os.replace(ffp + '.copy', ffp); os.replace(ffp + '-wal.copy', ffp + '-wal')
 if os.path.exists(ffp + '-shm'): os.remove(ffp + '-shm')
 
+# --- pca: Windows 11 PCA text files in both encodings the write-ups report
+# (UTF-16LE without BOM, and ANSI cp1252), plus a line of unknown shape --------
+pcad = os.path.join(pfx, 'drive_c', 'windows', 'appcompat', 'pca')
+os.makedirs(pcad, exist_ok=True)
+with open(os.path.join(pcad, 'PcaAppLaunchDic.txt'), 'wb') as f:
+    f.write(('C:\\Users\\bob\\AppData\\Local\\Temp\\stage2.exe|2024-03-05 08:09:10.123\r\n'
+             'C:\\Program Files\\Notepad++\\notepad++.exe|2024-03-04 07:00:00.000\r\n').encode('utf-16-le'))
+with open(os.path.join(pcad, 'PcaGeneralDb0.txt'), 'wb') as f:
+    f.write(('2024-03-05 08:09:11.000|2|C:\\Tools\\caf\xe9.exe|Caf\xe9 tool|ACME|1.2.3|0006aa|0\r\n'
+             'something unexpected here\r\n').encode('cp1252'))
+
 # --- rdp: outgoing Remote Desktop history ---------------------------------------
 T = r'HKCU\Software\Microsoft\Terminal Server Client'
 reg(T + r'\Default', '/v', 'MRU0', '/t', 'REG_SZ', '/d', '10.10.5.21')
@@ -398,6 +409,9 @@ checks = [
                              ('198.51.100.7', 'visited a bare IP address'), ('tool v2.ps1', 'downloaded from a bare IP address'),
                              ('"title":"Example"', None)],
      ['report.pdf', 'Example news', '"title":"Example"']),
+    (['pca', '--json'], [('stage2.exe', 'ran from a user-writable dir'), ('"time":"2024-03-05 08:09:10"', None),
+                         ('café.exe', '"vendor":"ACME"'), ('"raw":"something unexpected here"', None)],
+     ['notepad++.exe', 'café.exe']),
     (['rdp', '--json'], [('"source":"Default","position":0', '"host":"10.10.5.21"'),
                          ('fileserver01.corp.example', '"position":1'),
                          ('"source":"Servers"', 'CORP\\\\svc_backup'), ('"certificate_accepted":true', None)], []),
@@ -878,7 +892,7 @@ rc, out, err = wine([exe, 'sweep', '--json'], timeout=600)
 try:
     d = json.loads(out)
     want = ['posture', 'hunt', 'hidden', 'net', 'autoruns', 'services', 'tasks', 'taskcache',
-            'firewall', 'prefetch', 'defender', 'wmi', 'users', 'comhijack', 'bits', 'pshistory', 'recyclebin', 'browser', 'events']
+            'firewall', 'prefetch', 'pca', 'defender', 'wmi', 'users', 'comhijack', 'bits', 'pshistory', 'recyclebin', 'browser', 'events']
     missing = [k for k in want if k not in d]
     if missing:
         print(f'FAIL sweep: missing keys {missing}'); fails += 1

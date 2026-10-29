@@ -827,6 +827,22 @@ int main(void)
             check_int("br ip visit", browser_reason(0, "http://10.1.1.1/x?y=1", NULL, 0) != NULL, 1);
             check_int("br ip query", browser_reason(0, "https://example.com/?ip=10.1.1.1", NULL, 0) == NULL, 1);
             check_int("br file url", browser_reason(0, "file:///C:/10.1.1.1/a.html", NULL, 0) == NULL, 1);
+            {
+                pca_rec pr;
+                check_int("pca launch", pca_parse_line("C:\\Users\\u\\Downloads\\a.exe|2024-02-01 10:11:12.345", &pr), 0);
+                check_int("pca launch kind", pr.kind, PCA_LAUNCH);
+                check_str("pca launch time", pr.time, "2024-02-01 10:11:12");
+                check_str("pca launch path", pr.path, "C:\\Users\\u\\Downloads\\a.exe");
+                check_int("pca general", pca_parse_line("2024-02-01 10:11:12.345|2|C:\\Tools\\t.exe|Tool|ACME|1.0.0|0006abc|0", &pr), 0);
+                check_int("pca general kind", pr.kind, PCA_GENERAL);
+                check_str("pca general path", pr.path, "C:\\Tools\\t.exe");
+                check_str("pca general vendor", pr.vendor, "ACME");
+                check_str("pca general pid", pr.program_id, "0006abc");
+                check_int("pca bad time", (pca_parse_line("C:\\a.exe|2024-02-01T10:11:12", &pr), pr.kind), PCA_RAW);
+                check_int("pca no path", (pca_parse_line("abc|2024-02-01 10:11:12", &pr), pr.kind), PCA_RAW);
+                check_int("pca short general", (pca_parse_line("2024-02-01 10:11:12|1|C:\\a.exe", &pr), pr.kind), PCA_RAW);
+                check_int("pca empty", pca_parse_line("   ", &pr), -1);
+            }
             check_int("xpm sys", evt_xpath_match("*[System[(EventID=7045 or EventID=104)]]", 104, 4), 1);
             check_int("xpm sys no", evt_xpath_match("*[System[(EventID=7045 or EventID=104)]]", 1040, 4), 0);
             check_int("xpm level ok", evt_xpath_match("*[System[(EventID=4104) and (Level=3)]]", 4104, 3), 1);

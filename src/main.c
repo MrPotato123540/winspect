@@ -94,6 +94,7 @@
 #include "timeline.h"
 #include "image.h"
 #include "browser.h"
+#include "pca.h"
 #include "tasks.h"
 
 // cmd_modules lives in modules.c: a live process's loaded modules
@@ -281,6 +282,7 @@ static const struct {
     { "certstore",cmd_certstore,"certificates in a system store (Root)",    "system" },
     { "objects",  cmd_objects,  "named kernel objects (BaseNamedObjects)",  "system" },
     { "usb",      cmd_usb,      "USB storage history (Enum\\USBSTOR)",       "system" },
+    { "pca",      cmd_pca,      "PCA launch records (Windows 11 22H2+)",      "system" },
     { "prefetch", cmd_prefetch, "execution evidence from Prefetch (*.pf)",   "system" },
     { "shimcache",cmd_shimcache,"AppCompatCache entries (programs seen)",    "system" },
     { "bam",      cmd_bam,      "BAM: last run per program per user",        "system" },
