@@ -81,6 +81,8 @@ add_executable(winspect
     src/mftcmd.c
     src/usn.c
     src/usncmd.c
+    src/esedb.c
+    src/srum.c
     src/timeline.c
     src/jumplist.c
     src/tasks.c

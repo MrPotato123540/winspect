@@ -122,6 +122,17 @@ jobs:
           python3 -I tests/usn_check.py ./usn_dump UsnJrnl.raw
           cc -I inc -std=c11 $SAN src/mft.c tests/fuzz_mft.c -o fuzz_mft
           ./fuzz_mft MFT 1000
+      - name: ESE reader (SRUM) vs plaso test data + fuzz
+        # plaso's test_data/SRUDB.dat (data only, pinned commit): the record
+        # count over the three SRUM tables and the rows plaso's SRUM plugin
+        # test asserts; then corrupted copies under ASan/UBSan.
+        run: |
+          curl -sSfL -o SRUDB.dat "https://raw.githubusercontent.com/log2timeline/plaso/ee5a0ab4f7af07f61b0554ba8edc0700514efc5a/test_data/SRUDB.dat"
+          SAN="-g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all"
+          cc -I inc -std=c11 $SAN src/esedb.c tests/ese_dump.c -o ese_dump
+          python3 -I tests/srum_check.py ./ese_dump SRUDB.dat
+          cc -I inc -std=c11 $SAN src/esedb.c tests/fuzz_ese.c -o fuzz_ese
+          ./fuzz_ese SRUDB.dat 60 SruDbIdMapTable "{973F5D5C-1D90-4944-BE8E-24B94231A174}" "{DD6636C4-8929-4683-974E-22C046A43763}"
       - name: Registry hive reader vs real hives (regipy test data)
         # Real NTUSER.DAT / SYSTEM / SOFTWARE / Amcache.hve files from the
         # regipy project (data only, pinned commit). Header fields, key/value
@@ -175,6 +186,8 @@ jobs:
           python3 tests/wine/evtxfiles.py ./winspect.exe evtxref
           curl -sSfL -o MFT "https://raw.githubusercontent.com/log2timeline/plaso/ee5a0ab4f7af07f61b0554ba8edc0700514efc5a/test_data/MFT"
           python3 tests/wine/mftfile.py ./winspect.exe MFT
+          curl -sSfL -o SRUDB.dat "https://raw.githubusercontent.com/log2timeline/plaso/ee5a0ab4f7af07f61b0554ba8edc0700514efc5a/test_data/SRUDB.dat"
+          python3 tests/wine/srumfile.py ./winspect.exe SRUDB.dat
           # Offline-hive mode (--hive / hive) on real Windows hives
           git clone -q https://github.com/mkorman90/regipy regipy
           git -C regipy checkout -q c6de929abc37d8315d1c31aba5e937db636f3303

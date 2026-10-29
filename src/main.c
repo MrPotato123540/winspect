@@ -98,6 +98,7 @@
 #include "activities.h"
 #include "mftcmd.h"
 #include "usncmd.h"
+#include "srum.h"
 #include "tasks.h"
 
 // cmd_modules lives in modules.c: a live process's loaded modules
@@ -243,6 +244,7 @@ static const struct {
     { "comhijack",cmd_comhijack,"per-user COM classes overriding HKLM ones",  "security" },
     { "bits",     cmd_bits,     "BITS jobs: files, owner, notify command",   "security" },
     { "recyclebin", cmd_recyclebin, "Recycle Bin: deleted files, owner, time", "file" },
+    { "srum",     cmd_srum,     "SRUM: network bytes and app use per hour",   "file" },
     { "usn",      cmd_usn,      "NTFS change journal copy ($UsnJrnl:$J)",     "file" },
     { "mft",      cmd_mft,      "NTFS $MFT copy: paths, times, timestomping", "file" },
     { "activities", cmd_activities, "Windows 10 Timeline: app use and documents", "file" },

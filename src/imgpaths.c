@@ -38,6 +38,7 @@ int img_find(const char *root, img_paths *p)
     at(p, p->tasks, sizeof p->tasks, "Windows\\System32\\Tasks", 1);
     at(p, p->recycle, sizeof p->recycle, "$Recycle.Bin", 1);
     at(p, p->pca, sizeof p->pca, "Windows\\appcompat\\pca", 1);
+    at(p, p->srum, sizeof p->srum, "Windows\\System32\\sru\\SRUDB.dat", 0);
     static const char *const logs[IMG_MAX_LOGS] = {
         "System.evtx", "Security.evtx", "Microsoft-Windows-Windows Defender%4Operational.evtx",
         "Microsoft-Windows-TaskScheduler%4Operational.evtx",

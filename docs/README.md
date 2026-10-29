@@ -78,6 +78,9 @@ Sırayla oku. Her dosya bir öncekinin üstüne kurulu:
 24. **[23 — NTFS $MFT ve USN günlüğü](23-ntfs-mft.md)**
     `mft` ve `usn`: dosya kayıtları, silinmiş ve sahipsiz dosyalar, Object ID,
     değişiklik geçmişi; timestomping neden bulgu değil de aday listesi.
+25. **[24 — SRUM ve ESE](24-srum-ese.md)**
+    `srum`: uygulama başına ağ baytları; kendi ESE (JET Blue) okuyucumuz ve
+    plaso'nun gerçek veritabanıyla doğrulaması.
 
 ## Aklında tut: tek cümlelik fikir
 

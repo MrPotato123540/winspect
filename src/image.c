@@ -49,6 +49,7 @@
 #include "browser.h"
 #include "pca.h"
 #include "activities.h"
+#include "srum.h"
 
 #include <windows.h>
 #include <stdio.h>
@@ -244,6 +245,7 @@ int cmd_image(int argc, char **argv)
     if (has_amc) JOB("amcache", cmd_amcache, NULL, RULE_FLAGGED, NULL, amc);
     if (has_pf)  JOB("prefetch", cmd_prefetch, NULL, RULE_FLAGGED, NULL, "--dir", pf);
     if (ip.pca[0]) JOB("pca", cmd_pca, NULL, RULE_FLAGGED, NULL, ip.pca);
+    if (ip.srum[0]) JOB("srum", cmd_srum, NULL, RULE_FLAGGED, NULL, ip.srum, "--summary");
     if (has_tk)  JOB("tasks", cmd_tasks, NULL, RULE_FLAGGED, NULL, "--dir", tk);
     if (has_rb)  JOB("recyclebin", cmd_recyclebin, NULL, RULE_FLAGGED, NULL, rb);
     if (nev) {

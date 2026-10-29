@@ -76,6 +76,7 @@ takes. The tables below are a map, not the full reference.
 | --- | --- |
 | `prefetch` | Programs that ran: full path, run count, last eight run times. Handles Windows 10/11 compressed files. |
 | `pca` | Windows 11 22H2+ Program Compatibility Assistant logs (`appcompat\pca`): programs launched, with the last launch time. Still there when Prefetch is off. |
+| `srum` | System Resource Usage Monitor (`SRUDB.dat`, an ESE database read with a built-in reader): bytes sent and received per application, user and hour; CPU / disk use; connection spans. `--summary` totals per application, largest upload first. |
 | `amcache` | File inventory from Amcache.hve with SHA-1, publisher and version. Look up a hash with `--sha1`. |
 | `shimcache` | AppCompatCache entries (Windows 7, 10 and 11 layouts). |
 | `bam` | Background Activity Moderator: last run per program and user. |
@@ -159,7 +160,7 @@ came back from the ANSI file APIs as `Gülsen` and was silently skipped.
 ## Testing
 
 Parsers that do not need Windows (Prefetch, ShimCache, `.lnk`, shell items,
-Jump List DestList, compound files, registry hives, `.evtx` event logs, SQLite databases, `$MFT` records, Recycle Bin, SAM records,
+Jump List DestList, compound files, registry hives, `.evtx` event logs, SQLite and ESE databases, `$MFT` records, Recycle Bin, SAM records,
 task XML, the JSON reader and the various rule tables) live in portable C files
 and are tested on Linux:
 
@@ -178,7 +179,7 @@ third-party code is run):
 - `.lnk`: 34 real-world samples, field by field, against LnkParse3's expected output.
 - Jump List DestList: real Windows 7 to 10 files from the JumpList project.
 - Registry hives, SAM, AppCompatCache, Amcache, ShellBags: regipy's test hives and published values.
-- Recycle Bin, `.evtx` event logs, `$MFT` and the USN journal: plaso's test files and the values its tests assert.
+- Recycle Bin, `.evtx` event logs, `$MFT`, the USN journal and SRUM: plaso's test files and the values its tests assert.
 - Certificates read offline: checked against `openssl x509` and `hashlib`.
 - The JSON reader: random documents compared with Python's `json` module.
 - The SQLite reader: random databases (page sizes, UTF-16, overflow pages, uncheckpointed WAL) compared row by row with Python's `sqlite3` module.

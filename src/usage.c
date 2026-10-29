@@ -130,6 +130,18 @@ static const struct { const char *name, *text; } usage_table[] = {
         "flagged. Other users' folders need admin. A file or folder argument reads a\n"
         "copy (e.g. from a disk image). Read-only. Usage:\n"
         "  winspect recyclebin [<$I file | INFO2 | folder>] [--flagged] [--json | --csv]\n" },
+    { "srum",
+        "winspect srum - System Resource Usage Monitor (SRUDB.dat, an ESE database\n"
+        "read with winspect's own reader): per application and user, hour by hour,\n"
+        "the bytes sent and received on each network interface (--network, the\n"
+        "default), CPU / disk use (--apps) and network connection spans\n"
+        "(--connectivity). --summary adds the network bytes up per application,\n"
+        "largest upload first - the quickest way to spot data leaving. Flags\n"
+        "programs in user-writable folders that sent data. The live file\n"
+        "(%SystemRoot%\\System32\\sru\\SRUDB.dat) is locked: pass a copy (e.g.\n"
+        "esentutl /y ... /vss). Read-only. Usage:\n"
+        "  winspect srum <SRUDB.dat> [--network | --apps | --connectivity | --summary]\n"
+        "                [--find <app text>] [--flagged] [--json | --csv]\n" },
     { "usn",
         "winspect usn - the NTFS change journal ($Extend\\$UsnJrnl:$J, copied with a\n"
         "triage tool): every create, delete, rename, data change... with time, file\n"
