@@ -28,7 +28,7 @@ static void u16_to_u8(const unsigned char *s, size_t nchars, char *out, size_t n
         } else if (c >= 0xD800 && c <= 0xDFFF) {
             c = '?';
         }
-        unsigned char b[4];
+        unsigned char b[4] = { 0, 0, 0, 0 };
         size_t len;
         if (c < 0x80) { b[0] = (unsigned char)c; len = 1; }
         else if (c < 0x800) { b[0] = (unsigned char)(0xC0 | (c >> 6)); b[1] = (unsigned char)(0x80 | (c & 0x3F)); len = 2; }
