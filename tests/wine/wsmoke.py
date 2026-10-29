@@ -108,7 +108,8 @@ cases += [['ssn','NtOpenProcess'], ['ssn','NtOpenProcess','--json'], ['modules',
           ['mft','C:\\mftref\\MFT','--deleted','--find','zzz_none'], ['mft','C:\\mftref\\MFT','--find'],
           ['usn'], ['usn','C:\\ntfs\\J'], ['usn','C:\\ntfs\\J','--csv','--flagged'], ['usn','C:\\ntfs\\J','--reason','bogus'],
           ['usn','C:\\ntfs\\J','--mft','C:\\windows\\win.ini'], ['usn','C:\\nonexistent'], ['usn','--live','C:'], ['usn','--live','7'], ['usn','--live'],
-          ['srum'], ['srum','C:\\windows\\win.ini'], ['srum','C:\\srumref\\SRUDB.dat','--summary','--flagged','--csv'], ['srum','C:\\mftref\\MFT']]
+          ['srum'], ['srum','C:\\windows\\win.ini'], ['srum','C:\\srumref\\SRUDB.dat','--summary','--flagged','--csv'], ['srum','C:\\mftref\\MFT'],
+          ['webcache'], ['webcache','C:\\windows\\win.ini'], ['webcache','C:\\srumref\\WebCacheV01.dat','--csv','--all'], ['webcache','--home','C:\\img2\\Users\\bob','--json']]
 
 bad = 0
 for args in cases:

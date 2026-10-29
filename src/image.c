@@ -50,6 +50,7 @@
 #include "pca.h"
 #include "activities.h"
 #include "srum.h"
+#include "webcache.h"
 
 #include <windows.h>
 #include <stdio.h>
@@ -276,6 +277,7 @@ int cmd_image(int argc, char **argv)
         if (sl) *sl = 0;
         JOB("browser", cmd_browser, NULL, RULE_FLAGGED, NULL, "--home", home);
         JOB("activities", cmd_activities, NULL, RULE_FLAGGED, NULL, "--home", home);
+        JOB("webcache", cmd_webcache, NULL, RULE_FLAGGED, NULL, "--home", home);
         for (int i = 0; i < nj; i++) {
             jm_node *doc = run_json(jobs[i].fn, jobs[i].args);
             if (doc) collect(&fl, jobs[i].name, p->name, doc, jobs[i].list, jobs[i].rule, jobs[i].fixed);

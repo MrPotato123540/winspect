@@ -83,6 +83,7 @@ add_executable(winspect
     src/usncmd.c
     src/esedb.c
     src/srum.c
+    src/webcache.c
     src/timeline.c
     src/jumplist.c
     src/tasks.c

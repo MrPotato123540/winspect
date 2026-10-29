@@ -87,6 +87,7 @@ takes. The tables below are a map, not the full reference.
 | `recyclebin` | What was deleted, by which account and when (`$I` files and the old `INFO2`). |
 | `browser` | Chrome, Edge, Brave and Firefox history and downloads, read with a built-in SQLite reader (Firefox's `-wal` file included): URL, title, last visit, saved path, size and the browser's own danger verdict. Flags downloads the browser warned about or the user kept anyway, downloads from a bare IP, downloaded programs and scripts. |
 | `activities` | Windows 10 Timeline (`ActivitiesCache.db`): which application was used when and for how long, and the documents it opened. |
+| `webcache` | Internet Explorer / legacy Edge `WebCacheV01.dat` (ESE): visited pages and locally opened `file:///` documents with user and access count, IE downloads; `--all` adds the cache. |
 | `pshistory` | PowerShell console history (PSReadLine); suspicious lines are flagged. `--all-users` reads every profile. |
 | `rdp` | Outgoing Remote Desktop connections of a user. |
 | `usb` | USB storage devices with first install, last connect and last removal times. |
@@ -133,7 +134,7 @@ takes. The tables below are a map, not the full reference.
 | `--usrclass` with `--software` | `comhijack` |
 | `--sam <SAM>` | `users` (account names and the fixed `F` record only) |
 | `--evtx <file>` (repeatable) | `events`, including `--summary` |
-| a copied file or folder | `prefetch` (file or `--dir`), `pca`, `amcache`, `lnk`, `jumplist`, `recyclebin`, `pshistory`, `tasks --dir`, `browser` and `activities` (database file or `--home <user folder>`) |
+| a copied file or folder | `prefetch` (file or `--dir`), `pca`, `amcache`, `lnk`, `jumplist`, `recyclebin`, `pshistory`, `tasks --dir`, `browser`, `activities` and `webcache` (database file or `--home <user folder>`) |
 
 ## Building
 
@@ -179,7 +180,7 @@ third-party code is run):
 - `.lnk`: 34 real-world samples, field by field, against LnkParse3's expected output.
 - Jump List DestList: real Windows 7 to 10 files from the JumpList project.
 - Registry hives, SAM, AppCompatCache, Amcache, ShellBags: regipy's test hives and published values.
-- Recycle Bin, `.evtx` event logs, `$MFT`, the USN journal and SRUM: plaso's test files and the values its tests assert.
+- Recycle Bin, `.evtx` event logs, `$MFT`, the USN journal, SRUM and WebCache: plaso's test files and the values its tests assert.
 - Certificates read offline: checked against `openssl x509` and `hashlib`.
 - The JSON reader: random documents compared with Python's `json` module.
 - The SQLite reader: random databases (page sizes, UTF-16, overflow pages, uncheckpointed WAL) compared row by row with Python's `sqlite3` module.

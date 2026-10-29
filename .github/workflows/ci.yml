@@ -186,8 +186,11 @@ jobs:
           python3 tests/wine/evtxfiles.py ./winspect.exe evtxref
           curl -sSfL -o MFT "https://raw.githubusercontent.com/log2timeline/plaso/ee5a0ab4f7af07f61b0554ba8edc0700514efc5a/test_data/MFT"
           python3 tests/wine/mftfile.py ./winspect.exe MFT
-          curl -sSfL -o SRUDB.dat "https://raw.githubusercontent.com/log2timeline/plaso/ee5a0ab4f7af07f61b0554ba8edc0700514efc5a/test_data/SRUDB.dat"
-          python3 tests/wine/srumfile.py ./winspect.exe SRUDB.dat
+          mkdir -p eseref
+          for f in SRUDB.dat WebCacheV01.dat PartitionsEx-WebCacheV01.dat; do
+            curl -sSfL -o "eseref/$f" "https://raw.githubusercontent.com/log2timeline/plaso/ee5a0ab4f7af07f61b0554ba8edc0700514efc5a/test_data/$f"
+          done
+          python3 tests/wine/esefiles.py ./winspect.exe eseref
           # Offline-hive mode (--hive / hive) on real Windows hives
           git clone -q https://github.com/mkorman90/regipy regipy
           git -C regipy checkout -q c6de929abc37d8315d1c31aba5e937db636f3303

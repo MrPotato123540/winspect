@@ -99,6 +99,7 @@
 #include "mftcmd.h"
 #include "usncmd.h"
 #include "srum.h"
+#include "webcache.h"
 #include "tasks.h"
 
 // cmd_modules lives in modules.c: a live process's loaded modules
@@ -248,6 +249,7 @@ static const struct {
     { "usn",      cmd_usn,      "NTFS change journal copy ($UsnJrnl:$J)",     "file" },
     { "mft",      cmd_mft,      "NTFS $MFT copy: paths, times, timestomping", "file" },
     { "activities", cmd_activities, "Windows 10 Timeline: app use and documents", "file" },
+    { "webcache", cmd_webcache, "IE / legacy Edge WebCache: visits, file:// opens", "file" },
     { "browser",  cmd_browser,  "browser history and downloads (Chromium, Firefox)", "file" },
     { "pshistory", cmd_pshistory, "PowerShell command history (PSReadLine)", "file" },
     { "shellbags", cmd_shellbags, "folders browsed in Explorer (ShellBags)", "file" },
