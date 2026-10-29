@@ -1125,3 +1125,17 @@ int certblob_prop(const unsigned char *b, size_t n, uint32_t id, size_t *off, si
     }
     return 0;
 }
+
+int evt_xpath_match(const char *xpath, unsigned id, unsigned level)
+{
+    int any = 0, hit = 0;
+    for (const char *p = xpath; (p = strstr(p, "EventID=")) != NULL; ) {
+        p += 8;
+        any = 1;
+        if (strtoul(p, NULL, 10) == id) hit = 1;
+    }
+    if (any && !hit) return 0;
+    const char *l = strstr(xpath, "Level=");
+    if (l && strtoul(l + 6, NULL, 10) != level) return 0;
+    return 1;
+}

@@ -70,6 +70,7 @@ add_executable(winspect
     src/users.c
     src/capture.c
     src/jsonmini.c
+    src/evtx.c
     src/timeline.c
     src/jumplist.c
     src/tasks.c

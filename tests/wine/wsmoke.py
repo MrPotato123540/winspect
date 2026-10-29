@@ -95,7 +95,8 @@ cases += [['ssn','NtOpenProcess'], ['ssn','NtOpenProcess','--json'], ['modules',
           ['timeline'], ['timeline','--csv'], ['timeline','--flagged','--json'], ['timeline','--since','24'],
           ['timeline','--since','-5'], ['timeline','--sources','bam,mru'], ['timeline','--sources','bogus'], ['timeline','--since'],
           ['certstore','--software','C:\\nonexistent'], ['certstore','--software','a','--ntuser','b'], ['certstore','--ntuser'],
-          ['certstore','--store','CA','--csv']]
+          ['certstore','--store','CA','--csv'],
+          ['events','--evtx','C:\\nonexistent.evtx'], ['events','--evtx','C:\\windows\\win.ini','--json'], ['events','--evtx']]
 
 bad = 0
 for args in cases:

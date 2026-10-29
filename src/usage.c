@@ -299,8 +299,10 @@ static const struct { const char *name, *text; } usage_table[] = {
         "--since <hours> keeps only the last <hours> hours. --summary instead groups\n"
         "failed logons by source address (failures, distinct accounts, first/last)\n"
         "and flags password guessing / spraying patterns.\n"
+        "--evtx <file> (repeatable) reads copied .evtx files (e.g. from a disk image)\n"
+        "with winspect's own parser, through the same filters.\n"
         "Read-only (EvtQuery). Usage:\n"
-        "  winspect events [--max <n per channel>] [--since <hours>] [--summary] [--json | --csv]\n" },
+        "  winspect events [--evtx <file> ...] [--max <n per channel>] [--since <hours>] [--summary] [--json | --csv]\n" },
     { "hidden",
         "winspect hidden - cross-view checks for things hidden from the usual tools:\n"
         "  processes: Toolhelp snapshot vs NtQuerySystemInformation vs opening every\n"

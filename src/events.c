@@ -31,11 +31,16 @@
 //
 // Read-only: EvtQuery/EvtNext/EvtRender only. The Security channel needs
 // elevation; a denied or missing channel is reported, never silently skipped.
+//
+// --evtx <file> (repeatable) reads copied .evtx files instead (evtx.c renders
+// each record to the same XML EvtRender gives); every record goes through the
+// same channel / event ID / level filters, --since and --max, and --summary.
 
 #include "events.h"
 #include "artparse.h"
 #include "ioc.h"
 #include "jsonutil.h"
+#include "evtx.h"
 
 #include <windows.h>
 #include <winevt.h>
@@ -192,6 +197,28 @@ static const chan channels[] = {
 // Failed logons only, for --summary.
 static const chan fail_channel = { "Security", "Security", "*[System[(EventID=4625)]]" };
 
+// One rendered event (live or from an .evtx file): a listed row, or with
+// fails != NULL a failed-logon count.
+static void handle_xml(const char *xml, const char *label, evlist *out, evt_fail_table *fails)
+{
+    evrow r;
+    memset(&r, 0, sizeof r);
+    char idtxt[16];
+    evt_system(xml, "EventID", idtxt, sizeof idtxt);
+    r.id = (unsigned)strtoul(idtxt, NULL, 10);
+    evt_time(xml, r.time, sizeof r.time);
+    snprintf(r.channel, sizeof r.channel, "%s", label);
+    if (fails != NULL) {
+        char ip[64], user[128];
+        evt_data(xml, "IpAddress", ip, sizeof ip);
+        evt_data(xml, "TargetUserName", user, sizeof user);
+        evt_fail_add(fails, ip, user, r.time);
+    } else {
+        describe(xml, r.id, &r);
+        add_row(out, &r);
+    }
+}
+
 // Query one channel; returns 0 ok, else the Win32 error. hours > 0 limits it
 // to the last <hours> hours. With fails != NULL, 4625 events are counted per
 // source address instead of being listed.
@@ -238,22 +265,7 @@ static DWORD read_channel(const chan *ch, unsigned max, unsigned hours, evlist *
                     char *xml = need > 0 ? (char *)malloc((size_t)need) : NULL;
                     if (xml != NULL) {
                         WideCharToMultiByte(CP_UTF8, 0, wxml, -1, xml, need, NULL, NULL);
-                        evrow r;
-                        memset(&r, 0, sizeof r);
-                        char idtxt[16];
-                        evt_system(xml, "EventID", idtxt, sizeof idtxt);
-                        r.id = (unsigned)strtoul(idtxt, NULL, 10);
-                        evt_time(xml, r.time, sizeof r.time);
-                        snprintf(r.channel, sizeof r.channel, "%s", ch->label);
-                        if (fails != NULL) {
-                            char ip[64], user[128];
-                            evt_data(xml, "IpAddress", ip, sizeof ip);
-                            evt_data(xml, "TargetUserName", user, sizeof user);
-                            evt_fail_add(fails, ip, user, r.time);
-                        } else {
-                            describe(xml, r.id, &r);
-                            add_row(out, &r);
-                        }
+                        handle_xml(xml, ch->label, out, fails);
                         free(xml);
                         got_total++;
                     }
@@ -267,12 +279,106 @@ static DWORD read_channel(const chan *ch, unsigned max, unsigned hours, evlist *
     return 0;
 }
 
+// ---- offline: .evtx files --------------------------------------------------------
+
+typedef struct {
+    evlist *out;
+    evt_fail_table *fails;
+    char since[24];             // "" or the earliest time to keep (UTC)
+    unsigned long seen, kept;
+} offctx;
+
+static void off_record(uint64_t id, uint64_t written, const char *xml, void *vctx)
+{
+    (void)id; (void)written;
+    offctx *o = (offctx *)vctx;
+    o->seen++;
+    char chname[160], idtxt[16], lvl[8], when[24];
+    evt_system(xml, "Channel", chname, sizeof chname);
+    evt_system(xml, "EventID", idtxt, sizeof idtxt);
+    evt_system(xml, "Level", lvl, sizeof lvl);
+    unsigned eid = (unsigned)strtoul(idtxt, NULL, 10), level = (unsigned)strtoul(lvl, NULL, 10);
+    const chan *c = NULL;
+    if (o->fails) {
+        if (_stricmp(chname, fail_channel.channel) == 0 && evt_xpath_match(fail_channel.xpath, eid, level)) c = &fail_channel;
+    } else {
+        for (size_t i = 0; i < sizeof channels / sizeof channels[0] && c == NULL; i++)
+            if (_stricmp(chname, channels[i].channel) == 0 && evt_xpath_match(channels[i].xpath, eid, level))
+                c = &channels[i];
+    }
+    if (c == NULL) return;
+    evt_time(xml, when, sizeof when);
+    if (o->since[0] && strcmp(when, o->since) < 0) return;
+    handle_xml(xml, c->label, o->out, o->fails);
+    o->kept++;
+}
+
+// Reads every file; rows of the same channel are later cut to `max` newest.
+static int read_evtx_files(char **files, int nfiles, unsigned hours, evlist *out, evt_fail_table *fails)
+{
+    offctx o;
+    memset(&o, 0, sizeof o);
+    o.out = out;
+    o.fails = fails;
+    if (hours) {
+        FILETIME now;
+        GetSystemTimeAsFileTime(&now);
+        uint64_t t = ((uint64_t)now.dwHighDateTime << 32 | now.dwLowDateTime) - (uint64_t)hours * 36000000000ULL;
+        char iso[32];
+        filetime_utc_str(t, iso, sizeof iso);
+        snprintf(o.since, sizeof o.since, "%s", iso);
+    }
+    int rc = 0;
+    for (int i = 0; i < nfiles; i++) {
+        HANDLE h = CreateFileA(files[i], GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                               NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (h == INVALID_HANDLE_VALUE) {
+            fprintf(stderr, "events: cannot open '%s' (error %lu)\n", files[i], (unsigned long)GetLastError());
+            rc = 1;
+            continue;
+        }
+        LARGE_INTEGER sz;
+        unsigned char *d = NULL;
+        DWORD got = 0;
+        if (GetFileSizeEx(h, &sz) && sz.QuadPart > 0 && sz.QuadPart < (1LL << 31) &&
+                (d = (unsigned char *)malloc((size_t)sz.QuadPart)) != NULL) {
+            if (!ReadFile(h, d, (DWORD)sz.QuadPart, &got, NULL)) got = 0;
+        }
+        CloseHandle(h);
+        evtx_file f;
+        if (d == NULL || evtx_open(&f, d, got) != 0) {
+            fprintf(stderr, "events: '%s' is not an .evtx file\n", files[i]);
+            free(d);
+            rc = 1;
+            continue;
+        }
+        if (f.dirty) fprintf(stderr, "events: note: %s was not closed cleanly (copied while in use?)\n", files[i]);
+        evtx_records(&f, off_record, &o);
+        free(d);
+    }
+    return rc;
+}
+
+// Keep at most `max` rows per channel (rows already sorted newest first).
+static void cap_per_channel(evlist *l, unsigned max)
+{
+    size_t w = 0;
+    for (size_t i = 0; i < l->n; i++) {
+        unsigned seen = 0;
+        for (size_t j = 0; j < w; j++) if (strcmp(l->v[j].channel, l->v[i].channel) == 0) seen++;
+        if (seen < max) l->v[w++] = l->v[i];
+    }
+    l->n = w;
+}
+
 // --summary: failed logons grouped by source address.
-static int fail_summary(unsigned max, unsigned hours, int mode)
+static int fail_summary(unsigned max, unsigned hours, int mode, char **files, int nfiles)
 {
     static evt_fail_table t;
     memset(&t, 0, sizeof t);
-    DWORD err = read_channel(&fail_channel, max, hours, NULL, &t);
+    DWORD err = nfiles ? (DWORD)read_evtx_files(files, nfiles, hours, NULL, &t)
+                       : read_channel(&fail_channel, max, hours, NULL, &t);
+    if (nfiles && err) return 1;
     if (err != 0) {
         fprintf(stderr, "events: Security log: %s (error %lu)\n",
                 err == ERROR_ACCESS_DENIED ? "access denied - run elevated" : "cannot query",
@@ -336,8 +442,14 @@ int cmd_events(int argc, char **argv)
 {
     int mode = 0, summary = 0;
     unsigned max = 0, hours = 0;
+    char *files[32];
+    int nfiles = 0;
     for (int a = 0; a < argc; a++) {
-        if (strcmp(argv[a], "--json") == 0)      mode = 1;
+        if (strcmp(argv[a], "--evtx") == 0 && a + 1 < argc) {
+            if (nfiles == 32) { fputs("events: at most 32 --evtx files\n", stderr); return 1; }
+            files[nfiles++] = argv[++a];
+        }
+        else if (strcmp(argv[a], "--json") == 0)      mode = 1;
         else if (strcmp(argv[a], "--csv") == 0)  mode = 2;
         else if (strcmp(argv[a], "--summary") == 0) summary = 1;
         else if (strcmp(argv[a], "--since") == 0 && a + 1 < argc) {
@@ -360,7 +472,7 @@ int cmd_events(int argc, char **argv)
         }
     }
     if (summary) {
-        return fail_summary(max ? max : 10000, hours, mode);
+        return fail_summary(max ? max : 10000, hours, mode, files, nfiles);
     }
     if (max == 0) {
         max = 20;
@@ -370,7 +482,7 @@ int cmd_events(int argc, char **argv)
     char notes[1024] = "";
     size_t nl = 0;
     unsigned readable = 0;
-    for (size_t i = 0; i < sizeof channels / sizeof channels[0]; i++) {
+    for (size_t i = 0; nfiles == 0 && i < sizeof channels / sizeof channels[0]; i++) {
         DWORD err = read_channel(&channels[i], max, hours, &rows, NULL);
         if (err == 0) {
             readable++;
@@ -383,7 +495,15 @@ int cmd_events(int argc, char **argv)
                          channels[i].label, why, (unsigned long)err);
         if (w > 0 && (size_t)w < sizeof notes - nl) nl += (size_t)w;
     }
+    if (nfiles) {
+        if (read_evtx_files(files, nfiles, hours, &rows, NULL) != 0 && rows.n == 0) {
+            free(rows.v);
+            return 1;
+        }
+        readable = 1;
+    }
     qsort(rows.v, rows.n, sizeof *rows.v, newest_first);
+    if (nfiles) cap_per_channel(&rows, max);
 
     unsigned flagged = 0;
     if (mode == 0) {

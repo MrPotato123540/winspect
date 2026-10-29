@@ -77,6 +77,23 @@ jobs:
           cc -I inc -std=c11 -g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all \
              src/artparse.c src/ioc.c tests/rb_dump.c -o rb_dump
           python3 -I tests/rb_check.py ./rb_dump rbref
+      - name: Event log (.evtx) reader vs plaso test data + fuzz
+        # System.evtx / System2.evtx from plaso's test data (data only, no
+        # code run), pinned to a commit; record counts, record 1's full XML
+        # and record 179 are the values plaso's own parser tests assert, and
+        # every rendered record must be well-formed XML. Then the reader is
+        # fuzzed with corrupted copies of the real file under ASan/UBSan.
+        run: |
+          mkdir evtxref
+          for f in System.evtx System2.evtx; do
+            curl -sSfL -o "evtxref/$f" "https://raw.githubusercontent.com/log2timeline/plaso/ee5a0ab4f7af07f61b0554ba8edc0700514efc5a/test_data/evtx/$f"
+          done
+          SAN="-g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all"
+          cc -I inc -std=c11 $SAN src/evtx.c tests/evtx_dump.c -o evtx_dump
+          python3 -I tests/evtx_check.py ./evtx_dump evtxref
+          cc -I inc -std=c11 $SAN src/evtx.c tests/fuzz_evtx.c -o fuzz_evtx
+          ./fuzz_evtx evtxref/System.evtx 2000
+          ./fuzz_evtx evtxref/System2.evtx 1000
       - name: Registry hive reader vs real hives (regipy test data)
         # Real NTUSER.DAT / SYSTEM / SOFTWARE / Amcache.hve files from the
         # regipy project (data only, pinned commit). Header fields, key/value
@@ -122,6 +139,12 @@ jobs:
           python3 tests/wine/fixtures.py ./winspect.exe
           python3 tests/wine/wsmoke.py ./winspect.exe
           python3 tests/wine/fuzz.py ./winspect.exe 60 150
+          # events --evtx end to end on plaso's System.evtx (data only).
+          mkdir -p evtxref
+          for f in System.evtx System2.evtx; do
+            curl -sSfL -o "evtxref/$f" "https://raw.githubusercontent.com/log2timeline/plaso/ee5a0ab4f7af07f61b0554ba8edc0700514efc5a/test_data/evtx/$f"
+          done
+          python3 tests/wine/evtxfiles.py ./winspect.exe evtxref
           # Offline-hive mode (--hive / hive) on real Windows hives
           git clone -q https://github.com/mkorman90/regipy regipy
           git -C regipy checkout -q c6de929abc37d8315d1c31aba5e937db636f3303
@@ -256,6 +279,18 @@ jobs:
           $hl = Receive-Job $job | ConvertFrom-Json
           Stop-Process -Id $hp.Id -Force
           if (-not ($hl | Where-Object { $_.name -like "*wsfind_marker*" })) { throw "handles <pid>: read/write file handle not named" }
+          # events --evtx: export the live System log, then the offline reader
+          # must give the same System rows (7045 / 104) as the live API for
+          # every event written before the export.
+          $ev = Join-Path $env:RUNNER_TEMP "system.evtx"
+          wevtutil epl System $ev
+          $cut = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss")
+          $live = & $exe events --max 1000 --json | ConvertFrom-Json | Where-Object { $_.channel -eq "System" -and $_.time -lt $cut }
+          $off  = & $exe events --evtx $ev --max 1000 --json | ConvertFrom-Json | Where-Object { $_.time -lt $cut }
+          $lk = ($live | ForEach-Object { "$($_.time)|$($_.id)|$($_.summary)" }) -join "`n"
+          $ok = ($off  | ForEach-Object { "$($_.time)|$($_.id)|$($_.summary)" }) -join "`n"
+          if ($lk -ne $ok) { throw "events --evtx differs from live: $(@($live).Count) live vs $(@($off).Count) offline" }
+          Write-Host "events --evtx matches live ($(@($live).Count) System rows)"
           # bits: a helper creates a SUSPENDED job (bare-IP source, notify
           # command line), never resumed, cancelled when it reads a line. The
           # notify command must be the reason given.

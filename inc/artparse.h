@@ -137,6 +137,10 @@ int evt_time(const char *xml, char *out, size_t n);
 // the filter unchanged. Returns 0, or -1 if base has the wrong shape / out is
 // too small.
 int evt_xpath_since(const char *base, unsigned hours, char *out, size_t n);
+// 1 if an event (id, level) passes one of our channel filters - the small
+// XPath subset used there: "EventID=N" alternatives, optionally combined with
+// "Level=L". Lets offline .evtx files go through the same filters as EvtQuery.
+int evt_xpath_match(const char *xpath, unsigned id, unsigned level);
 
 // Failed-logon (4625) summary per source address, the way Chainsaw / Hayabusa
 // "logon summaries" group them: how many failures, against how many distinct

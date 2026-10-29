@@ -801,6 +801,11 @@ int main(void)
             check_int("np stock", asep_netprovider_default("%SystemRoot%\\System32\\ntlanman.dll"), 1);
             check_int("np stock bare", asep_netprovider_default("drprov.dll"), 1);
             check_int("np wsl", asep_netprovider_default("C:\\Windows\\system32\\P9NP.dll"), 1);
+            check_int("xpm sys", evt_xpath_match("*[System[(EventID=7045 or EventID=104)]]", 104, 4), 1);
+            check_int("xpm sys no", evt_xpath_match("*[System[(EventID=7045 or EventID=104)]]", 1040, 4), 0);
+            check_int("xpm level ok", evt_xpath_match("*[System[(EventID=4104) and (Level=3)]]", 4104, 3), 1);
+            check_int("xpm level no", evt_xpath_match("*[System[(EventID=4104) and (Level=3)]]", 4104, 5), 0);
+            check_int("xpm prefix id", evt_xpath_match("*[System[(EventID=4625)]]", 462, 0), 0);
             check_int("np extra", asep_netprovider_default("%SystemRoot%\\System32\\nppspy.dll"), 0);
             check_int("np stock name elsewhere", asep_netprovider_default("C:\\Users\\Public\\ntlanman.dll"), 0);
             check_int("tp still ok", asep_time_provider_default("%systemroot%\\system32\\w32time.dll"), 1);

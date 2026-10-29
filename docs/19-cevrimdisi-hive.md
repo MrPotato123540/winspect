@@ -210,3 +210,72 @@ kayıt "elle düzenlenmiş" diye işaretlenir.
   dürüst kayıt işaretsiz.
 - wine'da canlı karşılığı denenemedi: wine'ın crypt32'si ROOT deposunu kayıt
   defterinden değil ana makinenin sertifikalarından kuruyor.
+
+## Olay günlüğü dosyaları: events --evtx
+
+`events` canlı makinede `EvtQuery` kullanır. Bir disk imajından kopyalanmış
+`System.evtx`, `Security.evtx` gibi dosyalar için artık kendi okuyucumuz var:
+`src/evtx.c` (taşınabilir, Windows API'si yok).
+
+```
+winspect events --evtx D:\imaj\System.evtx --evtx D:\imaj\Security.evtx
+winspect events --evtx Security.evtx --summary       # parola deneme / püskürtme
+```
+
+### Biçim
+
+- **Dosya başlığı** (4096 bayt): `ElfFile\0`, chunk sayısı, "temiz kapanmadı" bayrağı.
+- **Chunk'lar** (her biri 65536 bayt): `ElfChnk\0`, isim ve şablon tabloları,
+  512. bayttan itibaren kayıtlar.
+- **Kayıt:** `2a2a0000` imzası, boyut, kayıt no, yazılma zamanı, **binary XML**.
+
+Binary XML bir belirteç (token) akışıdır:
+
+| Belirteç | Anlamı |
+|---|---|
+| `0x01` / `0x41` | öğe başı (`0x41`: öznitelikleri var) |
+| `0x02`, `0x03`, `0x04` | `>`, `/>`, `</öğe>` |
+| `0x05` | metin değeri |
+| `0x06` / `0x46` | öznitelik |
+| `0x0C` | **şablon örneği**: bir şablon tanımına referans + değer dizisi |
+| `0x0D` / `0x0E` | şablondaki (isteğe bağlı) yer tutucu: "buraya N. değeri koy" |
+
+Windows bir olay türünün iskeletini (System bloğu, EventData alanları) chunk
+içinde **bir kez** şablon olarak saklar; her kayıt yalnızca o şablona işaret
+eder ve değerlerini taşır. Öğe adları da chunk başına bir kez saklanır, sonra
+offset ile anılır; ilk kullanımda "satır içi" durur. Değerlerin tipi vardır:
+UTF-16 metin, tamsayılar, GUID, FILETIME, SID, hex, ikili, hatta başka bir
+binary XML parçası (gömülü, özyinelemeli).
+
+Okuyucu her kaydı **EvtRender'ın verdiği XML metnine** çevirir. Bu sayede
+`events`'in canlıda kullandığı alan çıkarıcıları (`evt_data`, `evt_system`,
+`evt_time`) ve kanal / olay no / seviye süzgeçleri aynen çalışır. Süzgeçler
+canlıda XPath olarak gider; dosyada aynı XPath metninden küçük bir eşleştirici
+(`evt_xpath_match`, birim testli) karar verir. Tek kural iki yerde yazılmaz.
+
+İnce nokta: değeri boş olan **isteğe bağlı** bir yer tutucu özniteliği
+tamamen düşürür. Windows `<Correlation ActivityID=""/>` değil `<Correlation/>`
+yazar; bizim çıktımız da öyle.
+
+Kısaltılmış dosyalar: son chunk eksikse sıfırla doldurulmuş bir kopya
+üzerinde çalışılır; tamamı dosyada olan kayıtlar okunur, yarım kalan atlanır.
+Dosya "temiz kapanmadı" işaretliyse (çalışırken kopyalanmış) bu not edilir.
+
+### Doğrulama
+
+- **plaso'nun test dosyaları** (yalnızca veri): `System.evtx` için kayıt
+  sayısı **5009** ve 1. kaydın **tam XML'i** plaso testlerindeki
+  `expected_xml_string` ile karakteri karakterine aynı (girinti hariç).
+- Elle kısaltılmış `System2.evtx`: plaso iki tam chunk'taki 194 kaydı okuyor;
+  biz bunlara ek olarak kesik chunk'taki tamamı mevcut 89 kaydı da
+  kurtarıyoruz. 179. kayıt plaso'nun değeriyle aynı (4624,
+  2015-08-09 09:15:48.4341250).
+- Okunan 5292 kaydın tamamı Python'un XML ayrıştırıcısına göre geçerli XML.
+- Gerçek dosyanın bozulmuş kopyalarıyla **ASan/UBSan altında fuzz** (kayıt
+  boyutları, belirteç baytları, isim/şablon offset'leri, değer sayıları):
+  6000 tur, ~600 bin kayıt, bulgu yok.
+- wine'da uçtan uca: `System.evtx`'teki 25 servis kurulumu (7045), en yeni ve
+  en eski satır, `--max`, `--since`, iki dosyayla `--summary`.
+- Windows CI: canlı System günlüğü `wevtutil epl` ile dışa aktarılır; dışa
+  aktarma anından önceki satırlar canlı API ile dosya okuyucusunda **aynı**
+  olmalı (henüz gerçek koşu görmedi).
