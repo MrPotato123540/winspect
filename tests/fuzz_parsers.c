@@ -15,6 +15,7 @@
 #include "pfparse.h"
 #include "artparse.h"
 #include "jsonmini.h"
+#include "usn.h"
 #include "lnkparse.h"
 #include "destlist.h"
 #include "regf.h"
@@ -270,6 +271,15 @@ int main(int argc, char **argv)
                 pf_volumes(buf, n, nop_vol, NULL); break;
         case 1: n = seed_mam(seed); n = mutate(seed, n, buf, sizeof buf);
                 pf_mam_header(buf, n, &fmt, &us, &off);
+                {   // change journal: v2 + v3 records behind zeros
+                    memset(seed, 0, 256);
+                    seed[64] = 88; seed[68] = 2; seed[64 + 56] = 10; seed[64 + 58] = 60;
+                    seed[152] = 96; seed[156] = 3; seed[152 + 72] = 6; seed[152 + 74] = 76;
+                    size_t m = mutate(seed, 256, buf, sizeof buf), uo = 0;
+                    usn_rec ur;
+                    char rs[256];
+                    for (int k = 0; k < 64 && usn_next(buf, m, &uo, &ur); k++) usn_reason_str(ur.reason, rs, sizeof rs);
+                }
                 {
                     rb_entry re;
                     char ts[32];

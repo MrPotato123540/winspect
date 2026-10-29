@@ -105,7 +105,9 @@ cases += [['ssn','NtOpenProcess'], ['ssn','NtOpenProcess','--json'], ['modules',
           ['activities'], ['activities','--csv'], ['activities','--flagged','--json'], ['activities','--home','C:\\img2\\Users\\bob'],
           ['activities','C:\\windows\\win.ini'], ['activities','C:\\nonexistent'],
           ['mft'], ['mft','C:\\windows\\win.ini'], ['mft','C:\\nonexistent'], ['mft','C:\\mftref\\MFT','--timestomp','--csv'],
-          ['mft','C:\\mftref\\MFT','--deleted','--find','zzz_none'], ['mft','C:\\mftref\\MFT','--find']]
+          ['mft','C:\\mftref\\MFT','--deleted','--find','zzz_none'], ['mft','C:\\mftref\\MFT','--find'],
+          ['usn'], ['usn','C:\\ntfs\\J'], ['usn','C:\\ntfs\\J','--csv','--flagged'], ['usn','C:\\ntfs\\J','--reason','bogus'],
+          ['usn','C:\\ntfs\\J','--mft','C:\\windows\\win.ini'], ['usn','C:\\nonexistent']]
 
 bad = 0
 for args in cases:

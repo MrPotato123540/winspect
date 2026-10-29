@@ -1,4 +1,4 @@
-# 23 — NTFS $MFT: dosya kayıtları, silinmiş dosyalar, timestomping
+# 23 — NTFS $MFT ve USN günlüğü: dosya kayıtları, silinmiş dosyalar, değişiklik geçmişi
 
 NTFS her dosyanın kaydını **Master File Table**'da (`$MFT`) tutar. Dosya
 silinse bile kaydı, üzerine yazılana kadar orada kalır. `mft` komutu,
@@ -88,3 +88,54 @@ zamanlarıyla birlikte değerlendirmelidir.
   öznitelik boyları, döngüye giren ebeveyn referansları): 375 bin kayıt,
   bulgu yok.
 - wine'da uçtan uca: `--find`, `--deleted`, `--csv`, `--timestomp`.
+
+## usn — değişiklik günlüğü ($UsnJrnl:$J)
+
+NTFS, birimdeki her dosya değişikliğini `$Extend\$UsnJrnl` dosyasının `$J`
+akışına yazar: oluşturma, silme, yeniden adlandırma (eski ve yeni ad ayrı
+kayıtlar), veri değişikliği, güvenlik değişikliği. `$MFT` bir dosyanın **şu
+anki** hâlini söyler; USN günlüğü **ne olduğunu** sırayla anlatır. Silinmiş ve
+çoktan üzerine yazılmış bir dosyanın adı bile burada kalabilir.
+
+Kayıt biçimi Microsoft'un belgelediği `USN_RECORD_V2` / `V3` yapılarıdır
+(`src/usn.c`):
+
+```
+uzunluk | sürüm | dosya referansı | ebeveyn referansı | USN | zaman | neden bitleri | ... | ad
+```
+
+Kopyalanmış bir `$J` çoğunlukla başta gigabaytlarca sıfırdan oluşur (seyrek
+dosya). Okuyucu sıfır bölgelerini 8 baytlık adımlarla geçer. Bozuk bir
+uzunluk görürse de bir sonraki geçerli kayda yeniden hizalanır.
+
+`--mft` ile aynı birimin `$MFT` kopyası verilirse, her kaydın ebeveyn
+referansı oradan klasör yoluna çevrilir. Sıra numarası kontrol edilir; klasör
+kaydı başka bir şeye verilmişse yol uydurulmaz, "reused or missing" yazılır.
+
+İşaretler (`usn_flag`, birim testli):
+
+| Gerekçe | Ne zaman |
+|---|---|
+| program or script deleted | `FILE_DELETE` ve ad bir program/betik |
+| renamed into a program or script | `RENAME_NEW_NAME` bir program adı, aynı dosyanın `RENAME_OLD_NAME`'i değil (ör. `fatura.pdf` → `fatura.exe`) |
+
+Eski ve yeni ad, dosya referansıyla eşleştirilir.
+
+**Doğrulama:**
+
+- plaso'nun `UsnJrnl.raw`'ı: **19 kayıt** (plaso'nun aynı birimden yaptığı
+  testteki sayı) ve ilk kayıt ("Nieuw - Tekstdocument.txt", FILE_CREATE,
+  2015-11-30 21:15:27.2031250) plaso'nun beklediğiyle aynı. Ayrıca her kayıt,
+  Microsoft'un yapı tanımından Python'da ayrıca yazılmış bir çözücüyle
+  karşılaştırılır.
+- Birim testleri: seyrek sıfırların arkasında V2 ve V3 kayıtları, bozuk
+  uzunluktan sonra yeniden hizalanma, neden adları, işaret kuralları.
+- Sanitizer fuzz (`fuzz_parsers`).
+- wine'da: test için yazılmış küçük bir `$MFT` ve `$J`
+  (`tests/wine/ntfswrite.py`). Bunlarda `fatura.pdf → fatura.exe` ve silinen
+  `tool.ps1` işaretli; `notes.txt` işaretsiz; klasör yolları MFT'den geliyor;
+  ebeveyni olmayan kayıt "reused or missing" gösteriyor.
+
+Bu sırada `mft` / `usn` daha dayanıklı oldu. Kayıt boyutu artık 0. kayıttan
+değil, ilk 64 KB içindeki ilk geçerli `FILE` kaydından bulunuyor; başı bozuk
+bir kopya geri kalanını gizlemiyor.

@@ -117,6 +117,7 @@ takes. The tables below are a map, not the full reference.
 | `hash <file>` | MD5, SHA-1 and SHA-256. |
 | `streams <path>` | Alternate data streams and Mark-of-the-Web (zone and download URL). |
 | `mft <$MFT>` | Files from a copied `$MFT`: full paths (deleted files too, broken chains under `$Orphan`), sizes, `$STANDARD_INFORMATION` and `$FILE_NAME` times, Object ID creation time and MAC. `--timestomp` lists files whose `$SI` creation time precedes `$FN`'s, as candidates rather than findings. |
+| `usn <$J>` | The NTFS change journal (`$UsnJrnl:$J` copy): every create, delete, rename and data change with time and reasons; `--mft` adds each file's folder. Flags deleted programs and files renamed into program names (`.pdf` to `.exe`). |
 | `hive <file> [key]` | Browse an offline registry hive. |
 | `pipes`, `objects`, `hosts`, `arp`, `routes`, `sessions`, `shares` | Named pipes (known tool defaults flagged), Object Manager names, hosts file, neighbour cache, routing table, logon sessions, SMB shares. |
 
@@ -165,7 +166,7 @@ and are tested on Linux:
 ```sh
 SRC="src/md5.c src/jsonutil.c src/ioc.c src/entropy.c src/pecksum.c src/imphash_ords.c \
      src/pfparse.c src/artparse.c src/capa.c src/lnkparse.c src/rights.c src/destlist.c \
-     src/shellitem.c src/jsonmini.c src/sqlite.c src/mft.c"   # evtx.c: tests/evtx_check.py
+     src/shellitem.c src/jsonmini.c src/sqlite.c src/mft.c src/usn.c"   # evtx.c: tests/evtx_check.py
 cc -I inc -std=c11 $SRC tests/test_util.c -o test_util -lm && ./test_util
 ```
 
@@ -177,7 +178,7 @@ third-party code is run):
 - `.lnk`: 34 real-world samples, field by field, against LnkParse3's expected output.
 - Jump List DestList: real Windows 7 to 10 files from the JumpList project.
 - Registry hives, SAM, AppCompatCache, Amcache, ShellBags: regipy's test hives and published values.
-- Recycle Bin, `.evtx` event logs and `$MFT`: plaso's test files and the values its tests assert.
+- Recycle Bin, `.evtx` event logs, `$MFT` and the USN journal: plaso's test files and the values its tests assert.
 - Certificates read offline: checked against `openssl x509` and `hashlib`.
 - The JSON reader: random documents compared with Python's `json` module.
 - The SQLite reader: random databases (page sizes, UTF-16, overflow pages, uncheckpointed WAL) compared row by row with Python's `sqlite3` module.

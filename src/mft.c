@@ -16,6 +16,15 @@ size_t mft_record_size(const unsigned char *rec, size_t n)
     return (s >= 512 && s <= 65536 && (s & (s - 1)) == 0) ? s : 0;
 }
 
+size_t mft_file_record_size(const unsigned char *d, size_t n)
+{
+    for (size_t o = 0; o + 48 <= n && o < 65536; o += 512) {
+        size_t rs = mft_record_size(d + o, n - o);
+        if (rs && o % rs == 0) return rs;
+    }
+    return 0;
+}
+
 static void u16_to_u8(const unsigned char *s, size_t nchars, char *out, size_t n)
 {
     size_t o = 0;

@@ -44,6 +44,9 @@ int mft_parse(unsigned char *rec, size_t n, uint32_t recno, mft_entry *e);
 
 // Record size declared by a record (allocated size @28), 0 if none.
 size_t mft_record_size(const unsigned char *rec, size_t n);
+// Record size of a whole $MFT copy: from the first FILE record within its
+// first 64 KiB (a damaged record 0 does not hide the rest). 0 if none.
+size_t mft_file_record_size(const unsigned char *d, size_t n);
 
 // What path building needs per record, kept small so a table for millions
 // of records fits in memory.

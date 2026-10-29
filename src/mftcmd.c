@@ -62,14 +62,14 @@ int cmd_mft(int argc, char **argv)
         fprintf(stderr, "mft: '%s' is too small to be an $MFT\n", file);
         return 1;
     }
-    unsigned char first[1024];
+    static unsigned char first[65536];
     DWORD got = 0;
-    if (!ReadFile(h, first, sizeof first, &got, NULL) || got != sizeof first || mft_record_size(first, got) == 0) {
+    size_t rs = 0;
+    if (!ReadFile(h, first, sizeof first, &got, NULL) || (rs = mft_file_record_size(first, got)) == 0) {
         CloseHandle(h);
-        fprintf(stderr, "mft: '%s' does not start with a FILE record\n", file);
+        fprintf(stderr, "mft: '%s' has no FILE record near its start (not an $MFT copy?)\n", file);
         return 1;
     }
-    size_t rs = mft_record_size(first, got);
     size_t count = (size_t)(sz.QuadPart / (LONGLONG)rs);
     mft_node *nodes = (mft_node *)calloc(count, sizeof *nodes);
     rowinfo *info = (rowinfo *)calloc(count, sizeof *info);

@@ -23,6 +23,7 @@
 #include "jsonmini.h"
 #include "sqlite.h"
 #include "mft.h"
+#include "usn.h"
 #include "capa.h"
 #include "lnkparse.h"
 #include "destlist.h"
@@ -109,6 +110,8 @@ static void dl_test_cb(const dl_entry *e, void *ctx)
     dl_entry *out = (dl_entry *)ctx;
     if (e->mru < 4) out[e->mru] = *e;
 }
+
+static int usn_is_prog(const char *n) { return rb_reason(n) != NULL; }
 
 int main(void)
 {
@@ -902,6 +905,48 @@ int main(void)
                 torn[48] = 0x07;
                 check_int("mft torn", mft_parse(torn, sizeof torn, 41, &me), -1);
                 check_int("mft not file", mft_parse((unsigned char *)"BAAD", 4, 0, &me), -1);
+            }
+            {
+                char rs[256];
+                usn_reason_str(0x80002100, rs, sizeof rs);
+                check_str("usn reasons", rs, "FILE_CREATE|RENAME_NEW_NAME|CLOSE");
+                check_int("usn del exe", usn_flag(0x80000200, "a.exe", NULL, usn_is_prog) != NULL, 1);
+                check_int("usn del txt", usn_flag(0x80000200, "a.txt", NULL, usn_is_prog) == NULL, 1);
+                check_int("usn ren to exe", usn_flag(0x2000, "invoice.exe", "invoice.pdf", usn_is_prog) != NULL, 1);
+                check_int("usn ren exe->exe", usn_flag(0x2000, "b.exe", "a.exe", usn_is_prog) == NULL, 1);
+                check_int("usn ren no old", usn_flag(0x2000, "b.exe", NULL, usn_is_prog) == NULL, 1);
+                // A v2 record behind a run of zeros (sparse $J), then a v3 record.
+                unsigned char j[64 + 88 + 96];
+                memset(j, 0, sizeof j);
+                unsigned char *v2 = j + 64;
+                v2[0] = 88; v2[4] = 2;
+                v2[8] = 0x1e; v2[14] = 1;                         // file ref
+                v2[16] = 5; v2[22] = 5;                           // parent
+                v2[32] = 0x10;                                    // timestamp low byte
+                v2[40] = 0x00; v2[41] = 0x01;                     // reason FILE_CREATE
+                v2[56] = 10; v2[58] = 60;                         // name 5 chars @60
+                memcpy(v2 + 60, "a\0.\0e\0x\0e\0", 10);
+                unsigned char *v3 = v2 + 88;
+                v3[0] = 96; v3[4] = 3;
+                v3[8] = 0x22; v3[24] = 0x05;                      // 128-bit ids
+                v3[58] = 0x02;                                    // reason FILE_DELETE (byte 2 of u32 at 56)
+                v3[72] = 6; v3[74] = 76;
+                memcpy(v3 + 76, "b\0.\0c\0", 6);
+                size_t uo = 0;
+                usn_rec ur;
+                check_int("usn v2 found", usn_next(j, sizeof j, &uo, &ur), 1);
+                check_str("usn v2 name", ur.name, "a.exe");
+                check_int("usn v2 ref", ur.file_ref == 0x100000000001EULL && ur.parent_ref == 0x5000000000005ULL, 1);
+                check_int("usn v2 create", (int)ur.reason, 0x100);
+                check_int("usn v3 found", usn_next(j, sizeof j, &uo, &ur), 1);
+                check_int("usn v3 major", ur.major, 3);
+                check_str("usn v3 name", ur.name, "b.c");
+                check_int("usn v3 delete", (int)ur.reason, 0x20000);
+                check_int("usn end", usn_next(j, sizeof j, &uo, &ur), 0);
+                j[64] = 87;                                       // misaligned length: skipped, no crash
+                uo = 0;
+                check_int("usn bad len resync", usn_next(j, sizeof j, &uo, &ur), 1);
+                check_int("usn bad len -> v3", ur.major, 3);
             }
             check_int("xpm sys", evt_xpath_match("*[System[(EventID=7045 or EventID=104)]]", 104, 4), 1);
             check_int("xpm sys no", evt_xpath_match("*[System[(EventID=7045 or EventID=104)]]", 1040, 4), 0);

@@ -912,6 +912,53 @@ try:
 except Exception as e:
     print('FAIL timeline --root check:', e, out[:200]); fails += 1
 
+# usn / mft: a hand-built $MFT (Users\bob\Downloads) and change journal:
+# invoice.pdf created and renamed to invoice.exe (flagged), tool.ps1 deleted
+# (flagged), notes.txt created (not flagged); --mft rebuilds the folder.
+import ntfswrite as nw
+ntd = os.path.join(pfx, 'drive_c', 'ntfs'); os.makedirs(ntd, exist_ok=True)
+T0 = 133500000000000000
+ents = {5: dict(name='.', parent=5, dir=True, seq=5, parent_seq=5),
+        40: dict(name='Users', parent=5, parent_seq=5, dir=True, seq=1),
+        41: dict(name='bob', parent=40, dir=True, seq=1),
+        42: dict(name='Downloads', parent=41, dir=True, seq=3),
+        50: dict(name='invoice.exe', parent=42, parent_seq=3, seq=2, size=4096,
+                 si=[T0 - 10**15, T0, T0, T0], fn=[T0, T0, T0, T0])}
+with open(os.path.join(ntd, 'MFT'), 'wb') as f:
+    f.write(nw.mft(ents, 64))
+dl = 42 | (3 << 48)
+with open(os.path.join(ntd, 'J'), 'wb') as f:
+    f.write(nw.usn([(50 | (2 << 48), dl, T0, 0x100, 'invoice.pdf'),
+                    (50 | (2 << 48), dl, T0 + 10, 0x1000, 'invoice.pdf'),
+                    (50 | (2 << 48), dl, T0 + 10, 0x2000, 'invoice.exe'),
+                    (51 | (1 << 48), dl, T0 + 20, 0x80000200, 'tool.ps1'),
+                    (52 | (1 << 48), dl, T0 + 30, 0x100, 'notes.txt'),
+                    (53 | (1 << 48), 99 | (7 << 48), T0 + 40, 0x100, 'lost.txt')]))
+rc, out, err = wine([exe, 'usn', r'C:\ntfs\J', '--mft', r'C:\ntfs\MFT', '--json'])
+try:
+    ur = json.loads(out)
+    fl = {r['name']: r['reason'] for r in ur if r['suspicious']}
+    folders = {r['name']: r['folder'] for r in ur}
+    if fl != {'invoice.exe': 'renamed into a program or script', 'tool.ps1': 'program or script deleted'}:
+        print(f'FAIL usn: flags {fl}'); fails += 1
+    elif folders.get('notes.txt') != '\\Users\\bob\\Downloads' or 'reused or missing' not in folders.get('lost.txt', ''):
+        print(f'FAIL usn --mft: folders {folders}'); fails += 1
+    elif not any(r['old_name'] == 'invoice.pdf' for r in ur if r['name'] == 'invoice.exe'):
+        print('FAIL usn: old name not paired with the new one'); fails += 1
+    else:
+        print('checked usn --mft --json  (rename into exe and deleted script flagged, folders from the $MFT)')
+except Exception as e:
+    print('FAIL usn check:', e, out[:200]); fails += 1
+rc, out, err = wine([exe, 'mft', r'C:\ntfs\MFT', '--timestomp', '--json'])
+try:
+    mr = json.loads(out)
+    if [r['path'] for r in mr] != ['\\Users\\bob\\Downloads\\invoice.exe']:
+        print(f'FAIL mft (synthetic): {mr}'); fails += 1
+    else:
+        print('checked mft --timestomp  (synthetic $MFT: backdated invoice.exe listed with its path)')
+except Exception as e:
+    print('FAIL mft synthetic check:', e, out[:200]); fails += 1
+
 # sweep: one valid JSON document with every check as a key; checks that
 # cannot run under wine (WMI, event logs) must be null or empty, not broken.
 rc, out, err = wine([exe, 'sweep', '--json'], timeout=600)

@@ -130,6 +130,15 @@ static const struct { const char *name, *text; } usage_table[] = {
         "flagged. Other users' folders need admin. A file or folder argument reads a\n"
         "copy (e.g. from a disk image). Read-only. Usage:\n"
         "  winspect recyclebin [<$I file | INFO2 | folder>] [--flagged] [--json | --csv]\n" },
+    { "usn",
+        "winspect usn - the NTFS change journal ($Extend\\$UsnJrnl:$J, copied with a\n"
+        "triage tool): every create, delete, rename, data change... with time, file\n"
+        "name and reasons, oldest first. With --mft the folder of each entry is\n"
+        "rebuilt from a copy of the same volume's $MFT. Flags deleted programs /\n"
+        "scripts and files renamed into a program / script name (pdf -> exe).\n"
+        "--find filters by name, --reason by reason words (create, delete, rename,\n"
+        "data, security, close...). Read-only. Usage:\n"
+        "  winspect usn <$J file> [--mft <$MFT>] [--find <text>] [--reason <words>] [--flagged] [--json | --csv]\n" },
     { "mft",
         "winspect mft - files from a copied NTFS $MFT (collected with a triage tool\n"
         "or taken from a mounted image): full path (deleted files included, broken\n"

@@ -21,16 +21,16 @@ jobs:
           git diff --exit-code src/usage.c || { echo "src/usage.c is stale: run python3 tools/gen_usage.py"; exit 1; }
       - name: Build + run helper tests
         run: |
-          SRC="src/md5.c src/jsonutil.c src/ioc.c src/entropy.c src/pecksum.c src/imphash_ords.c src/pfparse.c src/artparse.c src/capa.c src/lnkparse.c src/rights.c src/destlist.c src/shellitem.c src/jsonmini.c src/sqlite.c src/mft.c"
+          SRC="src/md5.c src/jsonutil.c src/ioc.c src/entropy.c src/pecksum.c src/imphash_ords.c src/pfparse.c src/artparse.c src/capa.c src/lnkparse.c src/rights.c src/destlist.c src/shellitem.c src/jsonmini.c src/sqlite.c src/mft.c src/usn.c"
           cc -I inc -Wall -Wextra -std=c11 $SRC tests/test_util.c -o test_util -lm
           ./test_util
       - name: Same tests + parser fuzz under AddressSanitizer / UBSan
         run: |
           SAN="-g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all"
-          SRC="src/md5.c src/jsonutil.c src/ioc.c src/entropy.c src/pecksum.c src/imphash_ords.c src/pfparse.c src/artparse.c src/capa.c src/lnkparse.c src/rights.c src/destlist.c src/shellitem.c src/jsonmini.c src/sqlite.c src/mft.c"
+          SRC="src/md5.c src/jsonutil.c src/ioc.c src/entropy.c src/pecksum.c src/imphash_ords.c src/pfparse.c src/artparse.c src/capa.c src/lnkparse.c src/rights.c src/destlist.c src/shellitem.c src/jsonmini.c src/sqlite.c src/mft.c src/usn.c"
           cc -I inc -std=c11 $SAN $SRC tests/test_util.c -o test_util_san -lm
           ./test_util_san
-          cc -I inc -std=c11 $SAN src/ioc.c src/pfparse.c src/artparse.c src/lnkparse.c src/rights.c src/capa.c src/cfb.c src/destlist.c src/regf.c src/shellitem.c src/jsonmini.c tests/fuzz_parsers.c -o fuzz_parsers
+          cc -I inc -std=c11 $SAN src/ioc.c src/pfparse.c src/artparse.c src/lnkparse.c src/rights.c src/capa.c src/cfb.c src/destlist.c src/regf.c src/shellitem.c src/jsonmini.c src/usn.c tests/fuzz_parsers.c -o fuzz_parsers
           ./fuzz_parsers 300000
           # Compound-file reader: random files from tests/wine/cfbwrite.py must
           # read back byte-identical (sizes + MD5 per stream).
@@ -116,6 +116,10 @@ jobs:
           SAN="-g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all"
           cc -I inc -std=c11 $SAN src/mft.c tests/mft_dump.c -o mft_dump
           python3 -I tests/mft_check.py ./mft_dump MFT
+          # $UsnJrnl:$J records from the same project (19 records, first one asserted by its tests)
+          curl -sSfL -o UsnJrnl.raw "https://raw.githubusercontent.com/log2timeline/plaso/ee5a0ab4f7af07f61b0554ba8edc0700514efc5a/test_data/UsnJrnl.raw"
+          cc -I inc -std=c11 $SAN src/usn.c tests/usn_dump.c -o usn_dump
+          python3 -I tests/usn_check.py ./usn_dump UsnJrnl.raw
           cc -I inc -std=c11 $SAN src/mft.c tests/fuzz_mft.c -o fuzz_mft
           ./fuzz_mft MFT 1000
       - name: Registry hive reader vs real hives (regipy test data)
