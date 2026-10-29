@@ -533,6 +533,21 @@ static const struct { const char *name, *text; } usage_table[] = {
         "raw instead of being guessed at. Flags programs in user-writable folders.\n"
         "A folder argument reads a copy (e.g. from a disk image). Read-only. Usage:\n"
         "  winspect pca [<folder>] [--flagged] [--json | --csv]\n" },
+    { "setupapi",
+        "winspect setupapi - device and driver installs from the SetupAPI text logs\n"
+        "(%SystemRoot%\\INF\\setupapi.dev.log, setupapi.setup.log and their rotated\n"
+        "copies setupapi.dev.YYYYMMDD_hhmmss.log). One row per logged section: when\n"
+        "it started and ended, what it was (device install, driver package import,\n"
+        "...), the device id or INF path, the exit status, the signer named in the\n"
+        "section and its error/warning line counts. A USB storage device's first\n"
+        "\"Device Install\" is the classic first-connected time. Times in the log are\n"
+        "LOCAL: for the live logs they are converted with this machine's time zone;\n"
+        "for a copied file --utc-offset <+hh:mm> converts them, otherwise time_utc\n"
+        "stays empty. Sections without a target (policy checks, cleanup) are only\n"
+        "shown with --all. Flags a driver package installed from a user-writable\n"
+        "folder. A file or folder argument reads a copy. Read-only. Usage:\n"
+        "  winspect setupapi [<file | INF folder>] [--all] [--flagged] [--find <text>]\n"
+        "                    [--utc-offset <+hh:mm>] [--json | --csv]\n" },
     { "prefetch",
         "winspect prefetch - evidence of execution from %SystemRoot%\\Prefetch\\*.pf:\n"
         "executable name, run count, last run time(s) and - from the file's own\n"

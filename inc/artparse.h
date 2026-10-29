@@ -356,4 +356,31 @@ typedef struct {
 // empty line.
 int pca_parse_line(const char *line, pca_rec *r);
 
+
+// ---- setupapi.dev.log / setupapi.setup.log ---------------------------------
+// %SystemRoot%\INF\setupapi*.log, the PnP/driver install text log:
+//   [Boot Session: 2015/11/22 17:58:03.498]
+//   >>>  [Device Install (Hardware initiated) - USBSTOR\Disk&Ven_...]
+//   >>>  Section start 2015/11/22 17:59:28.110
+//        ... body lines; "!!!  " = error, "!    " = warning ...
+//   <<<  Section end 2015/11/22 17:59:37.142
+//   <<<  [Exit status: SUCCESS]
+// Times are the machine's LOCAL time as written.
+typedef struct {
+    char boot[24];              // boot session ("YYYY-MM-DD hh:mm:ss") or ""
+    char title[128];            // "Device Install (Hardware initiated)"
+    char target[1024];          // text after " - " (device id, INF path) or ""
+    char start[24], end[24];    // "YYYY-MM-DD hh:mm:ss.fff" or ""
+    char status[96];            // "SUCCESS", "SUCCESS (REBOOT_REQUIRED)", ... or ""
+    char signer[256];           // first "sig: Signer Name = ..." in the body
+    unsigned errors, warnings;
+} sa_sec;
+typedef struct { const char *p; char boot[24]; } sa_iter;
+void sa_init(sa_iter *it, const char *text);
+// Next section; 1 when one was filled, 0 at the end of the text.
+int sa_next(sa_iter *it, sa_sec *s);
+// Device class hint from a section target: "USB storage", "portable device",
+// "USB", "storage" or NULL.
+const char *sa_device_kind(const char *target);
+
 #endif

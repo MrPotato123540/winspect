@@ -95,6 +95,7 @@
 #include "image.h"
 #include "browser.h"
 #include "pca.h"
+#include "setupapi.h"
 #include "activities.h"
 #include "mftcmd.h"
 #include "usncmd.h"
@@ -293,6 +294,7 @@ static const struct {
     { "objects",  cmd_objects,  "named kernel objects (BaseNamedObjects)",  "system" },
     { "usb",      cmd_usb,      "USB storage history (Enum\\USBSTOR)",       "system" },
     { "pca",      cmd_pca,      "PCA launch records (Windows 11 22H2+)",      "system" },
+    { "setupapi", cmd_setupapi, "device/driver installs (setupapi logs)",     "system" },
     { "prefetch", cmd_prefetch, "execution evidence from Prefetch (*.pf)",   "system" },
     { "shimcache",cmd_shimcache,"AppCompatCache entries (programs seen)",    "system" },
     { "bam",      cmd_bam,      "BAM: last run per program per user",        "system" },

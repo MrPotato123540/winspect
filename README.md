@@ -76,6 +76,7 @@ takes. The tables below are a map, not the full reference.
 | --- | --- |
 | `prefetch` | Programs that ran: full path, run count, last eight run times. Handles Windows 10/11 compressed files. |
 | `pca` | Windows 11 22H2+ Program Compatibility Assistant logs (`appcompat\pca`): programs launched, with the last launch time. Still there when Prefetch is off. |
+| `setupapi` | Device and driver installs from `INF\setupapi*.log`: start/end time, device id or INF path, exit status, signer. A USB stick's first install is its first-connected time. Flags driver packages installed from user-writable folders. `--utc-offset` for copied logs. |
 | `srum` | System Resource Usage Monitor (`SRUDB.dat`, an ESE database read with a built-in reader): bytes sent and received per application, user and hour; CPU / disk use; connection spans. `--summary` totals per application, largest upload first. |
 | `amcache` | File inventory from Amcache.hve with SHA-1, publisher and version. Look up a hash with `--sha1`. |
 | `shimcache` | AppCompatCache entries (Windows 7, 10 and 11 layouts). |

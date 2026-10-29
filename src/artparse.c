@@ -1213,3 +1213,134 @@ int pca_parse_line(const char *line, pca_rec *r)
     }
     return 0;
 }
+
+// ---- setupapi logs ------------------------------------------------------------
+
+void sa_init(sa_iter *it, const char *text)
+{
+    it->p = text ? text : "";
+    it->boot[0] = 0;
+    if ((unsigned char)it->p[0] == 0xEF && (unsigned char)it->p[1] == 0xBB && (unsigned char)it->p[2] == 0xBF) it->p += 3;
+}
+
+// One line [*p, eol) -> buf (no CR/LF); advances *p past the line ending.
+static int sa_line(const char **p, char *buf, size_t n)
+{
+    const char *s = *p;
+    if (*s == 0) return 0;
+    const char *e = s;
+    while (*e && *e != '\n') e++;
+    size_t L = (size_t)(e - s);
+    if (L && s[L - 1] == '\r') L--;
+    if (L >= n) L = n - 1;
+    memcpy(buf, s, L);
+    buf[L] = 0;
+    *p = *e ? e + 1 : e;
+    return 1;
+}
+
+// "2015/11/22 17:59:28.110" (at s) -> "2015-11-22 17:59:28.110"; with
+// ms = 0 the fraction is dropped. 0 if the shape does not match.
+static int sa_time(const char *s, char out[24], int ms)
+{
+    static const char shape[] = "dddd/dd/dd dd:dd:dd";
+    for (int i = 0; shape[i]; i++) {
+        if (shape[i] == 'd' ? !(s[i] >= '0' && s[i] <= '9') : s[i] != shape[i]) return 0;
+    }
+    memcpy(out, s, 19);
+    out[4] = out[7] = '-';
+    out[19] = 0;
+    if (ms && s[19] == '.' && s[20] >= '0' && s[20] <= '9' && s[21] >= '0' && s[21] <= '9' && s[22] >= '0' && s[22] <= '9') {
+        memcpy(out + 19, s + 19, 4);
+        out[23] = 0;
+    }
+    return 1;
+}
+
+int sa_next(sa_iter *it, sa_sec *s)
+{
+    char line[2048];
+    memset(s, 0, sizeof *s);
+    int in = 0;
+    const char *before;
+    for (;;) {
+        before = it->p;
+        if (!sa_line(&it->p, line, sizeof line)) return in;
+        if (!in) {
+            if (strncmp(line, "[Boot Session: ", 15) == 0) {
+                if (!sa_time(line + 15, it->boot, 0)) it->boot[0] = 0;
+                continue;
+            }
+            if (strncmp(line, ">>>  [", 6) != 0) continue;
+            const char *t = line + 6;
+            size_t L = strlen(t);
+            if (L && t[L - 1] == ']') L--;
+            char head[1200];
+            if (L >= sizeof head) L = sizeof head - 1;
+            memcpy(head, t, L);
+            head[L] = 0;
+            char *dash = strstr(head, " - ");
+            if (dash) {
+                *dash = 0;
+                snprintf(s->target, sizeof s->target, "%.1023s", dash + 3);
+            }
+            snprintf(s->title, sizeof s->title, "%.127s", head);
+            snprintf(s->boot, sizeof s->boot, "%s", it->boot);
+            in = 1;
+            continue;
+        }
+        // A new section or boot session before this one's exit status: the
+        // section was cut off (log rotated, crash). Leave the line for the
+        // next call.
+        if (strncmp(line, ">>>  [", 6) == 0 || strncmp(line, "[Boot Session: ", 15) == 0) {
+            it->p = before;
+            return 1;
+        }
+        if (strncmp(line, ">>>  Section start ", 19) == 0) { sa_time(line + 19, s->start, 1); continue; }
+        if (strncmp(line, "<<<  Section end ", 17) == 0)   { sa_time(line + 17, s->end, 1); continue; }
+        if (strncmp(line, "<<<  [Exit status: ", 19) == 0) {
+            const char *v = line + 19;
+            size_t L = strlen(v);
+            if (L && v[L - 1] == ']') L--;
+            if (L >= sizeof s->status) L = sizeof s->status - 1;
+            memcpy(s->status, v, L);
+            s->status[L] = 0;
+            return 1;
+        }
+        if (strncmp(line, "!!!  ", 5) == 0) s->errors++;
+        else if (strncmp(line, "!    ", 5) == 0) s->warnings++;
+        const char *sg = strstr(line, "sig:");
+        if (sg && s->signer[0] == 0) {
+            const char *k = strstr(sg, "Signer Name");
+            if (k) {
+                k += 11;
+                while (*k == ' ') k++;
+                if (*k == '=') {
+                    k++;
+                    while (*k == ' ') k++;
+                    snprintf(s->signer, sizeof s->signer, "%s", k);
+                }
+            }
+        }
+    }
+}
+
+static int sa_prefix(const char *s, const char *pre)
+{
+    for (; *pre; s++, pre++) {
+        char a = *s, b = *pre;
+        if (a >= 'a' && a <= 'z') a = (char)(a - 32);
+        if (a != b) return 0;
+    }
+    return 1;
+}
+
+const char *sa_device_kind(const char *t)
+{
+    if (t == NULL) return NULL;
+    if (sa_prefix(t, "USBSTOR\\")) return "USB storage";
+    if (sa_prefix(t, "SWD\\WPDBUSENUM\\") || sa_prefix(t, "WPDBUSENUMROOT\\")) return "portable device";
+    if (sa_prefix(t, "USB\\")) return "USB";
+    if (sa_prefix(t, "STORAGE\\") || sa_prefix(t, "SCSI\\")) return "storage";
+    return NULL;
+}
