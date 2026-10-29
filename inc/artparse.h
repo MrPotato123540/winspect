@@ -137,6 +137,10 @@ int evt_time(const char *xml, char *out, size_t n);
 // the filter unchanged. Returns 0, or -1 if base has the wrong shape / out is
 // too small.
 int evt_xpath_since(const char *base, unsigned hours, char *out, size_t n);
+// 1 if an event (id, level) passes one of our channel filters - the small
+// XPath subset used there: "EventID=N" alternatives, optionally combined with
+// "Level=L". Lets offline .evtx files go through the same filters as EvtQuery.
+int evt_xpath_match(const char *xpath, unsigned id, unsigned level);
 
 // Failed-logon (4625) summary per source address, the way Chainsaw / Hayabusa
 // "logon summaries" group them: how many failures, against how many distinct
@@ -266,6 +270,11 @@ const char *rb_reason(const char *path);
 // documented persistence trick (T1197); a bare-IP source or a program/script
 // landing in a user-writable folder are download hints. NULL = nothing to say.
 const char *bits_reason(const char *notify, const char *remote, const char *local);
+// Browser history row judged: for a download (download = 1) the browser's own
+// warning (Chromium danger_type; 6 = kept despite a warning), a bare-IP source
+// or a program/script as the target; for a visit, an http(s) URL whose host
+// is a bare IP address. NULL = nothing to say.
+const char *browser_reason(int download, const char *url, const char *target, int danger);
 
 // ---- Scheduled task XML ----------------------------------------------------
 // The fields of a Task Scheduler 2.0 definition (System32\Tasks\...) that say

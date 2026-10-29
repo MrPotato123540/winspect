@@ -99,3 +99,30 @@ wine'daki fixture'lar birleştirilip şunlar kontrol ediliyor:
 - PowerShell geçmişi dosya başına tek, işaretli satır;
 - `--since 1` eski fixture'ları dışarıda bırakıyor, `--sources` yalnızca
   istenen kaynağı veriyor, bilinmeyen kaynak hata veriyor.
+
+## Bir imajdan zaman çizelgesi: --root
+
+`timeline --root E:\` aynı kaynakları canlı makine yerine bağlanmış bir imajın
+dosyalarıyla çalıştırır. Kanıt bulma işi `image` ile ortaktır (`imgpaths.c`):
+
+- **Makine geneli, bir kez:** Prefetch klasörü; SYSTEM hive'ından bam,
+  shimcache, usb; Amcache; Geri Dönüşüm Kutusu; SAM'dan hesaplar; görev
+  klasörü; SOFTWARE/SYSTEM'den sysinfo; bulunan `.evtx` dosyaları.
+- **Her profil için:** NTUSER.DAT'tan userassist, mru, rdp; NTUSER +
+  UsrClass'tan shellbags; `Recent` klasöründen lnk ve Jump List'ler;
+  PSReadLine geçmişi; UsrClass + SOFTWARE'den kullanıcı başına COM sınıfları.
+
+Kullanıcı başına satırlar profil adını taşır (`"user": "bob"`). Böylece birden
+çok kullanıcılı bir imajda kimin ne yaptığı ayrışır.
+
+**Amcache** yalnızca bu modda kaynaktır. Canlı makinede dosya kilitli
+olduğundan okunamaz. Satır zamanı, Amcache'in o dosya için kaydı yazdığı
+zamandır; yaklaşık olarak ilk çalışma ya da kurulum anını verir, kesin bir
+çalışma zamanı değildir.
+
+**Doğrulama:**
+
+- Sentetik imaj (`C:\img2`): prefetch, geri dönüşüm, hesap, bob'un COM ve
+  PowerShell satırları, yeniden eskiye sıra.
+- regipy hive'larından kurulan imaj: shimcache, bob'un UserAssist / ShellBags
+  / COM satırları ve SOFTWARE'deki kurulum zamanı (2010-11-10 16:28:55).

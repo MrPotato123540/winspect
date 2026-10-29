@@ -213,7 +213,12 @@ def make_lnk_crafted(target, args, machine, mac):
     tr += machine.encode('ascii').ljust(16, b'\0') + bytes(16) + droid + bytes(32)
     return bytes(hdr) + li + sd + tr + b'\0' * 4
 users = os.path.join(pfx, 'drive_c', 'users')
-uname = [u for u in os.listdir(users) if u.lower() not in ('public',)][0]
+# wine names the profile after the unix user; other folders (e.g. the
+# non-ASCII test profile below) must not be mistaken for it.
+import getpass
+uname = getpass.getuser()
+if not os.path.isdir(os.path.join(users, uname)):
+    uname = sorted(u for u in os.listdir(users) if u.lower() != 'public' and u.isascii())[0]
 roam = os.path.join(users, uname, 'AppData', 'Roaming', 'Microsoft', 'Windows')
 startup = os.path.join(roam, 'Start Menu', 'Programs', 'Startup')
 recent = os.path.join(roam, 'Recent')
@@ -300,6 +305,66 @@ os.makedirs(gpsd, exist_ok=True)
 with open(os.path.join(gpsd, 'ConsoleHost_history.txt'), 'w', newline='') as f:
     f.write('Clear-EventLog -LogName Security\r\n')
 
+# --- browser: a Chrome History and a Firefox places.sqlite (WAL mode, rows
+# only in the -wal file), real column names in a shuffled order -------------
+import sqlite3
+home = os.path.join(users, uname)
+chd = os.path.join(home, 'AppData', 'Local', 'Google', 'Chrome', 'User Data', 'Default')
+os.makedirs(chd, exist_ok=True)
+chp = os.path.join(chd, 'History')
+for x in (chp, chp + '-journal'):
+    if os.path.exists(x): os.remove(x)
+con = sqlite3.connect(chp)
+con.execute('CREATE TABLE urls(id INTEGER PRIMARY KEY AUTOINCREMENT,url LONGVARCHAR,title LONGVARCHAR,'
+            'visit_count INTEGER DEFAULT 0 NOT NULL,typed_count INTEGER DEFAULT 0 NOT NULL,'
+            'last_visit_time INTEGER NOT NULL,hidden INTEGER DEFAULT 0 NOT NULL)')
+con.execute('CREATE TABLE downloads (id INTEGER PRIMARY KEY,guid VARCHAR NOT NULL,current_path LONGVARCHAR NOT NULL,'
+            'target_path LONGVARCHAR NOT NULL,start_time INTEGER NOT NULL,received_bytes INTEGER NOT NULL,'
+            'total_bytes INTEGER NOT NULL,state INTEGER NOT NULL,danger_type INTEGER NOT NULL,'
+            'interrupt_reason INTEGER NOT NULL,hash BLOB NOT NULL,end_time INTEGER NOT NULL,opened INTEGER NOT NULL,'
+            'last_access_time INTEGER NOT NULL,transient INTEGER NOT NULL,referrer VARCHAR NOT NULL,'
+            'site_url VARCHAR NOT NULL,tab_url VARCHAR NOT NULL,tab_referrer_url VARCHAR NOT NULL,'
+            'http_method VARCHAR NOT NULL,by_ext_id VARCHAR NOT NULL,by_ext_name VARCHAR NOT NULL,'
+            'etag VARCHAR NOT NULL,last_modified VARCHAR NOT NULL,mime_type VARCHAR(255) NOT NULL,'
+            'original_mime_type VARCHAR(255) NOT NULL)')
+con.execute('CREATE TABLE downloads_url_chains (id INTEGER NOT NULL,chain_index INTEGER NOT NULL,url LONGVARCHAR NOT NULL, PRIMARY KEY (id, chain_index))')
+wk = lambda unix: (unix + 11644473600) * 1000000          # WebKit / Chrome time
+con.execute("INSERT INTO urls VALUES (NULL,'https://www.example.org/news','Example news',3,0,?,0)", (wk(1700000000),))
+con.execute("INSERT INTO urls VALUES (NULL,'http://198.51.100.7/panel/login.php','panel',1,1,?,0)", (wk(1700000100),))
+def dl(i, target, url, danger, t):
+    con.execute('INSERT INTO downloads VALUES (?,?,?,?,?,1,4096,1,?,0,x\'\',?,0,0,0,\'\',\'\',?,\'\',\'GET\',\'\',\'\',\'\',\'\',\'application/octet-stream\',\'\')',
+                (i, 'g%d' % i, target, target, wk(t), danger, wk(t + 5), url))
+    con.execute('INSERT INTO downloads_url_chains VALUES (?,0,?)', (i, url))
+dl(1, r'C:\Users\bob\Downloads\report.pdf', 'https://www.example.org/report.pdf', 0, 1700000200)
+dl(2, r'C:\Users\bob\Downloads\invoice.exe', 'https://files.example.net/invoice.exe', 6, 1700000300)
+con.commit(); con.close()
+ffd = os.path.join(home, 'AppData', 'Roaming', 'Mozilla', 'Firefox', 'Profiles', 'abcd1234.default-release')
+os.makedirs(ffd, exist_ok=True)
+ffp = os.path.join(ffd, 'places.sqlite')
+for x in (ffp, ffp + '-wal', ffp + '-shm'):
+    if os.path.exists(x): os.remove(x)
+con = sqlite3.connect(ffp)
+con.execute('PRAGMA journal_mode=WAL')
+con.execute('PRAGMA wal_autocheckpoint=0')
+con.execute('CREATE TABLE moz_places (id INTEGER PRIMARY KEY, url LONGVARCHAR, title LONGVARCHAR, rev_host LONGVARCHAR, '
+            'visit_count INTEGER DEFAULT 0, hidden INTEGER DEFAULT 0 NOT NULL, typed INTEGER DEFAULT 0 NOT NULL, '
+            'frecency INTEGER DEFAULT -1 NOT NULL, last_visit_date INTEGER , guid TEXT, foreign_count INTEGER DEFAULT 0 NOT NULL)')
+con.execute('CREATE TABLE moz_anno_attributes (id INTEGER PRIMARY KEY,name VARCHAR(32) UNIQUE NOT NULL)')
+con.execute('CREATE TABLE moz_annos (id INTEGER PRIMARY KEY,place_id INTEGER NOT NULL,anno_attribute_id INTEGER,'
+            'content LONGVARCHAR, flags INTEGER DEFAULT 0,expiration INTEGER DEFAULT 0,type INTEGER DEFAULT 0,'
+            'dateAdded INTEGER DEFAULT 0,lastModified INTEGER DEFAULT 0)')
+us = lambda unix: unix * 1000000
+con.execute("INSERT INTO moz_places VALUES (1,'https://www.example.com/','Example','moc.elpmaxe.www.',2,0,0,100,?,'g1',0)", (us(1700000400),))
+con.execute("INSERT INTO moz_places VALUES (2,'http://203.0.113.9/dl/tool.ps1','',NULL,1,0,0,100,?,'g2',0)", (us(1700000500),))
+con.execute("INSERT INTO moz_anno_attributes VALUES (1,'downloads/metaData'),(2,'downloads/destinationFileURI')")
+con.execute("INSERT INTO moz_annos VALUES (1,2,2,'file:///C:/Users/bob/Downloads/tool%20v2.ps1',0,4,3,?,?)", (us(1700000505), us(1700000505)))
+con.commit()
+import shutil as _shb
+_shb.copy(ffp, ffp + '.copy'); _shb.copy(ffp + '-wal', ffp + '-wal.copy')
+con.close()
+os.replace(ffp + '.copy', ffp); os.replace(ffp + '-wal.copy', ffp + '-wal')
+if os.path.exists(ffp + '-shm'): os.remove(ffp + '-shm')
+
 # --- rdp: outgoing Remote Desktop history ---------------------------------------
 T = r'HKCU\Software\Microsoft\Terminal Server Client'
 reg(T + r'\Default', '/v', 'MRU0', '/t', 'REG_SZ', '/d', '10.10.5.21')
@@ -329,6 +394,10 @@ checks = [
     (['pshistory', '--json'], [('DownloadString', 'download cradle'), ('DisableRealtimeMonitoring', 'Defender'),
                                ('"line":1', None)], ['Get-ChildItem', 'git status']),
     (['pshistory', '--all-users', '--flagged', '--json'], [('"user":"Gülşen"', 'log / history clearing')], []),
+    (['browser', '--json'], [('report.pdf', None), ('invoice.exe', 'user kept a download the browser warned about'),
+                             ('198.51.100.7', 'visited a bare IP address'), ('tool v2.ps1', 'downloaded from a bare IP address'),
+                             ('"title":"Example"', None)],
+     ['report.pdf', 'Example news', '"title":"Example"']),
     (['rdp', '--json'], [('"source":"Default","position":0', '"host":"10.10.5.21"'),
                          ('fileserver01.corp.example', '"position":1'),
                          ('"source":"Servers"', 'CORP\\\\svc_backup'), ('"certificate_accepted":true', None)], []),
@@ -729,13 +798,87 @@ if certs:
 else:
     print('skipped certstore offline check (openssl not installed)')
 
+# image: a whole (synthetic) offline Windows installation under C:\img2 -
+# hives from the test writer, a Prefetch file, a dropped task, a Recycle Bin
+# record and a PowerShell history - every planted item must come back as a
+# finding with its source (and user for per-user evidence); nothing benign.
+img = os.path.join(pfx, 'drive_c', 'img2')
+cfg = os.path.join(img, 'Windows', 'System32', 'config')
+for d in (cfg, os.path.join(img, 'Windows', 'Prefetch'), os.path.join(img, 'Windows', 'System32', 'Tasks'),
+          os.path.join(img, 'Users', 'bob', 'AppData', 'Local', 'Microsoft', 'Windows'),
+          os.path.join(img, 'Users', 'bob', 'AppData', 'Roaming', 'Microsoft', 'Windows', 'PowerShell', 'PSReadLine'),
+          os.path.join(img, '$Recycle.Bin', 'S-1-5-21-1-2-3-1001')):
+    os.makedirs(d, exist_ok=True)
+system_hive = K('ROOT', [], [
+    K('Select', [rw.Value('Current', rw.REG_DWORD, rw.dword(1))]),
+    K('ControlSet001', [], [K('Services', [], [
+        K('WsImgSvc', [rw.Value('ImagePath', rw.REG_EXPAND_SZ, rw.sz(r'C:\Users\Public\svc.exe')),
+                       rw.Value('Start', rw.REG_DWORD, rw.dword(2)), rw.Value('Type', rw.REG_DWORD, rw.dword(16)),
+                       rw.Value('ObjectName', rw.REG_SZ, rw.sz('LocalSystem'))])])])])
+with open(os.path.join(cfg, 'SYSTEM'), 'wb') as f:
+    f.write(rw.build(system_hive))
+_sh.copy(os.path.join(off, 'SOFTWARE'), os.path.join(cfg, 'SOFTWARE'))
+_sh.copy(os.path.join(off, 'SAM'), os.path.join(cfg, 'SAM'))
+ntu = K('ROOT', [], [K('Software', [], [K('Microsoft', [], [K('Windows', [], [K('CurrentVersion', [], [
+    K('Run', [rw.Value('Updater', rw.REG_SZ, rw.sz(r'C:\Users\bob\AppData\Local\Temp\upd.exe'))])])])])])])
+with open(os.path.join(img, 'Users', 'bob', 'NTUSER.DAT'), 'wb') as f:
+    f.write(rw.build(ntu))
+_sh.copy(os.path.join(off, 'UsrClass.dat'), os.path.join(img, 'Users', 'bob', 'AppData', 'Local', 'Microsoft', 'Windows', 'UsrClass.dat'))
+with open(os.path.join(img, 'Users', 'bob', 'AppData', 'Roaming', 'Microsoft', 'Windows', 'PowerShell', 'PSReadLine',
+                       'ConsoleHost_history.txt'), 'w', newline='') as f:
+    f.write('dir\r\nwevtutil cl Security\r\n')
+with open(os.path.join(img, 'Windows', 'Prefetch', 'EVIL.EXE-DEADBEEF.pf'), 'wb') as f:
+    f.write(make_pf())
+_sh.copy(os.path.join(pfx, 'drive_c', 'tasks_copy', 'Sub', 'Dropped'), os.path.join(img, 'Windows', 'System32', 'Tasks', 'Dropped'))
+_sh.copy(os.path.join(rbd, '$IAB12CD.exe'), os.path.join(img, '$Recycle.Bin', 'S-1-5-21-1-2-3-1001', '$IAB12CD.exe'))
+ibr = os.path.join(img, 'Users', 'bob', 'AppData', 'Local', 'Google', 'Chrome', 'User Data', 'Default')
+os.makedirs(ibr, exist_ok=True)
+_sh.copy(chp, os.path.join(ibr, 'History'))
+rc, out, err = wine([exe, 'image', r'C:\img2', '--json'], timeout=300)
+try:
+    im = json.loads(out)
+    got = {(x['source'], x['user']) for x in im['findings']}
+    want = {('users', ''), ('services', ''), ('prefetch', ''), ('tasks', ''), ('recyclebin', ''), ('autoruns', 'bob'),
+            ('comhijack', 'bob'), ('pshistory', 'bob'), ('browser', 'bob')}
+    if certs:
+        want.add(('certstore', ''))
+    detail = ' '.join(x['detail'] for x in im['findings'])
+    if not want <= got:
+        print(f'FAIL image: missing findings {sorted(want - got)}; got {sorted(got)}'); fails += 1
+    elif 'HASHCANARY' in out:
+        print('FAIL image: SAM V content leaked'); fails += 1
+    elif not all(k in detail for k in ('svc.exe', 'EVIL.EXE', 'upd.exe', 'dropper.exe', 'wevtutil cl')):
+        print(f'FAIL image: finding details incomplete: {detail[:300]}'); fails += 1
+    elif im['evidence']['profiles'] != ['bob'] or not im['evidence']['sam']:
+        print(f"FAIL image: evidence summary wrong: {im['evidence']}"); fails += 1
+    else:
+        print(f"checked image --json  ({len(im['findings'])} findings, every planted item found)")
+except Exception as e:
+    print('FAIL image check:', e, out[:300]); fails += 1
+
+# timeline --root: the synthetic image as a timeline; per-user rows name bob.
+rc, out, err = wine([exe, 'timeline', '--root', r'C:\img2', '--json'], timeout=300)
+try:
+    tr = json.loads(out)
+    keys = {(r['source'], r['user']) for r in tr}
+    if not {('prefetch', ''), ('recyclebin', ''), ('users', ''), ('comhijack', 'bob'), ('pshistory', 'bob'), ('browser', 'bob')} <= keys:
+        print(f'FAIL timeline --root: sources missing: {sorted(keys)}'); fails += 1
+    elif [r['time'] for r in tr] != sorted((r['time'] for r in tr), reverse=True):
+        print('FAIL timeline --root: not newest first'); fails += 1
+    elif not any(r['source'] == 'prefetch' and 'EVIL.EXE' in r['event'] and r['suspicious'] for r in tr):
+        print('FAIL timeline --root: prefetch run missing'); fails += 1
+    else:
+        print(f'checked timeline --root  ({len(tr)} rows from the synthetic image)')
+except Exception as e:
+    print('FAIL timeline --root check:', e, out[:200]); fails += 1
+
 # sweep: one valid JSON document with every check as a key; checks that
 # cannot run under wine (WMI, event logs) must be null or empty, not broken.
 rc, out, err = wine([exe, 'sweep', '--json'], timeout=600)
 try:
     d = json.loads(out)
     want = ['posture', 'hunt', 'hidden', 'net', 'autoruns', 'services', 'tasks', 'taskcache',
-            'firewall', 'prefetch', 'defender', 'wmi', 'users', 'comhijack', 'bits', 'pshistory', 'recyclebin', 'events']
+            'firewall', 'prefetch', 'defender', 'wmi', 'users', 'comhijack', 'bits', 'pshistory', 'recyclebin', 'browser', 'events']
     missing = [k for k in want if k not in d]
     if missing:
         print(f'FAIL sweep: missing keys {missing}'); fails += 1

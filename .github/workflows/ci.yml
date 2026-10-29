@@ -21,13 +21,13 @@ jobs:
           git diff --exit-code src/usage.c || { echo "src/usage.c is stale: run python3 tools/gen_usage.py"; exit 1; }
       - name: Build + run helper tests
         run: |
-          SRC="src/md5.c src/jsonutil.c src/ioc.c src/entropy.c src/pecksum.c src/imphash_ords.c src/pfparse.c src/artparse.c src/capa.c src/lnkparse.c src/rights.c src/destlist.c src/shellitem.c src/jsonmini.c"
+          SRC="src/md5.c src/jsonutil.c src/ioc.c src/entropy.c src/pecksum.c src/imphash_ords.c src/pfparse.c src/artparse.c src/capa.c src/lnkparse.c src/rights.c src/destlist.c src/shellitem.c src/jsonmini.c src/sqlite.c"
           cc -I inc -Wall -Wextra -std=c11 $SRC tests/test_util.c -o test_util -lm
           ./test_util
       - name: Same tests + parser fuzz under AddressSanitizer / UBSan
         run: |
           SAN="-g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all"
-          SRC="src/md5.c src/jsonutil.c src/ioc.c src/entropy.c src/pecksum.c src/imphash_ords.c src/pfparse.c src/artparse.c src/capa.c src/lnkparse.c src/rights.c src/destlist.c src/shellitem.c src/jsonmini.c"
+          SRC="src/md5.c src/jsonutil.c src/ioc.c src/entropy.c src/pecksum.c src/imphash_ords.c src/pfparse.c src/artparse.c src/capa.c src/lnkparse.c src/rights.c src/destlist.c src/shellitem.c src/jsonmini.c src/sqlite.c"
           cc -I inc -std=c11 $SAN $SRC tests/test_util.c -o test_util_san -lm
           ./test_util_san
           cc -I inc -std=c11 $SAN src/ioc.c src/pfparse.c src/artparse.c src/lnkparse.c src/rights.c src/capa.c src/cfb.c src/destlist.c src/regf.c src/shellitem.c src/jsonmini.c tests/fuzz_parsers.c -o fuzz_parsers
@@ -65,6 +65,18 @@ jobs:
           cc -I inc -std=c11 -g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all \
              src/jsonmini.c tests/jm_dump.c -o jm_dump -lm
           python3 -I tests/jm_diff.py ./jm_dump 5000
+      - name: SQLite reader vs Python's sqlite3 (differential) + fuzz
+        # browser reads Chromium / Firefox databases with src/sqlite.c. Random
+        # databases (page sizes, UTF-16, overflow chains, uncheckpointed WAL)
+        # must read back row for row, column names must match PRAGMA
+        # table_info, and corrupted copies must never trip the sanitizers.
+        run: |
+          SAN="-g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all"
+          cc -I inc -std=c11 $SAN src/sqlite.c tests/sqlite_dump.c -o sqlite_dump
+          python3 -I tests/sqlite_diff.py ./sqlite_dump 60
+          python3 -I tests/sqlite_seed.py seed.db
+          cc -I inc -std=c11 $SAN src/sqlite.c tests/fuzz_sqlite.c -o fuzz_sqlite
+          ./fuzz_sqlite seed.db 5000 seed.db-wal
       - name: Recycle Bin parser vs plaso test data
         # $I (Vista, Windows 10) and XP INFO2 files from plaso's test data
         # (data only, no code run), pinned to a commit; expected values are
@@ -77,6 +89,23 @@ jobs:
           cc -I inc -std=c11 -g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all \
              src/artparse.c src/ioc.c tests/rb_dump.c -o rb_dump
           python3 -I tests/rb_check.py ./rb_dump rbref
+      - name: Event log (.evtx) reader vs plaso test data + fuzz
+        # System.evtx / System2.evtx from plaso's test data (data only, no
+        # code run), pinned to a commit; record counts, record 1's full XML
+        # and record 179 are the values plaso's own parser tests assert, and
+        # every rendered record must be well-formed XML. Then the reader is
+        # fuzzed with corrupted copies of the real file under ASan/UBSan.
+        run: |
+          mkdir evtxref
+          for f in System.evtx System2.evtx; do
+            curl -sSfL -o "evtxref/$f" "https://raw.githubusercontent.com/log2timeline/plaso/ee5a0ab4f7af07f61b0554ba8edc0700514efc5a/test_data/evtx/$f"
+          done
+          SAN="-g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all"
+          cc -I inc -std=c11 $SAN src/evtx.c tests/evtx_dump.c -o evtx_dump
+          python3 -I tests/evtx_check.py ./evtx_dump evtxref
+          cc -I inc -std=c11 $SAN src/evtx.c tests/fuzz_evtx.c -o fuzz_evtx
+          ./fuzz_evtx evtxref/System.evtx 2000
+          ./fuzz_evtx evtxref/System2.evtx 1000
       - name: Registry hive reader vs real hives (regipy test data)
         # Real NTUSER.DAT / SYSTEM / SOFTWARE / Amcache.hve files from the
         # regipy project (data only, pinned commit). Header fields, key/value
@@ -122,6 +151,12 @@ jobs:
           python3 tests/wine/fixtures.py ./winspect.exe
           python3 tests/wine/wsmoke.py ./winspect.exe
           python3 tests/wine/fuzz.py ./winspect.exe 60 150
+          # events --evtx end to end on plaso's System.evtx (data only).
+          mkdir -p evtxref
+          for f in System.evtx System2.evtx; do
+            curl -sSfL -o "evtxref/$f" "https://raw.githubusercontent.com/log2timeline/plaso/ee5a0ab4f7af07f61b0554ba8edc0700514efc5a/test_data/evtx/$f"
+          done
+          python3 tests/wine/evtxfiles.py ./winspect.exe evtxref
           # Offline-hive mode (--hive / hive) on real Windows hives
           git clone -q https://github.com/mkorman90/regipy regipy
           git -C regipy checkout -q c6de929abc37d8315d1c31aba5e937db636f3303
@@ -170,7 +205,7 @@ jobs:
           }
           Smoke @()
           foreach ($args in @(@("pe",$f), @("pe",$f,"--json"), @("sign",$f), @("hash",$f), @("strings",$f,"--ioc"))) { Smoke $args }
-          foreach ($c in "list","services","drivers","autoruns","pipes","hosts","net","arp","routes","sessions","shares","certstore","tasks","objects","defender","usb","prefetch","shimcache","bam","firewall","taskcache","wmi","lnk","hunt","posture","events","hidden","sweep","userassist","mru","jumplist","rdp","sysinfo","programs","shellbags","pshistory","recyclebin","bits","comhijack","users","timeline") { Smoke @($c); Smoke @($c,"--json") }
+          foreach ($c in "list","services","drivers","autoruns","pipes","hosts","net","arp","routes","sessions","shares","certstore","tasks","objects","defender","usb","prefetch","shimcache","bam","firewall","taskcache","wmi","lnk","hunt","posture","events","hidden","sweep","userassist","mru","jumplist","rdp","sysinfo","programs","shellbags","pshistory","recyclebin","bits","comhijack","users","timeline","image","browser") { Smoke @($c); Smoke @($c,"--json") }
           foreach ($c in "inspect","threads","handles","regions","token","secinfo","modules","verify","triage") { Smoke @($c,"$p"); Smoke @($c,"$p","--json") }
           foreach ($args in @(@("modules","$p","--unsigned"), @("firewall","--inbound","--allow","--active","--csv"), @("autoruns","--csv"), @("objects","--global","--type","Mutant"), @("drivers","--sig"), @("services","--flagged"), @("prefetch","--dir","C:\Windows\Prefetch","--csv"), @("streams","C:\Windows\System32\drivers\etc"), @("lnk","--json"), @("autoruns","--sig"), @("services","--sig","--flagged"), @("events","--summary"), @("prefetch","--flagged"), @("hunt","--all"), @("handles","--find","ntdll","--type","File"), @("hive","C:\Windows\System32\config\SYSTEM"), @("amcache"), @("rdp"), @("rdp","--json"))) { Smoke $args }
           Write-Host "all commands ran without crashing"
@@ -256,6 +291,18 @@ jobs:
           $hl = Receive-Job $job | ConvertFrom-Json
           Stop-Process -Id $hp.Id -Force
           if (-not ($hl | Where-Object { $_.name -like "*wsfind_marker*" })) { throw "handles <pid>: read/write file handle not named" }
+          # events --evtx: export the live System log, then the offline reader
+          # must give the same System rows (7045 / 104) as the live API for
+          # every event written before the export.
+          $ev = Join-Path $env:RUNNER_TEMP "system.evtx"
+          wevtutil epl System $ev
+          $cut = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss")
+          $live = & $exe events --max 1000 --json | ConvertFrom-Json | Where-Object { $_.channel -eq "System" -and $_.time -lt $cut }
+          $off  = & $exe events --evtx $ev --max 1000 --json | ConvertFrom-Json | Where-Object { $_.time -lt $cut }
+          $lk = ($live | ForEach-Object { "$($_.time)|$($_.id)|$($_.summary)" }) -join "`n"
+          $ok = ($off  | ForEach-Object { "$($_.time)|$($_.id)|$($_.summary)" }) -join "`n"
+          if ($lk -ne $ok) { throw "events --evtx differs from live: $(@($live).Count) live vs $(@($off).Count) offline" }
+          Write-Host "events --evtx matches live ($(@($live).Count) System rows)"
           # bits: a helper creates a SUSPENDED job (bare-IP source, notify
           # command line), never resumed, cancelled when it reads a line. The
           # notify command must be the reason given.
@@ -327,7 +374,7 @@ jobs:
           smoke() { "$exe" "$@" >/dev/null 2>&1; rc=$?; if [ $rc -gt 1 ]; then echo "crash: $* => $rc"; exit 1; fi; }
           smoke
           smoke pe "$f"; smoke pe "$f" --json; smoke sign "$f"; smoke hash "$f"; smoke strings "$f" --ioc
-          for c in list services drivers autoruns pipes hosts net arp routes sessions shares certstore tasks objects defender usb prefetch shimcache bam firewall taskcache wmi lnk hunt posture events hidden sweep userassist mru jumplist rdp sysinfo programs shellbags pshistory recyclebin bits comhijack users timeline; do smoke $c; smoke $c --json; done
+          for c in list services drivers autoruns pipes hosts net arp routes sessions shares certstore tasks objects defender usb prefetch shimcache bam firewall taskcache wmi lnk hunt posture events hidden sweep userassist mru jumplist rdp sysinfo programs shellbags pshistory recyclebin bits comhijack users timeline browser; do smoke $c; smoke $c --json; done
           for c in inspect threads handles regions token secinfo modules verify triage; do smoke $c "$p"; smoke $c "$p" --json; done
           smoke modules "$p" --unsigned; smoke firewall --inbound --allow --active --csv; smoke autoruns --csv; smoke objects --global --type Mutant; smoke drivers --sig; smoke services --flagged; smoke streams /c/Windows/System32/drivers/etc; smoke lnk --json; smoke autoruns --sig; smoke services --sig --flagged; smoke events --summary; smoke prefetch --flagged; smoke hunt --all; smoke handles --find ntdll --type File; smoke hive /c/Windows/System32/config/SYSTEM; smoke amcache; smoke usb --csv; smoke rdp; smoke rdp --json
           echo "all commands ran without crashing"

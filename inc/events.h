@@ -11,8 +11,10 @@
 // --since <hours> keeps only the last <hours> hours. --summary instead groups
 // failed logons by source address (failures, distinct accounts, first/last)
 // and flags password guessing / spraying patterns.
+// --evtx <file> (repeatable) reads copied .evtx files (e.g. from a disk image)
+// with winspect's own parser, through the same filters.
 // Read-only (EvtQuery). Usage:
-//   winspect events [--max <n per channel>] [--since <hours>] [--summary] [--json | --csv]
+//   winspect events [--evtx <file> ...] [--max <n per channel>] [--since <hours>] [--summary] [--json | --csv]
 int cmd_events(int argc, char **argv);
 
 #endif

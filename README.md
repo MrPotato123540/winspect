@@ -46,7 +46,8 @@ takes. The tables below are a map, not the full reference.
 | Command | What it does |
 | --- | --- |
 | `sweep` | Runs every system-wide check in findings-only mode and prints one report (one JSON object with `--json`). |
-| `timeline` | Merges the timestamps from the evidence commands below into one UTC list, newest first. `--since <hours>`, `--sources a,b`, `--flagged`. |
+| `timeline` | Merges the timestamps from the evidence commands below into one UTC list, newest first. `--since <hours>`, `--sources a,b`, `--flagged`. `--root <folder>` builds it from a mounted image instead, with every per-user row naming its profile. |
+| `image <root>` | Triage of a Windows installation that is not running: point it at a mounted image or a copied system drive and it finds the hives, Amcache, Prefetch, tasks, event logs, the Recycle Bin and every user profile, runs the offline modes of the commands below, and prints machine facts, local accounts and every finding grouped by source, user and reason. |
 | `posture` | Hardening settings: UAC, LSA protection, WDigest, NTLM level, LM hashes, Credential Guard, SMBv1 and SMB signing, LLMNR, RDP/NLA, firewall profiles, AlwaysInstallElevated, PowerShell logging. Each check is OK, WARN or INFO with a one-line explanation. |
 | `hunt` | Process lineage checks in the spirit of the SANS "Hunt Evil" poster: wrong parent, duplicate singletons, core names outside System32, wrong account, boot processes started late. |
 | `hidden` | Cross-view: processes visible to one API but not another, services in the registry that the SCM does not list. |
@@ -82,10 +83,11 @@ takes. The tables below are a map, not the full reference.
 | `jumplist` / `lnk` | Jump Lists and shortcut files: targets, times, volume and the machine that created them. Flags shortcuts crafted to hide their command line. |
 | `shellbags` | Folders browsed in Explorer, including removable drives and deleted folders. |
 | `recyclebin` | What was deleted, by which account and when (`$I` files and the old `INFO2`). |
+| `browser` | Chrome, Edge, Brave and Firefox history and downloads, read with a built-in SQLite reader (Firefox's `-wal` file included): URL, title, last visit, saved path, size and the browser's own danger verdict. Flags downloads the browser warned about or the user kept anyway, downloads from a bare IP, downloaded programs and scripts. |
 | `pshistory` | PowerShell console history (PSReadLine); suspicious lines are flagged. `--all-users` reads every profile. |
 | `rdp` | Outgoing Remote Desktop connections of a user. |
 | `usb` | USB storage devices with first install, last connect and last removal times. |
-| `events` | A short list of high-signal event IDs (service installs, log clearing, failed logons, new accounts, Defender detections...). `--summary` groups failed logons by source and flags guessing and spraying. |
+| `events` | A short list of high-signal event IDs (service installs, log clearing, failed logons, new accounts, Defender detections...). `--summary` groups failed logons by source and flags guessing and spraying. `--evtx <file>` reads copied `.evtx` files with a built-in parser. |
 
 ### Processes
 
@@ -125,7 +127,8 @@ takes. The tables below are a map, not the full reference.
 | `--ntuser`, `--usrclass` | `shellbags` |
 | `--usrclass` with `--software` | `comhijack` |
 | `--sam <SAM>` | `users` (account names and the fixed `F` record only) |
-| a copied file or folder | `prefetch` (file or `--dir`), `amcache`, `lnk`, `jumplist`, `recyclebin`, `pshistory`, `tasks --dir` |
+| `--evtx <file>` (repeatable) | `events`, including `--summary` |
+| a copied file or folder | `prefetch` (file or `--dir`), `amcache`, `lnk`, `jumplist`, `recyclebin`, `pshistory`, `tasks --dir`, `browser` (database file or `--home <user folder>`) |
 
 ## Building
 
@@ -152,14 +155,14 @@ came back from the ANSI file APIs as `Gülsen` and was silently skipped.
 ## Testing
 
 Parsers that do not need Windows (Prefetch, ShimCache, `.lnk`, shell items,
-Jump List DestList, compound files, registry hives, Recycle Bin, SAM records,
+Jump List DestList, compound files, registry hives, `.evtx` event logs, SQLite databases, Recycle Bin, SAM records,
 task XML, the JSON reader and the various rule tables) live in portable C files
 and are tested on Linux:
 
 ```sh
 SRC="src/md5.c src/jsonutil.c src/ioc.c src/entropy.c src/pecksum.c src/imphash_ords.c \
      src/pfparse.c src/artparse.c src/capa.c src/lnkparse.c src/rights.c src/destlist.c \
-     src/shellitem.c src/jsonmini.c"
+     src/shellitem.c src/jsonmini.c src/sqlite.c"   # evtx.c: tests/evtx_check.py
 cc -I inc -std=c11 $SRC tests/test_util.c -o test_util -lm && ./test_util
 ```
 
@@ -171,9 +174,10 @@ third-party code is run):
 - `.lnk`: 34 real-world samples, field by field, against LnkParse3's expected output.
 - Jump List DestList: real Windows 7 to 10 files from the JumpList project.
 - Registry hives, SAM, AppCompatCache, Amcache, ShellBags: regipy's test hives and published values.
-- Recycle Bin: plaso's `$I` and `INFO2` test files.
+- Recycle Bin and `.evtx` event logs: plaso's test files and the values its tests assert.
 - Certificates read offline: checked against `openssl x509` and `hashlib`.
 - The JSON reader: random documents compared with Python's `json` module.
+- The SQLite reader: random databases (page sizes, UTF-16, overflow pages, uncheckpointed WAL) compared row by row with Python's `sqlite3` module.
 
 Functional tests run the real executable under wine (`tests/wine/`).
 `fixtures.py` plants known-bad artifacts in a throw-away prefix and checks

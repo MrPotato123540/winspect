@@ -880,29 +880,48 @@ const char *rb_reason(const char *path)
     return prog_ext(path) ? "deleted program or script" : NULL;
 }
 
+// 1 if the host part of scheme://[user[:pass]@]host[:port]/... is a bare IPv4 address.
+static int url_host_is_ip(const char *url)
+{
+    const char *h = strstr(url, "://");
+    h = h ? h + 3 : url;
+    char auth[256];
+    size_t k = 0;
+    while (h[k] && h[k] != '/' && h[k] != '\\' && h[k] != '?' && h[k] != '#' && k + 1 < sizeof auth) {
+        auth[k] = h[k];
+        k++;
+    }
+    auth[k] = 0;
+    char *host = strrchr(auth, '@');
+    host = host ? host + 1 : auth;
+    char *colon = strchr(host, ':');
+    if (colon) *colon = 0;
+    return ioc_is_ipv4(host);
+}
+
 const char *bits_reason(const char *notify, const char *remote, const char *local)
 {
     if (notify && notify[0])
         return "runs a command when the job ends (BITS persistence, T1197)";
-    if (remote) {
-        // Host part of scheme://[user[:pass]@]host[:port]/...
-        const char *h = strstr(remote, "://");
-        h = h ? h + 3 : remote;
-        char auth[256];
-        size_t k = 0;
-        while (h[k] && h[k] != '/' && h[k] != '\\' && k + 1 < sizeof auth) {
-            auth[k] = h[k];
-            k++;
-        }
-        auth[k] = 0;
-        char *host = strrchr(auth, '@');
-        host = host ? host + 1 : auth;
-        char *colon = strchr(host, ':');
-        if (colon) *colon = 0;
-        if (ioc_is_ipv4(host)) return "downloads from a bare IP address";
-    }
+    if (remote && url_host_is_ip(remote)) return "downloads from a bare IP address";
     if (local && prog_ext(local) && ioc_user_writable(local))
         return "downloads a program or script into a user-writable folder";
+    return NULL;
+}
+
+const char *browser_reason(int download, const char *url, const char *target, int danger)
+{
+    if (download) {
+        // Chromium's danger_type: 0 not dangerous, 6 "user validated" (the
+        // user kept it after a warning), others: the browser warned.
+        if (danger == 6) return "user kept a download the browser warned about";
+        if (danger > 0 && danger != 6 && danger < 32) return "browser warned about this download";
+        if (url && url_host_is_ip(url)) return "downloaded from a bare IP address";
+        if (target && prog_ext(target)) return "downloaded a program or script";
+        return NULL;
+    }
+    if (url && (strncmp(url, "http://", 7) == 0 || strncmp(url, "https://", 8) == 0) && url_host_is_ip(url))
+        return "visited a bare IP address";
     return NULL;
 }
 
@@ -1124,4 +1143,18 @@ int certblob_prop(const unsigned char *b, size_t n, uint32_t id, size_t *off, si
         o += plen;
     }
     return 0;
+}
+
+int evt_xpath_match(const char *xpath, unsigned id, unsigned level)
+{
+    int any = 0, hit = 0;
+    for (const char *p = xpath; (p = strstr(p, "EventID=")) != NULL; ) {
+        p += 8;
+        any = 1;
+        if (strtoul(p, NULL, 10) == id) hit = 1;
+    }
+    if (any && !hit) return 0;
+    const char *l = strstr(xpath, "Level=");
+    if (l && strtoul(l + 6, NULL, 10) != level) return 0;
+    return 1;
 }

@@ -61,6 +61,17 @@ static const struct { const char *name, *text; } usage_table[] = {
         "each item also shows its target, arguments and timestamps. Flags items that\n"
         "launch a script host or point into a user-writable dir. Read-only. Usage:\n"
         "  winspect jumplist [<file | folder>] [--json | --csv]\n" },
+    { "image",
+        "winspect image - triage of a Windows installation that is NOT running: a\n"
+        "mounted disk image, a copied system drive or a collection that keeps the\n"
+        "original folder layout. Give the root (the folder holding Windows\\ and\n"
+        "Users\\); winspect finds the registry hives, Amcache, Prefetch, scheduled\n"
+        "tasks, event logs, the Recycle Bin and every user's NTUSER.DAT,\n"
+        "UsrClass.dat and PowerShell history, runs each offline-capable command on\n"
+        "them and prints one findings-only report: machine facts, local accounts,\n"
+        "then every flagged entry with its source, user and reason (one JSON object\n"
+        "with --json). Read-only. Usage:\n"
+        "  winspect image <root> [--json]\n" },
     { "timeline",
         "winspect timeline - one time-ordered view of what the evidence commands\n"
         "already know: program runs (prefetch, bam, userassist), files opened and\n"
@@ -71,9 +82,12 @@ static const struct { const char *name, *text; } usage_table[] = {
         "shutdown / profile loads (sysinfo). Each source command is\n"
         "run with --json and its timestamps become rows (UTC, newest first); a row\n"
         "keeps the source's \"suspicious\" mark. Per-user sources read the CURRENT\n"
-        "user. --since keeps the last <hours>; --sources picks a comma-separated\n"
-        "subset. Read-only (it only calls read-only commands). Usage:\n"
-        "  winspect timeline [--since <hours>] [--sources a,b,...] [--flagged] [--json | --csv]\n" },
+        "user. --root <folder> builds the same timeline from an offline Windows\n"
+        "installation (a mounted image): its hives, Prefetch, Amcache, Recycle Bin,\n"
+        "tasks, event logs and every user profile, each row naming its user.\n"
+        "--since keeps the last <hours>; --sources picks a comma-separated subset.\n"
+        "Read-only (it only calls read-only commands). Usage:\n"
+        "  winspect timeline [--root <folder>] [--since <hours>] [--sources a,b,...] [--flagged] [--json | --csv]\n" },
     { "users",
         "winspect users - local accounts: name, RID, enabled, member of the local\n"
         "Administrators group, last logon, password last set, logon and bad-password\n"
@@ -116,6 +130,21 @@ static const struct { const char *name, *text; } usage_table[] = {
         "flagged. Other users' folders need admin. A file or folder argument reads a\n"
         "copy (e.g. from a disk image). Read-only. Usage:\n"
         "  winspect recyclebin [<$I file | INFO2 | folder>] [--flagged] [--json | --csv]\n" },
+    { "browser",
+        "winspect browser - web history and downloads from Chrome, Edge, Brave\n"
+        "(Chromium \"History\" databases, every profile) and Firefox (places.sqlite\n"
+        "with its -wal file), read with winspect's own SQLite reader: visited URLs\n"
+        "with title, visit count and last visit time, and downloads with source\n"
+        "URL, saved path, size and the browser's own danger verdict. Flags\n"
+        "downloads the browser warned about (or that the user kept anyway),\n"
+        "downloads from a bare IP address, downloaded programs/scripts and visits\n"
+        "to bare IP addresses. Default: the current user; --all-users reads every\n"
+        "profile under C:\\Users (admin); --home reads one user folder (e.g. a\n"
+        "profile in a mounted image); a file argument reads one copied database.\n"
+        "Read-only (files are opened with full sharing; a running browser is fine).\n"
+        "Usage:\n"
+        "  winspect browser [<History | places.sqlite> | --home <user folder> | --all-users] [--downloads]\n"
+        "                   [--since <hours>] [--flagged] [--json | --csv]\n" },
     { "pshistory",
         "winspect pshistory - PowerShell command history kept by PSReadLine\n"
         "(%APPDATA%\\Microsoft\\Windows\\PowerShell\\PSReadLine\\ConsoleHost_history.txt):\n"
@@ -299,8 +328,10 @@ static const struct { const char *name, *text; } usage_table[] = {
         "--since <hours> keeps only the last <hours> hours. --summary instead groups\n"
         "failed logons by source address (failures, distinct accounts, first/last)\n"
         "and flags password guessing / spraying patterns.\n"
+        "--evtx <file> (repeatable) reads copied .evtx files (e.g. from a disk image)\n"
+        "with winspect's own parser, through the same filters.\n"
         "Read-only (EvtQuery). Usage:\n"
-        "  winspect events [--max <n per channel>] [--since <hours>] [--summary] [--json | --csv]\n" },
+        "  winspect events [--evtx <file> ...] [--max <n per channel>] [--since <hours>] [--summary] [--json | --csv]\n" },
     { "hidden",
         "winspect hidden - cross-view checks for things hidden from the usual tools:\n"
         "  processes: Toolhelp snapshot vs NtQuerySystemInformation vs opening every\n"
@@ -316,7 +347,7 @@ static const struct { const char *name, *text; } usage_table[] = {
         "winspect sweep - one-shot machine triage: runs the system-wide checks in\n"
         "\"findings only\" mode (posture --warn, hunt, hidden, net, autoruns/services/tasks/\n"
         "taskcache/firewall/prefetch --flagged, defender, wmi, users/comhijack/bits/recyclebin --flagged,\n"
-        "pshistory --all-users --flagged, events) and prints them as one\n"
+        "pshistory / browser --all-users --flagged, events) and prints them as one\n"
         "report. With --json the result is a single object, one key per check; a\n"
         "check that could not run (e.g. needs elevation) is null instead of breaking\n"
         "the document. Read-only - it only calls the read-only commands. Usage:\n"

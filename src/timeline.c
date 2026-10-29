@@ -33,6 +33,9 @@
 #include "comhijack.h"
 #include "events.h"
 #include "sysinfo.h"
+#include "amcache.h"
+#include "browser.h"
+#include "imgpaths.h"
 
 #include <windows.h>
 #include <stdio.h>
@@ -43,6 +46,7 @@
 typedef struct {
     char time[20];
     const char *source;
+    char user[64];              // profile name (--root, per-user sources) or ""
     char *what, *detail;
     int suspicious;
 } row;
@@ -52,6 +56,7 @@ typedef struct {
     size_t n, cap;
     char since[20];             // "" = no lower bound
     const char *source;         // current source name
+    const char *user;           // current profile (--root) or NULL
 } tl;
 
 // "YYYY-MM-DD hh:mm:ss" or ISO "...T..." -> canonical 19 chars; 0 if not a time.
@@ -86,6 +91,7 @@ static void add(tl *t, const char *when, const char *what, const char *detail, i
     row *r = &t->rows[t->n];
     memcpy(r->time, ts, sizeof ts);
     r->source = t->source;
+    snprintf(r->user, sizeof r->user, "%s", t->user ? t->user : "");
     r->what = _strdup(what);
     r->detail = _strdup(detail ? detail : "");
     if (r->what == NULL || r->detail == NULL) { free(r->what); free(r->detail); return; }
@@ -264,6 +270,25 @@ static void x_events(tl *t, const jm_node *r)
     add(t, S(r, "time"), w, S(r, "reason"), B(r, "suspicious"));
 }
 
+static void x_amcache(tl *t, const jm_node *r)
+{
+    char w[1200], d[200];
+    cat(w, sizeof w, "program recorded in Amcache: ", S(r, "path"));
+    snprintf(d, sizeof d, "SHA-1 %s", S(r, "sha1"));
+    add(t, S(r, "recorded"), w, d, B(r, "suspicious"));
+}
+
+static void x_browser(tl *t, const jm_node *r)
+{
+    char w[2400];
+    const char *kind = S(r, "kind");
+    if (strcmp(kind, "download") == 0)
+        snprintf(w, sizeof w, "%s download: %s -> %s", S(r, "browser"), S(r, "url"), S(r, "saved_to"));
+    else
+        snprintf(w, sizeof w, "%s visit (last): %s", S(r, "browser"), S(r, "url"));
+    add(t, S(r, "time"), w, S(r, "reason"), B(r, "suspicious"));
+}
+
 // sysinfo prints one object, not a list. Network first/last-connected times
 // are LOCAL time in the registry, so they are left out of this UTC view.
 static void x_sysinfo(tl *t, const jm_node *doc)
@@ -284,31 +309,89 @@ static void x_sysinfo(tl *t, const jm_node *doc)
 typedef struct {
     const char *name;
     capture_fn fn;
-    const char *args[3];
+    const char *args[13];
     const char *list;           // member holding the records; NULL = top-level array
     void (*x)(tl *, const jm_node *);
+    const char *user;           // set for per-user sources of an image
 } source;
 
 static const source sources[] = {
-    { "prefetch",   cmd_prefetch,   { NULL },               NULL, x_prefetch },
-    { "bam",        cmd_bam,        { NULL },               NULL, x_bam },
-    { "userassist", cmd_userassist, { NULL },               NULL, x_userassist },
-    { "shimcache",  cmd_shimcache,  { NULL },               NULL, x_shimcache },
-    { "jumplist",   cmd_jumplist,   { NULL },               NULL, x_jumplist },
-    { "lnk",        cmd_lnk,        { NULL },               NULL, x_lnk },
-    { "shellbags",  cmd_shellbags,  { NULL },               NULL, x_shellbags },
-    { "recyclebin", cmd_recyclebin, { NULL },               NULL, x_recyclebin },
-    { "usb",        cmd_usb,        { NULL },               NULL, x_usb },
-    { "rdp",        cmd_rdp,        { NULL },               NULL, x_rdp },
-    { "mru",        cmd_mru,        { NULL },               NULL, x_mru },
-    { "pshistory",  cmd_pshistory,  { NULL },               NULL, x_pshistory },
-    { "users",      cmd_users,      { NULL },               "accounts", x_users },
-    { "bits",       cmd_bits,       { NULL },               NULL, x_bits },
-    { "tasks",      cmd_tasks,      { NULL },               NULL, x_tasks },
-    { "comhijack",  cmd_comhijack,  { "--all", NULL },      NULL, x_comhijack },
-    { "events",     cmd_events,     { "--max", "200", NULL }, NULL, x_events },
-    { "sysinfo",    cmd_sysinfo,    { NULL },               NULL, x_sysinfo },
+    { "prefetch",   cmd_prefetch,   { NULL },               NULL, x_prefetch, NULL },
+    { "bam",        cmd_bam,        { NULL },               NULL, x_bam, NULL },
+    { "userassist", cmd_userassist, { NULL },               NULL, x_userassist, NULL },
+    { "shimcache",  cmd_shimcache,  { NULL },               NULL, x_shimcache, NULL },
+    { "jumplist",   cmd_jumplist,   { NULL },               NULL, x_jumplist, NULL },
+    { "lnk",        cmd_lnk,        { NULL },               NULL, x_lnk, NULL },
+    { "shellbags",  cmd_shellbags,  { NULL },               NULL, x_shellbags, NULL },
+    { "recyclebin", cmd_recyclebin, { NULL },               NULL, x_recyclebin, NULL },
+    { "usb",        cmd_usb,        { NULL },               NULL, x_usb, NULL },
+    { "rdp",        cmd_rdp,        { NULL },               NULL, x_rdp, NULL },
+    { "mru",        cmd_mru,        { NULL },               NULL, x_mru, NULL },
+    { "pshistory",  cmd_pshistory,  { NULL },               NULL, x_pshistory, NULL },
+    { "users",      cmd_users,      { NULL },               "accounts", x_users, NULL },
+    { "bits",       cmd_bits,       { NULL },               NULL, x_bits, NULL },
+    { "tasks",      cmd_tasks,      { NULL },               NULL, x_tasks, NULL },
+    { "comhijack",  cmd_comhijack,  { "--all", NULL },      NULL, x_comhijack, NULL },
+    { "events",     cmd_events,     { "--max", "200", NULL }, NULL, x_events, NULL },
+    { "sysinfo",    cmd_sysinfo,    { NULL },               NULL, x_sysinfo, NULL },
+    { "browser",    cmd_browser,    { NULL },               NULL, x_browser, NULL },
 };
+
+// The same sources for an offline installation under root (timeline --root):
+// machine-wide files once, the per-user ones once for each profile.
+static size_t image_sources(const img_paths *ip, source *out, size_t cap)
+{
+    size_t n = 0;
+#define ADD(nm, f, x_, lst, usr, ...) do { if (n < cap) { source *s_ = &out[n++]; memset(s_, 0, sizeof *s_); \
+        s_->name = nm; s_->fn = f; s_->x = x_; s_->list = lst; s_->user = usr; \
+        const char *a_[] = { __VA_ARGS__, NULL }; \
+        for (int i_ = 0; a_[i_] && i_ < 12; i_++) s_->args[i_] = a_[i_]; } } while (0)
+    if (ip->prefetch[0]) ADD("prefetch", cmd_prefetch, x_prefetch, NULL, NULL, "--dir", ip->prefetch);
+    if (ip->system[0]) {
+        ADD("bam", cmd_bam, x_bam, NULL, NULL, "--hive", ip->system);
+        ADD("shimcache", cmd_shimcache, x_shimcache, NULL, NULL, "--hive", ip->system);
+        ADD("usb", cmd_usb, x_usb, NULL, NULL, "--hive", ip->system);
+    }
+    if (ip->amcache[0]) ADD("amcache", cmd_amcache, x_amcache, NULL, NULL, ip->amcache);
+    if (ip->recycle[0]) ADD("recyclebin", cmd_recyclebin, x_recyclebin, NULL, NULL, ip->recycle);
+    if (ip->sam[0]) ADD("users", cmd_users, x_users, "accounts", NULL, "--sam", ip->sam);
+    if (ip->tasks[0]) ADD("tasks", cmd_tasks, x_tasks, NULL, NULL, "--dir", ip->tasks);
+    if (ip->software[0] && ip->system[0])
+        ADD("sysinfo", cmd_sysinfo, x_sysinfo, NULL, NULL, "--software", ip->software, "--system", ip->system);
+    else if (ip->software[0])
+        ADD("sysinfo", cmd_sysinfo, x_sysinfo, NULL, NULL, "--software", ip->software);
+    if (ip->nevtx && n < cap) {
+        source *s_ = &out[n++];
+        memset(s_, 0, sizeof *s_);
+        s_->name = "events"; s_->fn = cmd_events; s_->x = x_events;
+        int k = 0;
+        s_->args[k++] = "--max"; s_->args[k++] = "200";
+        for (int i = 0; i < ip->nevtx && k + 2 <= 12; i++) { s_->args[k++] = "--evtx"; s_->args[k++] = ip->evtx[i]; }
+    }
+    for (int u = 0; u < ip->nusers; u++) {
+        const img_user *p = &ip->users[u];
+        ADD("userassist", cmd_userassist, x_userassist, NULL, p->name, "--hive", p->ntuser);
+        ADD("mru", cmd_mru, x_mru, NULL, p->name, "--hive", p->ntuser);
+        ADD("rdp", cmd_rdp, x_rdp, NULL, p->name, "--hive", p->ntuser);
+        if (p->usrclass[0]) ADD("shellbags", cmd_shellbags, x_shellbags, NULL, p->name, "--ntuser", p->ntuser, "--usrclass", p->usrclass);
+        else                ADD("shellbags", cmd_shellbags, x_shellbags, NULL, p->name, "--ntuser", p->ntuser);
+        if (p->autodest[0]) ADD("jumplist", cmd_jumplist, x_jumplist, NULL, p->name, p->autodest);
+        if (p->recent[0])   ADD("lnk", cmd_lnk, x_lnk, NULL, p->name, p->recent);
+        if (p->pshist[0])   ADD("pshistory", cmd_pshistory, x_pshistory, NULL, p->name, p->pshist);
+        {
+            // The user folder is the one holding NTUSER.DAT.
+            static char homes[IMG_MAX_USERS][MAX_PATH * 2];
+            snprintf(homes[u], sizeof homes[u], "%s", p->ntuser);
+            char *sl = strrchr(homes[u], '\\');
+            if (sl) *sl = 0;
+            ADD("browser", cmd_browser, x_browser, NULL, p->name, "--home", homes[u]);
+        }
+        if (p->usrclass[0] && ip->software[0])
+            ADD("comhijack", cmd_comhijack, x_comhijack, NULL, p->name, "--usrclass", p->usrclass, "--software", ip->software, "--all");
+    }
+#undef ADD
+    return n;
+}
 
 static int in_list(const char *list, const char *name)
 {
@@ -333,9 +416,10 @@ int cmd_timeline(int argc, char **argv)
 {
     int mode = 0, only_flagged = 0;
     long hours = 0;
-    const char *pick = NULL;
+    const char *pick = NULL, *root = NULL;
     for (int a = 0; a < argc; a++) {
-        if (strcmp(argv[a], "--json") == 0)                         mode = 1;
+        if (strcmp(argv[a], "--root") == 0 && a + 1 < argc)         root = argv[++a];
+        else if (strcmp(argv[a], "--json") == 0)                    mode = 1;
         else if (strcmp(argv[a], "--csv") == 0)                     mode = 2;
         else if (strcmp(argv[a], "--flagged") == 0)                 only_flagged = 1;
         else if (strcmp(argv[a], "--since") == 0 && a + 1 < argc)   hours = strtol(argv[++a], NULL, 10);
@@ -349,15 +433,28 @@ int cmd_timeline(int argc, char **argv)
         fputs("timeline: --since needs a positive number of hours\n", stderr);
         return 1;
     }
+    // Live: the fixed list. --root: the same sources pointed at the image.
+    static img_paths ip;
+    static source dyn[16 + IMG_MAX_USERS * 8];
+    const source *list = sources;
     size_t ns = sizeof sources / sizeof sources[0];
+    if (root) {
+        if (img_find(root, &ip) != 0) {
+            fprintf(stderr, "timeline: no Windows\\System32\\config\\SYSTEM or SOFTWARE under '%s'\n", root);
+            return 1;
+        }
+        ns = image_sources(&ip, dyn, sizeof dyn / sizeof dyn[0]);
+        list = dyn;
+    }
     if (pick) {
         // Every requested name must be a known source.
         for (const char *p = pick; *p;) {
             const char *e = strchr(p, ',');
             size_t n = e ? (size_t)(e - p) : strlen(p);
             int ok = 0;
-            for (size_t i = 0; i < ns; i++)
+            for (size_t i = 0; i < sizeof sources / sizeof sources[0]; i++)
                 if (strlen(sources[i].name) == n && _strnicmp(p, sources[i].name, n) == 0) ok = 1;
+            if (n == 7 && _strnicmp(p, "amcache", 7) == 0) ok = 1;      // image only
             if (!ok) {
                 fprintf(stderr, "timeline: unknown source '%.*s'\n", (int)n, p);
                 return 1;
@@ -374,36 +471,39 @@ int cmd_timeline(int argc, char **argv)
         if (g) strftime(t.since, sizeof t.since, "%Y-%m-%d %H:%M:%S", g);
     }
     for (size_t i = 0; i < ns; i++) {
-        if (pick && !in_list(pick, sources[i].name)) continue;
-        char *av[5];
+        const source *src = &list[i];
+        if (pick && !in_list(pick, src->name)) continue;
+        char *av[16];
         int ac = 0;
-        for (int k = 0; k < 3 && sources[i].args[k]; k++) av[ac++] = (char *)sources[i].args[k];
+        for (int k = 0; k < 13 && src->args[k]; k++) av[ac++] = (char *)src->args[k];
         av[ac++] = (char *)"--json";
         av[ac] = NULL;
         int rc = 1;
-        char *text = capture_stdout(sources[i].fn, ac, av, &rc);
+        char *text = capture_stdout(src->fn, ac, av, &rc);
         if (text == NULL) continue;
         jm_node *doc = jm_parse(text, strlen(text));
         free(text);
         if (doc == NULL) {
-            if (rc == 0) fprintf(stderr, "timeline: %s printed no usable JSON\n", sources[i].name);
+            if (rc == 0) fprintf(stderr, "timeline: %s printed no usable JSON\n", src->name);
             continue;
         }
-        const jm_node *list = sources[i].list ? jm_get(doc, sources[i].list) : doc;
-        t.source = sources[i].name;
-        if (list && list->type == JM_OBJ) sources[i].x(&t, list);      // a single-object source
-        for (const jm_node *r = list && list->type == JM_ARR ? list->child : NULL; r; r = r->next)
-            if (r->type == JM_OBJ) sources[i].x(&t, r);
-        if (sources[i].x == x_pshistory) ps_flush(&t);
+        const jm_node *recs = src->list ? jm_get(doc, src->list) : doc;
+        t.source = src->name;
+        t.user = src->user;
+        if (recs && recs->type == JM_OBJ) src->x(&t, recs);            // a single-object source
+        for (const jm_node *r = recs && recs->type == JM_ARR ? recs->child : NULL; r; r = r->next)
+            if (r->type == JM_OBJ) src->x(&t, r);
+        if (src->x == x_pshistory) ps_flush(&t);
         jm_free(doc);
     }
     if (t.n > 1) qsort(t.rows, t.n, sizeof *t.rows, cmp_row);
 
     unsigned shown = 0;
     if (mode == 0) {
-        printf("timeline  (UTC, newest first%s%s)\n\n", t.since[0] ? ", since " : "", t.since);
+        printf("timeline  (%s%sUTC, newest first%s%s)\n\n", root ? ip.root : "", root ? ", " : "",
+               t.since[0] ? ", since " : "", t.since);
     } else if (mode == 2) {
-        puts("time,source,event,detail,suspicious");
+        puts("time,source,user,event,detail,suspicious");
     } else {
         putchar('[');
     }
@@ -411,14 +511,18 @@ int cmd_timeline(int argc, char **argv)
         row *r = &t.rows[i];
         if (only_flagged && !r->suspicious) continue;
         if (mode == 0) {
-            printf("%s  %s %-10s %s\n", r->time, r->suspicious ? "[!]" : "   ", r->source, r->what);
+            printf("%s  %s %-10s %s%s%s%s\n", r->time, r->suspicious ? "[!]" : "   ", r->source,
+                   r->user[0] ? "(" : "", r->user, r->user[0] ? ") " : "", r->what);
             if (r->detail[0]) printf("%36s%s\n", "", r->detail);
         } else if (mode == 2) {
             printf("%s,%s,", r->time, r->source);
+            csv_str(r->user); putchar(',');
             csv_str(r->what); putchar(',');
             csv_str(r->detail); printf(",%s\n", r->suspicious ? "true" : "false");
         } else {
-            printf("%s{\"time\":\"%s\",\"source\":\"%s\",\"event\":", shown ? "," : "", r->time, r->source);
+            printf("%s{\"time\":\"%s\",\"source\":\"%s\",\"user\":", shown ? "," : "", r->time, r->source);
+            json_str(r->user);
+            fputs(",\"event\":", stdout);
             json_str(r->what);
             fputs(",\"detail\":", stdout);
             json_str(r->detail);
