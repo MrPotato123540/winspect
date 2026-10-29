@@ -4,10 +4,12 @@
 // parent/child tree with a thread count per process (-t lists every thread)
 
 #include "list.h"
+#include "jsonutil.h"
 
 #include <windows.h>
 #include <tlhelp32.h>   // CreateToolhelp32Snapshot, PROCESSENTRY32, Process32First/Next
 #include <stdio.h>
+#include <stdlib.h>     // malloc, free (used by -l detail lookup)
 #include <string.h>     // strcmp for option parsing
 
 // Fixed cap instead of a growing heap buffer, keeps this first version simple
@@ -106,6 +108,8 @@ struct proc {
     DWORD     ppid;
     ULONGLONG created;
     char      name[MAX_PATH];
+    char      path[MAX_PATH];   // full image path, filled only in -l/--long mode
+    char      integrity[16];    // integrity level name, -l/--long mode only
     int       printed;
 };
 
@@ -127,6 +131,60 @@ static int g_thr_count;
 
 // Set by the -t / --threads option, read by print_subtree
 static int g_show_threads;
+
+// Set by the -l / --long option: also show each process's full path + integrity
+static int g_show_long;
+
+// Set by the -j / --json option: emit a machine-readable array instead of a tree
+static int g_json;
+// Set by --csv: one CSV row per process (same fields as JSON)
+static int g_csv;
+
+// Maps an integrity-level RID (from the token's integrity SID) to a short name.
+static const char *integrity_name(DWORD rid) {
+    if (rid >= SECURITY_MANDATORY_SYSTEM_RID) return "System";
+    if (rid >= SECURITY_MANDATORY_HIGH_RID)   return "High";
+    if (rid >= SECURITY_MANDATORY_MEDIUM_RID) return "Medium";
+    if (rid >= SECURITY_MANDATORY_LOW_RID)    return "Low";
+    return "Untrusted";
+}
+
+// Fills dest->path (full image path) and dest->integrity (level name) for the
+// -l mode. Best-effort: on access denied the fields stay empty rather than fail,
+// because many system processes cannot be opened from a non-admin shell.
+static void query_details(struct proc *dest) {
+    dest->path[0] = '\0';
+    dest->integrity[0] = '\0';
+
+    // PROCESS_QUERY_LIMITED_INFORMATION is the broad right that still allows
+    // QueryFullProcessImageName and (on modern Windows) OpenProcessToken.
+    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, dest->pid);
+    if (h == NULL) {
+        return;
+    }
+
+    DWORD plen = (DWORD)sizeof dest->path;
+    QueryFullProcessImageNameA(h, 0, dest->path, &plen);   // leaves path empty on failure
+
+    HANDLE tok = NULL;
+    if (OpenProcessToken(h, TOKEN_QUERY, &tok)) {
+        DWORD len = 0;
+        GetTokenInformation(tok, TokenIntegrityLevel, NULL, 0, &len);
+        if (len > 0) {
+            TOKEN_MANDATORY_LABEL *lab = malloc(len);
+            if (lab != NULL &&
+                GetTokenInformation(tok, TokenIntegrityLevel, lab, len, &len)) {
+                UCHAR *cnt = GetSidSubAuthorityCount(lab->Label.Sid);
+                DWORD rid = (cnt != NULL && *cnt > 0)
+                    ? *GetSidSubAuthority(lab->Label.Sid, (DWORD)(*cnt - 1)) : 0;
+                snprintf(dest->integrity, sizeof dest->integrity, "%s", integrity_name(rid));
+            }
+            free(lab);
+        }
+        CloseHandle(tok);
+    }
+    CloseHandle(h);
+}
 
 // Asks the kernel when this process was created
 // Returns the creation time as one 64-bit number, or 0 if we are not allowed to ask
@@ -249,6 +307,16 @@ static void print_subtree(int index, int depth) {
     printf("%s (%lu)  threads: %d\n", g_procs[index].name,
         (unsigned long)g_procs[index].pid, count_threads(g_procs[index].pid));
 
+    // -l mode: one extra indented line with integrity level and full image path.
+    if (g_show_long) {
+        for (int d = 0; d < depth + 1; d++) {
+            fputs("  ", stdout);
+        }
+        printf("[%s]  %s\n",
+               g_procs[index].integrity[0] ? g_procs[index].integrity : "?",
+               g_procs[index].path[0] ? g_procs[index].path : "(path unavailable)");
+    }
+
     // Threads go right under their process, before its child processes,
     // so each thread line sits next to the process that owns it
     if (g_show_threads) {
@@ -271,6 +339,9 @@ int cmd_list(int argc, char** argv) {
     g_count = 0;
     g_thr_count = 0;
     g_show_threads = 0;
+    g_show_long = 0;
+    g_json = 0;
+    g_csv = 0;
 
     // Our own options start at argv[0], main() already sliced off "winspect list"
     // Anything we do not recognize is an error, never silently ignored:
@@ -279,9 +350,18 @@ int cmd_list(int argc, char** argv) {
         if (strcmp(argv[a], "-t") == 0 || strcmp(argv[a], "--threads") == 0) {
             g_show_threads = 1;
         }
+        else if (strcmp(argv[a], "-l") == 0 || strcmp(argv[a], "--long") == 0) {
+            g_show_long = 1;
+        }
+        else if (strcmp(argv[a], "-j") == 0 || strcmp(argv[a], "--json") == 0) {
+            g_json = 1;
+        }
+        else if (strcmp(argv[a], "--csv") == 0) {
+            g_csv = 1;
+        }
         else {
             fprintf(stderr, "list: unknown option '%s'\n", argv[a]);
-            fputs("usage: winspect list [-t | --threads]\n", stderr);
+            fputs("usage: winspect list [-t | --threads] [-l | --long] [-j | --json | --csv]\n", stderr);
             return 1;
         }
     }
@@ -357,6 +437,48 @@ int cmd_list(int argc, char** argv) {
     // same kind of window anyway
     for (int i = 0; i < g_count; i++) {
         g_procs[i].created = query_create_time(g_procs[i].pid);
+        // Path + integrity are extra per-process work (a handle open each), so
+        // only pay for them when asked (-l) or when emitting JSON (-j), which
+        // is expected to carry the full record.
+        if (g_show_long || g_json || g_csv) {
+            query_details(&g_procs[i]);
+        }
+    }
+
+    // JSON mode: emit a flat array of every process and skip the tree. The tree
+    // layout is a human convenience; scripts want the records.
+    if (g_json) {
+        putchar('[');
+        for (int i = 0; i < g_count; i++) {
+            if (i != 0) {
+                putchar(',');
+            }
+            printf("{\"pid\":%lu,\"ppid\":%lu,\"name\":",
+                   (unsigned long)g_procs[i].pid, (unsigned long)g_procs[i].ppid);
+            json_str(g_procs[i].name);
+            printf(",\"threads\":%d,\"integrity\":", count_threads(g_procs[i].pid));
+            json_str(g_procs[i].integrity);
+            fputs(",\"path\":", stdout);
+            json_str(g_procs[i].path);
+            putchar('}');
+        }
+        puts("]");
+        return 0;
+    }
+
+    // CSV mode: the same flat records as JSON, one row per process.
+    if (g_csv) {
+        puts("pid,ppid,name,threads,integrity,path");
+        for (int i = 0; i < g_count; i++) {
+            printf("%lu,%lu,", (unsigned long)g_procs[i].pid, (unsigned long)g_procs[i].ppid);
+            csv_str(g_procs[i].name);
+            printf(",%d,", count_threads(g_procs[i].pid));
+            csv_str(g_procs[i].integrity);
+            putchar(',');
+            csv_str(g_procs[i].path);
+            putchar('\n');
+        }
+        return 0;
     }
 
     // Pass 1: print every real root

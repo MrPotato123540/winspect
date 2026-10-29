@@ -1,9 +1,111 @@
 #include <stdio.h>
 #include <string.h>
+#include <windows.h>    // SetConsoleOutputCP
 
 // cmd_list now lives in list.c (Phase 1)
 // The header gives main.c the prototype, the linker connects the two .obj files
 #include "list.h"
+
+// cmd_pe lives in pe.c (Phase 2), same pattern as list
+#include "pe.h"
+
+// cmd_inspect lives in inspect.c (Phase 4): reads a live process's PEB
+#include "inspect.h"
+
+// cmd_threads / cmd_handles live in threads.c and handles.c (Phase 5)
+#include "threads.h"
+#include "handles.h"
+
+// cmd_token / cmd_secinfo live in token.c and secinfo.c (Phase 6)
+#include "token.h"
+#include "secinfo.h"
+
+// cmd_ssn / cmd_launch live in ssn.c and launch.c (Phase 7)
+#include "ssn.h"
+#include "launch.h"
+
+// cmd_verify lives in verify.c (Phase 8): the consistency/hook detector
+#include "verify.h"
+
+// cmd_sign lives in sign.c: Authenticode signature check
+#include "sign.h"
+
+// cmd_regions lives in regions.c: virtual memory map
+#include "regions.h"
+
+// cmd_net lives in net.c: per-process TCP/UDP endpoints
+#include "net.h"
+
+// cmd_triage lives in triage.c: one-shot suspicion report
+#include "triage.h"
+
+// cmd_strings lives in strings.c: static string + indicator extraction
+#include "strings.h"
+
+// cmd_services lives in services.c: SCM service enumeration
+#include "services.h"
+
+// cmd_drivers lives in drivers.c: loaded kernel driver list
+#include "drivers.h"
+
+// cmd_autoruns lives in autoruns.c: registry auto-start sweep
+#include "autoruns.h"
+
+// cmd_pipes lives in pipes.c: named pipe listing
+#include "pipes.h"
+
+// cmd_hash lives in hash.c: file digest (MD5/SHA1/SHA256)
+#include "hash.h"
+
+// cmd_hosts / cmd_certstore / cmd_tasks: more read-only DFIR views
+#include "hosts.h"
+#include "certstore.h"
+#include "objects.h"
+#include "defender.h"
+#include "usb.h"
+#include "prefetch.h"
+#include "shimcache.h"
+#include "bam.h"
+#include "firewall.h"
+#include "taskcache.h"
+#include "wmi.h"
+#include "lnk.h"
+#include "streams.h"
+#include "hunt.h"
+#include "posture.h"
+#include "events.h"
+#include "hidden.h"
+#include "sweep.h"
+#include "usage.h"
+#include "userassist.h"
+#include "mru.h"
+#include "jumplist.h"
+#include "hive.h"
+#include "amcache.h"
+#include "rdp.h"
+#include "sysinfo.h"
+#include "programs.h"
+#include "shellbags.h"
+#include "pshistory.h"
+#include "recyclebin.h"
+#include "bitsjobs.h"
+#include "comhijack.h"
+#include "users.h"
+#include "timeline.h"
+#include "tasks.h"
+
+// cmd_modules lives in modules.c: a live process's loaded modules
+#include "modules.h"
+
+// cmd_arp / cmd_sessions: network neighbours and logon sessions
+#include "arp.h"
+#include "sessions.h"
+
+// cmd_shares lives in shares.c: SMB share enumeration
+#include "shares.h"
+
+// cmd_routes lives in routes.c: IPv4 routing table
+#include "routes.h"
 
 // Row count computed by the compiler from the table itself
 // No separate MAX_COMMANDS constant that we could forget to update
@@ -15,20 +117,6 @@
 // Return value becomes the process exit code: 0 = success, anything else = failure
 // CI relies on this, a non-zero exit code turns the GitHub Actions step red
 typedef int (*cmd_fn)(int argc, char** argv);
-
-// Placeholder for Phase 2 (PE header parsing)
-static int cmd_pe(int argc, char** argv)
-{
-    // pe needs exactly one path, refuse early instead of reading past argv
-    if (argc < 1) {
-        // Errors go to stderr so stdout stays clean when output is piped to a file
-        fputs("usage: winspect pe <path>\n", stderr);
-        return 1;
-    }
-
-    printf("pe: '%s' (Phase 2)\n", argv[0]);
-    return 0;
-}
 
 /*
  * ============================================================================
@@ -134,16 +222,129 @@ static const struct {
     const char* name;
     cmd_fn      fn;
     const char* help;
+    const char* cat;       // for the grouped usage listing
 } commands[] = {
-    { "list", cmd_list, "process/thread tree via Toolhelp" },
-    { "pe",   cmd_pe,   "parse and dump PE file headers"   },
+    { "pe",      cmd_pe,      "parse and dump PE file headers",             "file" },
+    { "sign",    cmd_sign,    "Authenticode signature + trust (or --scan)", "file" },
+    { "strings", cmd_strings, "printable strings + indicators from a file", "file" },
+    { "hash",    cmd_hash,    "MD5/SHA1/SHA256 of a file",                  "file" },
+    { "lnk",      cmd_lnk,      "shortcut files (default: Recent folder)",  "file" },
+    { "streams",  cmd_streams,  "alternate data streams + Mark-of-the-Web", "file" },
+    { "jumplist", cmd_jumplist, "Jump Lists: recent items per application",  "file" },
+    { "timeline", cmd_timeline, "merged, time-ordered evidence (UTC)",        "security" },
+    { "users",    cmd_users,    "local accounts: admin, last logon, flags",  "security" },
+    { "comhijack",cmd_comhijack,"per-user COM classes overriding HKLM ones",  "security" },
+    { "bits",     cmd_bits,     "BITS jobs: files, owner, notify command",   "security" },
+    { "recyclebin", cmd_recyclebin, "Recycle Bin: deleted files, owner, time", "file" },
+    { "pshistory", cmd_pshistory, "PowerShell command history (PSReadLine)", "file" },
+    { "shellbags", cmd_shellbags, "folders browsed in Explorer (ShellBags)", "file" },
+    { "hive",     cmd_hive,     "browse an offline registry hive file",      "file" },
+    { "amcache",  cmd_amcache,  "Amcache.hve: file inventory with SHA-1",    "file" },
+    { "rdp",      cmd_rdp,      "outgoing Remote Desktop history (mstsc)",   "system" },
+    { "sysinfo",  cmd_sysinfo,  "machine facts: name, build, users, networks", "system" },
+    { "programs", cmd_programs, "installed software; flags remote-access tools", "system" },
+
+    { "list",    cmd_list,    "process/thread tree via Toolhelp",           "process" },
+    { "inspect", cmd_inspect, "dump a live process PEB (cmdline/modules)",  "process" },
+    { "modules", cmd_modules, "loaded modules of a process (+flags)",       "process" },
+    { "threads", cmd_threads, "per-thread register snapshot (RIP/RSP)",     "process" },
+    { "handles", cmd_handles, "kernel object handles a process holds",      "process" },
+    { "regions", cmd_regions, "virtual memory map (flags private+exec)",    "process" },
+    { "token",   cmd_token,   "process security context (SID/privileges)",  "process" },
+    { "launch",  cmd_launch,  "start a program suspended, show entry point","process" },
+
+    { "secinfo", cmd_secinfo, "owner/DACL of process/file/service/key",     "security" },
+    { "verify",  cmd_verify,  "consistency checks (hook/masquerade/tamper)","security" },
+    { "triage",  cmd_triage,  "one-shot suspicion score for a process",     "security" },
+    { "hunt",     cmd_hunt,     "lineage/masquerade checks on all processes", "security" },
+    { "posture",  cmd_posture,  "host hardening checks (UAC, LSA, SMBv1...)", "security" },
+    { "events",   cmd_events,   "high-signal event log timeline",          "security" },
+    { "hidden",   cmd_hidden,   "cross-view: hidden processes / services",  "security" },
+    { "sweep",    cmd_sweep,    "all system-wide checks, findings only",   "security" },
+    { "ssn",     cmd_ssn,     "read an ntdll stub's service number",        "security" },
+
+    { "net",     cmd_net,     "per-process TCP/UDP endpoints",              "system" },
+    { "arp",     cmd_arp,     "IPv4 neighbour (ARP) cache",                 "system" },
+    { "routes",  cmd_routes,  "IPv4 routing table",                         "system" },
+    { "sessions",cmd_sessions,"terminal/logon sessions and users",          "system" },
+    { "shares",  cmd_shares,  "SMB shares this machine exposes",            "system" },
+    { "services",cmd_services,"SCM services: state, start, path, account",  "system" },
+    { "drivers", cmd_drivers, "loaded kernel drivers (+ --sig check)",        "system" },
+    { "autoruns",cmd_autoruns,"auto-start locations, flagged with reasons", "system" },
+    { "tasks",   cmd_tasks,   "scheduled tasks (command + author)",         "system" },
+    { "pipes",   cmd_pipes,   "named pipes on the system",                  "system" },
+    { "hosts",   cmd_hosts,   "active entries in the hosts file",           "system" },
+    { "certstore",cmd_certstore,"certificates in a system store (Root)",    "system" },
+    { "objects",  cmd_objects,  "named kernel objects (BaseNamedObjects)",  "system" },
+    { "usb",      cmd_usb,      "USB storage history (Enum\\USBSTOR)",       "system" },
+    { "prefetch", cmd_prefetch, "execution evidence from Prefetch (*.pf)",   "system" },
+    { "shimcache",cmd_shimcache,"AppCompatCache entries (programs seen)",    "system" },
+    { "bam",      cmd_bam,      "BAM: last run per program per user",        "system" },
+    { "userassist",cmd_userassist,"GUI program launches (UserAssist)",       "system" },
+    { "mru",      cmd_mru,      "Run box / typed paths / recent docs",     "system" },
+    { "firewall", cmd_firewall, "firewall rules (flags risky inbound allow)", "security" },
+    { "taskcache",cmd_taskcache,"scheduled tasks hidden from schtasks",      "security" },
+    { "wmi",      cmd_wmi,      "WMI permanent event subscriptions",        "security" },
+    { "defender", cmd_defender, "Defender exclusions + disabling policies",  "security" },
 };
 
 static void usage(void) {
-    puts("winspect - Windows internals inspector\n\ncommands:");
-    for (size_t i = 0; i < COMMAND_COUNT; i++) {
-        // %-8s pads the name to 8 chars so the help texts line up in a column
-        printf("  %-8s %s\n", commands[i].name, commands[i].help);
+    // Fixed category order with a readable heading for each.
+    static const struct { const char *key, *title; } groups[] = {
+        { "file",     "Static file analysis" },
+        { "process",  "Live process inspection" },
+        { "security", "Security / triage" },
+        { "system",   "System-wide views" },
+    };
+    puts("winspect - Windows internals inspector\n");
+    for (size_t g = 0; g < sizeof groups / sizeof groups[0]; g++) {
+        printf("%s:\n", groups[g].title);
+        for (size_t i = 0; i < COMMAND_COUNT; i++) {
+            if (strcmp(commands[i].cat, groups[g].key) == 0) {
+                // %-9s pads the name so the help texts line up in a column
+                printf("  %-10s %s\n", commands[i].name, commands[i].help);
+            }
+        }
+        putchar('\n');
+    }
+    puts("Most commands accept --json; tabular ones also accept --csv.");
+    puts("Details for one command: winspect help <command>   (or: winspect <command> --help)");
+}
+
+// Was the program launched by double-clicking it (so Windows spawned a fresh
+// console just for us), rather than run from an existing shell? If we are the
+// ONLY process attached to this console, nobody was here before us, which is the
+// double-click case. GetConsoleProcessList fills a buffer with the PIDs attached
+// to our console and returns the count; 1 means just winspect.
+//
+// This matters because a double-clicked console window closes the instant main()
+// returns, so any output flashes by unread. When we detect it we pause at the
+// end and, with no command given, print a few copy-paste examples.
+static int launched_by_doubleclick(void) {
+    DWORD pids[4];
+    DWORD n = GetConsoleProcessList(pids, (DWORD)(sizeof pids / sizeof pids[0]));
+    return (n == 1);
+}
+
+// Prints a short getting-started block for someone who just double-clicked.
+static void examples(void) {
+    puts("\nThis is a command-line tool. Open a terminal (PowerShell or cmd) and run,");
+    puts("for example:");
+    puts("  winspect list                     list processes");
+    puts("  winspect triage <pid>             quick suspicion report for a process");
+    puts("  winspect pe C:\\Windows\\notepad.exe   parse a PE file");
+    puts("  winspect net                      per-process network endpoints");
+    puts("\nAlmost every command also accepts --json (and tables accept --csv).");
+}
+
+// Waits for the user to press Enter, used only in the double-click case so the
+// window does not vanish before anything can be read.
+static void pause_exit(void) {
+    fputs("\nPress Enter to close this window...", stdout);
+    fflush(stdout);
+    int c;
+    while ((c = getchar()) != '\n' && c != EOF) {
+        /* drain the line */
     }
 }
 
@@ -234,23 +435,67 @@ static void usage(void) {
  */
 int main(int argc, char** argv) {
 
+    // Make the console interpret our output as UTF-8. All our string conversions
+    // (account names, module paths, UNICODE_STRINGs) emit UTF-8, so without this
+    // non-ASCII names render as mojibake under the console's legacy code page.
+    SetConsoleOutputCP(CP_UTF8);
+
+    // If double-clicked, the console closes the moment we return, so remember to
+    // pause at the end and be friendlier about a missing command.
+    int dbl = launched_by_doubleclick();
+
+    int rc;
+
     // argv[0] is the program path, argv[1] is the subcommand
     // No subcommand means the user does not know what to type, show help
     if (argc < 2) {
         usage();
-        return 1;
-    }
-
-    // Cache-localized linear scan across the read-only dispatch table (.rdata)
-    for (size_t i = 0; i < COMMAND_COUNT; i++) {
-        if (strcmp(argv[1], commands[i].name) == 0) {
-            // Skip program path + subcommand
-            // so each command sees its own arguments starting at index 0
-            return commands[i].fn(argc - 2, argv + 2);
+        if (dbl) {
+            examples();
+        }
+        rc = 1;
+    } else if (strcmp(argv[1], "help") == 0 || strcmp(argv[1], "--help") == 0 ||
+               strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "/?") == 0) {
+        // "winspect help <command>": the long description from the command's
+        // header (src/usage.c, generated). Bare "help" shows the overview.
+        const char *text = (argc >= 3) ? command_usage(argv[2]) : NULL;
+        if (text != NULL) {
+            fputs(text, stdout);
+            rc = 0;
+        } else {
+            if (argc >= 3) {
+                fprintf(stderr, "unknown command: %s\n\n", argv[2]);
+            }
+            usage();
+            rc = (argc >= 3) ? 1 : 0;
+        }
+    } else if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0) &&
+               command_usage(argv[1]) != NULL) {
+        // "winspect <command> --help" is the same as "winspect help <command>".
+        fputs(command_usage(argv[1]), stdout);
+        rc = 0;
+    } else {
+        // Cache-localized linear scan across the read-only dispatch table (.rdata)
+        int found = 0;
+        rc = 1;
+        for (size_t i = 0; i < COMMAND_COUNT; i++) {
+            if (strcmp(argv[1], commands[i].name) == 0) {
+                // Skip program path + subcommand so each command sees its own
+                // arguments starting at index 0.
+                rc = commands[i].fn(argc - 2, argv + 2);
+                found = 1;
+                break;
+            }
+        }
+        if (!found) {
+            fprintf(stderr, "unknown command: %s\n\n", argv[1]);
+            usage();
+            rc = 1;
         }
     }
 
-    fprintf(stderr, "unknown command: %s\n\n", argv[1]);
-    usage();
-    return 1;
+    if (dbl) {
+        pause_exit();
+    }
+    return rc;
 }
