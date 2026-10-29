@@ -103,7 +103,9 @@ cases += [['ssn','NtOpenProcess'], ['ssn','NtOpenProcess','--json'], ['modules',
           ['browser','--home','C:\\img2\\Users\\bob'], ['browser','C:\\windows\\win.ini'], ['browser','C:\\nonexistent'], ['browser','--since','0'],
           ['pca'], ['pca','--csv'], ['pca','--flagged','--json'], ['pca','C:\\nonexistent'], ['pca','a','b'],
           ['activities'], ['activities','--csv'], ['activities','--flagged','--json'], ['activities','--home','C:\\img2\\Users\\bob'],
-          ['activities','C:\\windows\\win.ini'], ['activities','C:\\nonexistent']]
+          ['activities','C:\\windows\\win.ini'], ['activities','C:\\nonexistent'],
+          ['mft'], ['mft','C:\\windows\\win.ini'], ['mft','C:\\nonexistent'], ['mft','C:\\mftref\\MFT','--timestomp','--csv'],
+          ['mft','C:\\mftref\\MFT','--deleted','--find','zzz_none'], ['mft','C:\\mftref\\MFT','--find']]
 
 bad = 0
 for args in cases:

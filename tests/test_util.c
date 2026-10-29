@@ -22,6 +22,7 @@
 #include "artparse.h"
 #include "jsonmini.h"
 #include "sqlite.h"
+#include "mft.h"
 #include "capa.h"
 #include "lnkparse.h"
 #include "destlist.h"
@@ -842,6 +843,65 @@ int main(void)
                 check_int("pca no path", (pca_parse_line("abc|2024-02-01 10:11:12", &pr), pr.kind), PCA_RAW);
                 check_int("pca short general", (pca_parse_line("2024-02-01 10:11:12|1|C:\\a.exe", &pr), pr.kind), PCA_RAW);
                 check_int("pca empty", pca_parse_line("   ", &pr), -1);
+            }
+            {
+                uint64_t si[4] = { 130000000000000000ULL, 130000000000000000ULL, 1, 1 };
+                uint64_t fn[4] = { 132000000001234567ULL, 132000000001234567ULL, 1, 1 };
+                check_int("ts whole", mft_timestomp_reason(si, fn) != NULL && strstr(mft_timestomp_reason(si, fn), "whole-second") != NULL, 1);
+                si[0] = 130000000000000001ULL;
+                check_int("ts earlier", mft_timestomp_reason(si, fn) != NULL && strstr(mft_timestomp_reason(si, fn), "whole") == NULL, 1);
+                si[0] = fn[0] - 5000000ULL;                      // half a second earlier: noise
+                check_int("ts tolerance", mft_timestomp_reason(si, fn) == NULL, 1);
+                si[0] = fn[0] + 100;
+                check_int("ts later ok", mft_timestomp_reason(si, fn) == NULL, 1);
+                si[0] = 0;
+                check_int("ts no si", mft_timestomp_reason(si, fn) == NULL, 1);
+                // A hand-made 1024-byte FILE record: fixups, $SI, $FN (DOS + Win32 names), $DATA.
+                unsigned char rec[1024];
+                memset(rec, 0, sizeof rec);
+                memcpy(rec, "FILE", 4);
+                rec[4] = 48; rec[6] = 3;                          // fixup array @48, 3 entries
+                rec[48] = 0x07; rec[49] = 0x00;                   // update sequence number 7
+                rec[50] = 0xAA; rec[51] = 0xBB; rec[52] = 0xCC; rec[53] = 0xDD;
+                rec[510] = 0x07; rec[511] = 0; rec[1022] = 0x07; rec[1023] = 0;
+                rec[16] = 3;                                      // sequence
+                rec[20] = 56;                                     // first attribute
+                rec[22] = 1;                                      // in use
+                rec[28] = 0; rec[29] = 4;                         // record size 1024
+                size_t o = 56;
+                // $SI
+                rec[o] = 0x10; rec[o + 4] = 24 + 48; rec[o + 16] = 48; rec[o + 20] = 24;
+                for (int k = 0; k < 8; k++) rec[o + 24 + k] = (unsigned char)(si[1] >> (8 * k));
+                o += 72;
+                // $FN, DOS name first, then Win32
+                const char *dosn = "LONGNA~1.TXT", *w32 = "long name.txt";
+                for (int pass = 0; pass < 2; pass++) {
+                    const char *nm = pass ? w32 : dosn;
+                    size_t nl = strlen(nm), clen = 66 + nl * 2, alen = (24 + clen + 7) & ~(size_t)7;
+                    rec[o] = 0x30; rec[o + 4] = (unsigned char)alen; rec[o + 16] = (unsigned char)clen; rec[o + 20] = 24;
+                    unsigned char *c = rec + o + 24;
+                    c[0] = 0x26; c[6] = 2;                       // parent record 0x26, sequence 2
+                    c[48] = 0x39; c[49] = 0x05;                   // real size 1337
+                    c[64] = (unsigned char)nl; c[65] = pass ? 1 : 2;
+                    for (size_t k = 0; k < nl; k++) c[66 + 2 * k] = (unsigned char)nm[k];
+                    o += alen;
+                }
+                rec[o] = 0xFF; rec[o + 1] = 0xFF; rec[o + 2] = 0xFF; rec[o + 3] = 0xFF;
+                mft_entry me;
+                check_int("mft parse", mft_parse(rec, sizeof rec, 41, &me), 0);
+                check_int("mft fixup restored", rec[510] == 0xAA && rec[1023] == 0xDD, 1);
+                check_str("mft win32 name", me.name, "long name.txt");
+                check_int("mft parent", (int)(me.parent & 0xFFFFFFFF), 0x26);
+                check_int("mft size", (int)me.size, 1337);
+                check_int("mft seq", me.seq, 3);
+                check_int("mft si", me.has_si && me.si[0] == si[1], 1);
+                unsigned char torn[1024];
+                memcpy(torn, rec, sizeof torn);
+                memcpy(torn, "FILE", 4);
+                torn[510] = 0x08;                                 // sector end does not hold the USN
+                torn[48] = 0x07;
+                check_int("mft torn", mft_parse(torn, sizeof torn, 41, &me), -1);
+                check_int("mft not file", mft_parse((unsigned char *)"BAAD", 4, 0, &me), -1);
             }
             check_int("xpm sys", evt_xpath_match("*[System[(EventID=7045 or EventID=104)]]", 104, 4), 1);
             check_int("xpm sys no", evt_xpath_match("*[System[(EventID=7045 or EventID=104)]]", 1040, 4), 0);

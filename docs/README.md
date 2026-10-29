@@ -75,6 +75,9 @@ Sırayla oku. Her dosya bir öncekinin üstüne kurulu:
 23. **[22 — Tarayıcı geçmişi](22-tarayici-gecmisi.md)**
     `browser`: Chrome/Edge/Brave/Firefox geçmişi ve indirmeler; kendi SQLite
     okuyucumuz (B-ağacı, taşma sayfaları, WAL) ve Python'la diferansiyel testi.
+24. **[23 — NTFS $MFT](23-ntfs-mft.md)**
+    `mft`: dosya kayıtları, silinmiş ve sahipsiz dosyalar, Object ID; timestomping
+    neden bulgu değil de aday listesi.
 
 ## Aklında tut: tek cümlelik fikir
 

@@ -130,6 +130,17 @@ static const struct { const char *name, *text; } usage_table[] = {
         "flagged. Other users' folders need admin. A file or folder argument reads a\n"
         "copy (e.g. from a disk image). Read-only. Usage:\n"
         "  winspect recyclebin [<$I file | INFO2 | folder>] [--flagged] [--json | --csv]\n" },
+    { "mft",
+        "winspect mft - files from a copied NTFS $MFT (collected with a triage tool\n"
+        "or taken from a mounted image): full path (deleted files included, broken\n"
+        "chains under $Orphan), size, the four $STANDARD_INFORMATION times and the\n"
+        "$FILE_NAME creation time, and the Object ID's creation time / MAC when\n"
+        "there is one. --timestomp lists only files whose $SI creation time is\n"
+        "earlier than their $FN creation time - a timestomping CANDIDATE list, not\n"
+        "a verdict: files from install media and archives look the same (on a real\n"
+        "XP image a third of all files did). --find filters by path text,\n"
+        "--deleted keeps records that are no longer in use. Read-only. Usage:\n"
+        "  winspect mft <$MFT file> [--find <text>] [--deleted] [--timestomp] [--json | --csv]\n" },
     { "activities",
         "winspect activities - Windows 10 Timeline (ActivitiesCache.db under\n"
         "%LOCALAPPDATA%\\ConnectedDevicesPlatform\\<account>\\): which application was\n"
