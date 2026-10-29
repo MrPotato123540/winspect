@@ -544,3 +544,40 @@ normalleştirme. CI smoke testi yeni komutları ve bayrak kombinasyonlarını da
 Kural eklemek/silmek, görev gizlemek/göstermek, servis yolunu düzeltmek,
 ShimCache/BAM/Prefetch temizlemek — hiçbiri yok. Araç sadece okur ve **neden**
 şüphelendiğini söyler.
+
+## pca — Windows 11'in Program Uyumluluk Yardımcısı kayıtları
+
+Windows 11 22H2 ile `C:\Windows\appcompat\pca` altında küçük metin
+dosyaları belirdi. Program Uyumluluk Yardımcısı (PcaSvc) izlediği programları
+buraya yazar:
+
+| Dosya | Satır biçimi |
+|---|---|
+| `PcaAppLaunchDic.txt` | `tam yol|YYYY-AA-GG ss:dd:nn.fff` (UTC, son başlatma) |
+| `PcaGeneralDb0.txt` / `Db1.txt` | `zaman|çalışma durumu|yol|açıklama|üretici|sürüm|program kimliği[|çıkış kodu]` |
+
+Değeri: Prefetch kapatılmış bir makinede (sunucular, bazı SSD ayarları) bile
+"bu program burada çalıştı" kanıtı verir.
+
+**Belirsizlikler açıkça ele alındı.** Kamuya açık yazılar bu dosyaların
+kodlaması konusunda çelişiyor (ANSI cp1252 mı, UTF-16LE mi?). Bu yüzden
+kodlama dosya başına **algılanır**:
+
+1. UTF-16 BOM varsa ya da ilk baytların tek konumlarında çoğunlukla NUL
+   varsa UTF-16LE;
+2. değilse geçerli UTF-8 ise UTF-8;
+3. değilse cp1252.
+
+`PcaGeneralDb`'nin alan sırası birkaç kaynakta aynı ama gerçek bir örnekle
+doğrulayamadık. Bu yüzden bir satır **ancak biçimi tutuyorsa**
+yorumlanır: geçerli bir zaman damgası ve ters bölü içeren bir yol aranır.
+Tutmayan satır tahmin edilmeden `raw` olarak gösterilir (`pca_parse_line`,
+birim testli).
+
+İşaret: yol kullanıcının yazabildiği bir klasördeyse "ran from a user-writable
+dir" (Prefetch ile aynı kural).
+
+**Doğrulama:** 11 birim testi; wine'da iki kodlamada yazılmış dosyalar
+(BOM'suz UTF-16LE ve `é` içeren cp1252) ile biçimi tutmayan bir satır.
+Gerçek bir Windows 11 örneğiyle henüz karşılaştırılmadı. `timeline` (canlı ve
+`--root`), `image` ve `sweep` de bu kaynağı kullanır.

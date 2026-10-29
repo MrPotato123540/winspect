@@ -75,6 +75,8 @@ takes. The tables below are a map, not the full reference.
 | Command | What it does |
 | --- | --- |
 | `prefetch` | Programs that ran: full path, run count, last eight run times. Handles Windows 10/11 compressed files. |
+| `pca` | Windows 11 22H2+ Program Compatibility Assistant logs (`appcompat\pca`): programs launched, with the last launch time. Still there when Prefetch is off. |
+| `srum` | System Resource Usage Monitor (`SRUDB.dat`, an ESE database read with a built-in reader): bytes sent and received per application, user and hour; CPU / disk use; connection spans. `--summary` totals per application, largest upload first. |
 | `amcache` | File inventory from Amcache.hve with SHA-1, publisher and version. Look up a hash with `--sha1`. |
 | `shimcache` | AppCompatCache entries (Windows 7, 10 and 11 layouts). |
 | `bam` | Background Activity Moderator: last run per program and user. |
@@ -84,6 +86,7 @@ takes. The tables below are a map, not the full reference.
 | `shellbags` | Folders browsed in Explorer, including removable drives and deleted folders. |
 | `recyclebin` | What was deleted, by which account and when (`$I` files and the old `INFO2`). |
 | `browser` | Chrome, Edge, Brave and Firefox history and downloads, read with a built-in SQLite reader (Firefox's `-wal` file included): URL, title, last visit, saved path, size and the browser's own danger verdict. Flags downloads the browser warned about or the user kept anyway, downloads from a bare IP, downloaded programs and scripts. |
+| `activities` | Windows 10 Timeline (`ActivitiesCache.db`): which application was used when and for how long, and the documents it opened. |
 | `pshistory` | PowerShell console history (PSReadLine); suspicious lines are flagged. `--all-users` reads every profile. |
 | `rdp` | Outgoing Remote Desktop connections of a user. |
 | `usb` | USB storage devices with first install, last connect and last removal times. |
@@ -114,6 +117,8 @@ takes. The tables below are a map, not the full reference.
 | `strings <file>` | ASCII and UTF-16 strings with URLs, IPs, paths and encoded PowerShell tagged. |
 | `hash <file>` | MD5, SHA-1 and SHA-256. |
 | `streams <path>` | Alternate data streams and Mark-of-the-Web (zone and download URL). |
+| `mft <$MFT>` | Files from a copied `$MFT`: full paths (deleted files too, broken chains under `$Orphan`), sizes, `$STANDARD_INFORMATION` and `$FILE_NAME` times, Object ID creation time and MAC. `--timestomp` lists files whose `$SI` creation time precedes `$FN`'s, as candidates rather than findings. |
+| `usn <$J>` | The NTFS change journal (`$UsnJrnl:$J` copy): every create, delete, rename and data change with time and reasons; `--mft` adds each file's folder; `--live C:` reads the running system's journal through the documented FSCTLs. Flags deleted programs and files renamed into program names (`.pdf` to `.exe`). |
 | `hive <file> [key]` | Browse an offline registry hive. |
 | `pipes`, `objects`, `hosts`, `arp`, `routes`, `sessions`, `shares` | Named pipes (known tool defaults flagged), Object Manager names, hosts file, neighbour cache, routing table, logon sessions, SMB shares. |
 
@@ -128,7 +133,7 @@ takes. The tables below are a map, not the full reference.
 | `--usrclass` with `--software` | `comhijack` |
 | `--sam <SAM>` | `users` (account names and the fixed `F` record only) |
 | `--evtx <file>` (repeatable) | `events`, including `--summary` |
-| a copied file or folder | `prefetch` (file or `--dir`), `amcache`, `lnk`, `jumplist`, `recyclebin`, `pshistory`, `tasks --dir`, `browser` (database file or `--home <user folder>`) |
+| a copied file or folder | `prefetch` (file or `--dir`), `pca`, `amcache`, `lnk`, `jumplist`, `recyclebin`, `pshistory`, `tasks --dir`, `browser` and `activities` (database file or `--home <user folder>`) |
 
 ## Building
 
@@ -155,14 +160,14 @@ came back from the ANSI file APIs as `Gülsen` and was silently skipped.
 ## Testing
 
 Parsers that do not need Windows (Prefetch, ShimCache, `.lnk`, shell items,
-Jump List DestList, compound files, registry hives, `.evtx` event logs, SQLite databases, Recycle Bin, SAM records,
+Jump List DestList, compound files, registry hives, `.evtx` event logs, SQLite and ESE databases, `$MFT` records, Recycle Bin, SAM records,
 task XML, the JSON reader and the various rule tables) live in portable C files
 and are tested on Linux:
 
 ```sh
 SRC="src/md5.c src/jsonutil.c src/ioc.c src/entropy.c src/pecksum.c src/imphash_ords.c \
      src/pfparse.c src/artparse.c src/capa.c src/lnkparse.c src/rights.c src/destlist.c \
-     src/shellitem.c src/jsonmini.c src/sqlite.c"   # evtx.c: tests/evtx_check.py
+     src/shellitem.c src/jsonmini.c src/sqlite.c src/mft.c src/usn.c"   # evtx.c: tests/evtx_check.py
 cc -I inc -std=c11 $SRC tests/test_util.c -o test_util -lm && ./test_util
 ```
 
@@ -174,7 +179,7 @@ third-party code is run):
 - `.lnk`: 34 real-world samples, field by field, against LnkParse3's expected output.
 - Jump List DestList: real Windows 7 to 10 files from the JumpList project.
 - Registry hives, SAM, AppCompatCache, Amcache, ShellBags: regipy's test hives and published values.
-- Recycle Bin and `.evtx` event logs: plaso's test files and the values its tests assert.
+- Recycle Bin, `.evtx` event logs, `$MFT`, the USN journal and SRUM: plaso's test files and the values its tests assert.
 - Certificates read offline: checked against `openssl x509` and `hashlib`.
 - The JSON reader: random documents compared with Python's `json` module.
 - The SQLite reader: random databases (page sizes, UTF-16, overflow pages, uncheckpointed WAL) compared row by row with Python's `sqlite3` module.

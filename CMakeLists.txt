@@ -75,6 +75,14 @@ add_executable(winspect
     src/imgpaths.c
     src/sqlite.c
     src/browser.c
+    src/pca.c
+    src/activities.c
+    src/mft.c
+    src/mftcmd.c
+    src/usn.c
+    src/usncmd.c
+    src/esedb.c
+    src/srum.c
     src/timeline.c
     src/jumplist.c
     src/tasks.c

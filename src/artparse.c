@@ -1158,3 +1158,58 @@ int evt_xpath_match(const char *xpath, unsigned id, unsigned level)
     if (l && strtoul(l + 6, NULL, 10) != level) return 0;
     return 1;
 }
+
+// ---- Program Compatibility Assistant -------------------------------------------
+
+static int pca_time(const char *s, char out[24])
+{
+    // YYYY-MM-DD hh:mm:ss, optionally followed by .fff
+    static const char shape[] = "dddd-dd-dd dd:dd:dd";
+    for (int i = 0; shape[i]; i++) {
+        if (shape[i] == 'd' ? !(s[i] >= '0' && s[i] <= '9') : s[i] != shape[i]) return 0;
+    }
+    if (s[19] != 0 && s[19] != '.') return 0;
+    memcpy(out, s, 19);
+    out[19] = 0;
+    return 1;
+}
+
+static int pca_pathlike(const char *s)
+{
+    return strchr(s, '\\') != NULL && strlen(s) > 3;
+}
+
+int pca_parse_line(const char *line, pca_rec *r)
+{
+    memset(r, 0, sizeof *r);
+    while (*line == ' ' || *line == '\t') line++;
+    if (*line == 0) return -1;
+    snprintf(r->raw, sizeof r->raw, "%s", line);
+    char *f[10];
+    int nf = 0;
+    char buf[1400];
+    snprintf(buf, sizeof buf, "%s", line);
+    for (char *p = buf; nf < 10;) {
+        f[nf++] = p;
+        char *e = strchr(p, '|');
+        if (e == NULL) break;
+        *e = 0;
+        p = e + 1;
+    }
+    if (nf == 2 && pca_pathlike(f[0]) && pca_time(f[1], r->time)) {
+        r->kind = PCA_LAUNCH;
+        snprintf(r->path, sizeof r->path, "%s", f[0]);
+    } else if (nf >= 7 && pca_time(f[0], r->time) && pca_pathlike(f[2])) {
+        r->kind = PCA_GENERAL;
+        snprintf(r->status, sizeof r->status, "%s", f[1]);
+        snprintf(r->path, sizeof r->path, "%s", f[2]);
+        snprintf(r->description, sizeof r->description, "%s", f[3]);
+        snprintf(r->vendor, sizeof r->vendor, "%s", f[4]);
+        snprintf(r->version, sizeof r->version, "%s", f[5]);
+        snprintf(r->program_id, sizeof r->program_id, "%s", f[6]);
+    } else {
+        r->kind = PCA_RAW;
+        r->time[0] = 0;
+    }
+    return 0;
+}

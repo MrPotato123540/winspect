@@ -337,4 +337,23 @@ const char *account_reason(const char *name, uint32_t rid, int disabled, int pw_
 #define CERTBLOB_NAME   11
 int certblob_prop(const unsigned char *b, size_t n, uint32_t id, size_t *off, size_t *len);
 
+// ---- Program Compatibility Assistant (Windows 11 22H2+) ---------------------
+// C:\Windows\appcompat\pca\ text files, one record per line, '|'-separated:
+//   PcaAppLaunchDic.txt   <full path>|<YYYY-MM-DD hh:mm:ss.fff>   (UTC)
+//   PcaGeneralDb0/1.txt   <time>|<run status>|<path>|<description>|<vendor>|
+//                         <version>|<program id>[|<exit code>]
+// Field meanings come from public write-ups that disagree in places, so a
+// line is only interpreted when its shape matches (a real timestamp, a path
+// with a backslash); otherwise kind = PCA_RAW and only `raw` is meaningful.
+enum { PCA_RAW, PCA_LAUNCH, PCA_GENERAL };
+typedef struct {
+    int kind;
+    char time[24];          // "YYYY-MM-DD hh:mm:ss" (UTC)
+    char path[1024], status[64], description[256], vendor[256], version[64], program_id[128];
+    char raw[1400];
+} pca_rec;
+// Parses one line (UTF-8, no line ending). Returns 0 for a record, -1 for an
+// empty line.
+int pca_parse_line(const char *line, pca_rec *r);
+
 #endif

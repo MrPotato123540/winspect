@@ -365,6 +365,40 @@ con.close()
 os.replace(ffp + '.copy', ffp); os.replace(ffp + '-wal.copy', ffp + '-wal')
 if os.path.exists(ffp + '-shm'): os.remove(ffp + '-shm')
 
+# --- activities: a Windows Timeline database (column order as in Windows 10)
+acd = os.path.join(home, 'AppData', 'Local', 'ConnectedDevicesPlatform', 'L.bob')
+os.makedirs(acd, exist_ok=True)
+acp = os.path.join(acd, 'ActivitiesCache.db')
+if os.path.exists(acp): os.remove(acp)
+con = sqlite3.connect(acp)
+con.execute('CREATE TABLE Activity ([Id] GUID PRIMARY KEY NOT NULL, [AppId] TEXT NOT NULL, [PackageIdHash] TEXT, '
+            '[AppActivityId] TEXT, [ActivityType] INT NOT NULL, [ActivityStatus] INT NOT NULL, [ParentActivityId] GUID, '
+            '[Tag] TEXT, [Group] TEXT, [MatchId] TEXT, [LastModifiedTime] DATETIME NOT NULL, [ExpirationTime] DATETIME NOT NULL, '
+            '[Payload] BLOB, [Priority] INT, [IsLocalOnly] INT, [PlatformDeviceId] TEXT, [CreatedInCloud] DATETIME, '
+            '[StartTime] DATETIME, [EndTime] DATETIME)')
+def act(i, appid, typ, payload, start, end):
+    con.execute('INSERT INTO Activity VALUES (?,?,NULL,NULL,?,1,NULL,NULL,NULL,NULL,?,?,?,1,1,NULL,0,?,?)',
+                (bytes([i]) * 16, json.dumps(appid), typ, end, end + 86400, json.dumps(payload).encode(), start, end))
+act(1, [{'application': 'C:\\Users\\bob\\AppData\\Local\\Temp\\rclone.exe', 'platform': 'x_exe_path'},
+        {'application': 'rclone.exe', 'platform': 'packageId'}], 6,
+    {'type': 'UserEngaged', 'activeDurationSeconds': 345, 'appDisplayName': 'rclone'}, 1700001000, 1700001345)
+act(2, [{'application': 'Microsoft.Windows.Notepad', 'platform': 'packageId'},
+        {'application': '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\notepad.exe', 'platform': 'x_exe_path'}], 5,
+    {'displayText': 'passwords.txt', 'appDisplayName': 'Notepad', 'description': 'C:\\Users\\bob\\Desktop\\passwords.txt'},
+    1700002000, 0)
+con.commit(); con.close()
+
+# --- pca: Windows 11 PCA text files in both encodings the write-ups report
+# (UTF-16LE without BOM, and ANSI cp1252), plus a line of unknown shape --------
+pcad = os.path.join(pfx, 'drive_c', 'windows', 'appcompat', 'pca')
+os.makedirs(pcad, exist_ok=True)
+with open(os.path.join(pcad, 'PcaAppLaunchDic.txt'), 'wb') as f:
+    f.write(('C:\\Users\\bob\\AppData\\Local\\Temp\\stage2.exe|2024-03-05 08:09:10.123\r\n'
+             'C:\\Program Files\\Notepad++\\notepad++.exe|2024-03-04 07:00:00.000\r\n').encode('utf-16-le'))
+with open(os.path.join(pcad, 'PcaGeneralDb0.txt'), 'wb') as f:
+    f.write(('2024-03-05 08:09:11.000|2|C:\\Tools\\caf\xe9.exe|Caf\xe9 tool|ACME|1.2.3|0006aa|0\r\n'
+             'something unexpected here\r\n').encode('cp1252'))
+
 # --- rdp: outgoing Remote Desktop history ---------------------------------------
 T = r'HKCU\Software\Microsoft\Terminal Server Client'
 reg(T + r'\Default', '/v', 'MRU0', '/t', 'REG_SZ', '/d', '10.10.5.21')
@@ -398,6 +432,12 @@ checks = [
                              ('198.51.100.7', 'visited a bare IP address'), ('tool v2.ps1', 'downloaded from a bare IP address'),
                              ('"title":"Example"', None)],
      ['report.pdf', 'Example news', '"title":"Example"']),
+    (['activities', '--json'], [('rclone.exe', 'application in a user-writable dir'), ('"focus_seconds":345', None),
+                                ('passwords.txt', '"kind":"opened"'), ('{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}', None)],
+     ['notepad.exe']),
+    (['pca', '--json'], [('stage2.exe', 'ran from a user-writable dir'), ('"time":"2024-03-05 08:09:10"', None),
+                         ('café.exe', '"vendor":"ACME"'), ('"raw":"something unexpected here"', None)],
+     ['notepad++.exe', 'café.exe']),
     (['rdp', '--json'], [('"source":"Default","position":0', '"host":"10.10.5.21"'),
                          ('fileserver01.corp.example', '"position":1'),
                          ('"source":"Servers"', 'CORP\\\\svc_backup'), ('"certificate_accepted":true', None)], []),
@@ -872,13 +912,60 @@ try:
 except Exception as e:
     print('FAIL timeline --root check:', e, out[:200]); fails += 1
 
+# usn / mft: a hand-built $MFT (Users\bob\Downloads) and change journal:
+# invoice.pdf created and renamed to invoice.exe (flagged), tool.ps1 deleted
+# (flagged), notes.txt created (not flagged); --mft rebuilds the folder.
+import ntfswrite as nw
+ntd = os.path.join(pfx, 'drive_c', 'ntfs'); os.makedirs(ntd, exist_ok=True)
+T0 = 133500000000000000
+ents = {5: dict(name='.', parent=5, dir=True, seq=5, parent_seq=5),
+        40: dict(name='Users', parent=5, parent_seq=5, dir=True, seq=1),
+        41: dict(name='bob', parent=40, dir=True, seq=1),
+        42: dict(name='Downloads', parent=41, dir=True, seq=3),
+        50: dict(name='invoice.exe', parent=42, parent_seq=3, seq=2, size=4096,
+                 si=[T0 - 10**15, T0, T0, T0], fn=[T0, T0, T0, T0])}
+with open(os.path.join(ntd, 'MFT'), 'wb') as f:
+    f.write(nw.mft(ents, 64))
+dl = 42 | (3 << 48)
+with open(os.path.join(ntd, 'J'), 'wb') as f:
+    f.write(nw.usn([(50 | (2 << 48), dl, T0, 0x100, 'invoice.pdf'),
+                    (50 | (2 << 48), dl, T0 + 10, 0x1000, 'invoice.pdf'),
+                    (50 | (2 << 48), dl, T0 + 10, 0x2000, 'invoice.exe'),
+                    (51 | (1 << 48), dl, T0 + 20, 0x80000200, 'tool.ps1'),
+                    (52 | (1 << 48), dl, T0 + 30, 0x100, 'notes.txt'),
+                    (53 | (1 << 48), 99 | (7 << 48), T0 + 40, 0x100, 'lost.txt')]))
+rc, out, err = wine([exe, 'usn', r'C:\ntfs\J', '--mft', r'C:\ntfs\MFT', '--json'])
+try:
+    ur = json.loads(out)
+    fl = {r['name']: r['reason'] for r in ur if r['suspicious']}
+    folders = {r['name']: r['folder'] for r in ur}
+    if fl != {'invoice.exe': 'renamed into a program or script', 'tool.ps1': 'program or script deleted'}:
+        print(f'FAIL usn: flags {fl}'); fails += 1
+    elif folders.get('notes.txt') != '\\Users\\bob\\Downloads' or 'reused or missing' not in folders.get('lost.txt', ''):
+        print(f'FAIL usn --mft: folders {folders}'); fails += 1
+    elif not any(r['old_name'] == 'invoice.pdf' for r in ur if r['name'] == 'invoice.exe'):
+        print('FAIL usn: old name not paired with the new one'); fails += 1
+    else:
+        print('checked usn --mft --json  (rename into exe and deleted script flagged, folders from the $MFT)')
+except Exception as e:
+    print('FAIL usn check:', e, out[:200]); fails += 1
+rc, out, err = wine([exe, 'mft', r'C:\ntfs\MFT', '--timestomp', '--json'])
+try:
+    mr = json.loads(out)
+    if [r['path'] for r in mr] != ['\\Users\\bob\\Downloads\\invoice.exe']:
+        print(f'FAIL mft (synthetic): {mr}'); fails += 1
+    else:
+        print('checked mft --timestomp  (synthetic $MFT: backdated invoice.exe listed with its path)')
+except Exception as e:
+    print('FAIL mft synthetic check:', e, out[:200]); fails += 1
+
 # sweep: one valid JSON document with every check as a key; checks that
 # cannot run under wine (WMI, event logs) must be null or empty, not broken.
 rc, out, err = wine([exe, 'sweep', '--json'], timeout=600)
 try:
     d = json.loads(out)
     want = ['posture', 'hunt', 'hidden', 'net', 'autoruns', 'services', 'tasks', 'taskcache',
-            'firewall', 'prefetch', 'defender', 'wmi', 'users', 'comhijack', 'bits', 'pshistory', 'recyclebin', 'browser', 'events']
+            'firewall', 'prefetch', 'pca', 'defender', 'wmi', 'users', 'comhijack', 'bits', 'pshistory', 'recyclebin', 'browser', 'events']
     missing = [k for k in want if k not in d]
     if missing:
         print(f'FAIL sweep: missing keys {missing}'); fails += 1

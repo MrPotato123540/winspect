@@ -21,16 +21,16 @@ jobs:
           git diff --exit-code src/usage.c || { echo "src/usage.c is stale: run python3 tools/gen_usage.py"; exit 1; }
       - name: Build + run helper tests
         run: |
-          SRC="src/md5.c src/jsonutil.c src/ioc.c src/entropy.c src/pecksum.c src/imphash_ords.c src/pfparse.c src/artparse.c src/capa.c src/lnkparse.c src/rights.c src/destlist.c src/shellitem.c src/jsonmini.c src/sqlite.c"
+          SRC="src/md5.c src/jsonutil.c src/ioc.c src/entropy.c src/pecksum.c src/imphash_ords.c src/pfparse.c src/artparse.c src/capa.c src/lnkparse.c src/rights.c src/destlist.c src/shellitem.c src/jsonmini.c src/sqlite.c src/mft.c src/usn.c"
           cc -I inc -Wall -Wextra -std=c11 $SRC tests/test_util.c -o test_util -lm
           ./test_util
       - name: Same tests + parser fuzz under AddressSanitizer / UBSan
         run: |
           SAN="-g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all"
-          SRC="src/md5.c src/jsonutil.c src/ioc.c src/entropy.c src/pecksum.c src/imphash_ords.c src/pfparse.c src/artparse.c src/capa.c src/lnkparse.c src/rights.c src/destlist.c src/shellitem.c src/jsonmini.c src/sqlite.c"
+          SRC="src/md5.c src/jsonutil.c src/ioc.c src/entropy.c src/pecksum.c src/imphash_ords.c src/pfparse.c src/artparse.c src/capa.c src/lnkparse.c src/rights.c src/destlist.c src/shellitem.c src/jsonmini.c src/sqlite.c src/mft.c src/usn.c"
           cc -I inc -std=c11 $SAN $SRC tests/test_util.c -o test_util_san -lm
           ./test_util_san
-          cc -I inc -std=c11 $SAN src/ioc.c src/pfparse.c src/artparse.c src/lnkparse.c src/rights.c src/capa.c src/cfb.c src/destlist.c src/regf.c src/shellitem.c src/jsonmini.c tests/fuzz_parsers.c -o fuzz_parsers
+          cc -I inc -std=c11 $SAN src/ioc.c src/pfparse.c src/artparse.c src/lnkparse.c src/rights.c src/capa.c src/cfb.c src/destlist.c src/regf.c src/shellitem.c src/jsonmini.c src/usn.c tests/fuzz_parsers.c -o fuzz_parsers
           ./fuzz_parsers 300000
           # Compound-file reader: random files from tests/wine/cfbwrite.py must
           # read back byte-identical (sizes + MD5 per stream).
@@ -106,6 +106,33 @@ jobs:
           cc -I inc -std=c11 $SAN src/evtx.c tests/fuzz_evtx.c -o fuzz_evtx
           ./fuzz_evtx evtxref/System.evtx 2000
           ./fuzz_evtx evtxref/System2.evtx 1000
+      - name: $MFT reader vs plaso test data + fuzz
+        # plaso's test_data/MFT (a Windows XP volume; data only, pinned
+        # commit): paths of a regular, a deleted and an orphaned file and an
+        # Object ID's v1 time / MAC as plaso's NTFS parser tests assert, then
+        # the reader is fuzzed with corrupted runs of real records.
+        run: |
+          curl -sSfL -o MFT "https://raw.githubusercontent.com/log2timeline/plaso/ee5a0ab4f7af07f61b0554ba8edc0700514efc5a/test_data/MFT"
+          SAN="-g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all"
+          cc -I inc -std=c11 $SAN src/mft.c tests/mft_dump.c -o mft_dump
+          python3 -I tests/mft_check.py ./mft_dump MFT
+          # $UsnJrnl:$J records from the same project (19 records, first one asserted by its tests)
+          curl -sSfL -o UsnJrnl.raw "https://raw.githubusercontent.com/log2timeline/plaso/ee5a0ab4f7af07f61b0554ba8edc0700514efc5a/test_data/UsnJrnl.raw"
+          cc -I inc -std=c11 $SAN src/usn.c tests/usn_dump.c -o usn_dump
+          python3 -I tests/usn_check.py ./usn_dump UsnJrnl.raw
+          cc -I inc -std=c11 $SAN src/mft.c tests/fuzz_mft.c -o fuzz_mft
+          ./fuzz_mft MFT 1000
+      - name: ESE reader (SRUM) vs plaso test data + fuzz
+        # plaso's test_data/SRUDB.dat (data only, pinned commit): the record
+        # count over the three SRUM tables and the rows plaso's SRUM plugin
+        # test asserts; then corrupted copies under ASan/UBSan.
+        run: |
+          curl -sSfL -o SRUDB.dat "https://raw.githubusercontent.com/log2timeline/plaso/ee5a0ab4f7af07f61b0554ba8edc0700514efc5a/test_data/SRUDB.dat"
+          SAN="-g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all"
+          cc -I inc -std=c11 $SAN src/esedb.c tests/ese_dump.c -o ese_dump
+          python3 -I tests/srum_check.py ./ese_dump SRUDB.dat
+          cc -I inc -std=c11 $SAN src/esedb.c tests/fuzz_ese.c -o fuzz_ese
+          ./fuzz_ese SRUDB.dat 60 SruDbIdMapTable "{973F5D5C-1D90-4944-BE8E-24B94231A174}" "{DD6636C4-8929-4683-974E-22C046A43763}"
       - name: Registry hive reader vs real hives (regipy test data)
         # Real NTUSER.DAT / SYSTEM / SOFTWARE / Amcache.hve files from the
         # regipy project (data only, pinned commit). Header fields, key/value
@@ -157,6 +184,10 @@ jobs:
             curl -sSfL -o "evtxref/$f" "https://raw.githubusercontent.com/log2timeline/plaso/ee5a0ab4f7af07f61b0554ba8edc0700514efc5a/test_data/evtx/$f"
           done
           python3 tests/wine/evtxfiles.py ./winspect.exe evtxref
+          curl -sSfL -o MFT "https://raw.githubusercontent.com/log2timeline/plaso/ee5a0ab4f7af07f61b0554ba8edc0700514efc5a/test_data/MFT"
+          python3 tests/wine/mftfile.py ./winspect.exe MFT
+          curl -sSfL -o SRUDB.dat "https://raw.githubusercontent.com/log2timeline/plaso/ee5a0ab4f7af07f61b0554ba8edc0700514efc5a/test_data/SRUDB.dat"
+          python3 tests/wine/srumfile.py ./winspect.exe SRUDB.dat
           # Offline-hive mode (--hive / hive) on real Windows hives
           git clone -q https://github.com/mkorman90/regipy regipy
           git -C regipy checkout -q c6de929abc37d8315d1c31aba5e937db636f3303
@@ -205,7 +236,7 @@ jobs:
           }
           Smoke @()
           foreach ($args in @(@("pe",$f), @("pe",$f,"--json"), @("sign",$f), @("hash",$f), @("strings",$f,"--ioc"))) { Smoke $args }
-          foreach ($c in "list","services","drivers","autoruns","pipes","hosts","net","arp","routes","sessions","shares","certstore","tasks","objects","defender","usb","prefetch","shimcache","bam","firewall","taskcache","wmi","lnk","hunt","posture","events","hidden","sweep","userassist","mru","jumplist","rdp","sysinfo","programs","shellbags","pshistory","recyclebin","bits","comhijack","users","timeline","image","browser") { Smoke @($c); Smoke @($c,"--json") }
+          foreach ($c in "list","services","drivers","autoruns","pipes","hosts","net","arp","routes","sessions","shares","certstore","tasks","objects","defender","usb","prefetch","shimcache","bam","firewall","taskcache","wmi","lnk","hunt","posture","events","hidden","sweep","userassist","mru","jumplist","rdp","sysinfo","programs","shellbags","pshistory","recyclebin","bits","comhijack","users","timeline","image","browser","pca","activities") { Smoke @($c); Smoke @($c,"--json") }
           foreach ($c in "inspect","threads","handles","regions","token","secinfo","modules","verify","triage") { Smoke @($c,"$p"); Smoke @($c,"$p","--json") }
           foreach ($args in @(@("modules","$p","--unsigned"), @("firewall","--inbound","--allow","--active","--csv"), @("autoruns","--csv"), @("objects","--global","--type","Mutant"), @("drivers","--sig"), @("services","--flagged"), @("prefetch","--dir","C:\Windows\Prefetch","--csv"), @("streams","C:\Windows\System32\drivers\etc"), @("lnk","--json"), @("autoruns","--sig"), @("services","--sig","--flagged"), @("events","--summary"), @("prefetch","--flagged"), @("hunt","--all"), @("handles","--find","ntdll","--type","File"), @("hive","C:\Windows\System32\config\SYSTEM"), @("amcache"), @("rdp"), @("rdp","--json"))) { Smoke $args }
           Write-Host "all commands ran without crashing"
@@ -303,6 +334,20 @@ jobs:
           $ok = ($off  | ForEach-Object { "$($_.time)|$($_.id)|$($_.summary)" }) -join "`n"
           if ($lk -ne $ok) { throw "events --evtx differs from live: $(@($live).Count) live vs $(@($off).Count) offline" }
           Write-Host "events --evtx matches live ($(@($live).Count) System rows)"
+          # usn --live: a file renamed from .txt to .exe and a deleted .ps1
+          # must show up flagged in the live change journal of C:.
+          $ud = Join-Path $env:TEMP "wsusn"
+          New-Item -ItemType Directory -Force -Path $ud | Out-Null
+          Set-Content (Join-Path $ud "wsusn_note.txt") "x"
+          Rename-Item (Join-Path $ud "wsusn_note.txt") "wsusn_note.exe"
+          Set-Content (Join-Path $ud "wsusn_tool.ps1") "x"
+          Remove-Item (Join-Path $ud "wsusn_tool.ps1")
+          $uj = & $exe usn --live C: --find wsusn_ --flagged --json | ConvertFrom-Json
+          Remove-Item -Recurse -Force $ud
+          if (-not ($uj | Where-Object { $_.name -eq "wsusn_note.exe" -and $_.reason -like "*renamed into*" -and $_.old_name -eq "wsusn_note.txt" })) {
+            throw "usn --live: rename into .exe not flagged: $($uj | ConvertTo-Json -Compress)" }
+          if (-not ($uj | Where-Object { $_.name -eq "wsusn_tool.ps1" -and $_.folder -like "*\wsusn" })) {
+            throw "usn --live: deleted .ps1 not flagged with its folder: $($uj | ConvertTo-Json -Compress)" }
           # bits: a helper creates a SUSPENDED job (bare-IP source, notify
           # command line), never resumed, cancelled when it reads a line. The
           # notify command must be the reason given.
@@ -374,7 +419,7 @@ jobs:
           smoke() { "$exe" "$@" >/dev/null 2>&1; rc=$?; if [ $rc -gt 1 ]; then echo "crash: $* => $rc"; exit 1; fi; }
           smoke
           smoke pe "$f"; smoke pe "$f" --json; smoke sign "$f"; smoke hash "$f"; smoke strings "$f" --ioc
-          for c in list services drivers autoruns pipes hosts net arp routes sessions shares certstore tasks objects defender usb prefetch shimcache bam firewall taskcache wmi lnk hunt posture events hidden sweep userassist mru jumplist rdp sysinfo programs shellbags pshistory recyclebin bits comhijack users timeline browser; do smoke $c; smoke $c --json; done
+          for c in list services drivers autoruns pipes hosts net arp routes sessions shares certstore tasks objects defender usb prefetch shimcache bam firewall taskcache wmi lnk hunt posture events hidden sweep userassist mru jumplist rdp sysinfo programs shellbags pshistory recyclebin bits comhijack users timeline browser pca activities; do smoke $c; smoke $c --json; done
           for c in inspect threads handles regions token secinfo modules verify triage; do smoke $c "$p"; smoke $c "$p" --json; done
           smoke modules "$p" --unsigned; smoke firewall --inbound --allow --active --csv; smoke autoruns --csv; smoke objects --global --type Mutant; smoke drivers --sig; smoke services --flagged; smoke streams /c/Windows/System32/drivers/etc; smoke lnk --json; smoke autoruns --sig; smoke services --sig --flagged; smoke events --summary; smoke prefetch --flagged; smoke hunt --all; smoke handles --find ntdll --type File; smoke hive /c/Windows/System32/config/SYSTEM; smoke amcache; smoke usb --csv; smoke rdp; smoke rdp --json
           echo "all commands ran without crashing"

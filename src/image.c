@@ -47,6 +47,9 @@
 #include "comhijack.h"
 #include "events.h"
 #include "browser.h"
+#include "pca.h"
+#include "activities.h"
+#include "srum.h"
 
 #include <windows.h>
 #include <stdio.h>
@@ -241,6 +244,8 @@ int cmd_image(int argc, char **argv)
     }
     if (has_amc) JOB("amcache", cmd_amcache, NULL, RULE_FLAGGED, NULL, amc);
     if (has_pf)  JOB("prefetch", cmd_prefetch, NULL, RULE_FLAGGED, NULL, "--dir", pf);
+    if (ip.pca[0]) JOB("pca", cmd_pca, NULL, RULE_FLAGGED, NULL, ip.pca);
+    if (ip.srum[0]) JOB("srum", cmd_srum, NULL, RULE_FLAGGED, NULL, ip.srum, "--summary");
     if (has_tk)  JOB("tasks", cmd_tasks, NULL, RULE_FLAGGED, NULL, "--dir", tk);
     if (has_rb)  JOB("recyclebin", cmd_recyclebin, NULL, RULE_FLAGGED, NULL, rb);
     if (nev) {
@@ -270,6 +275,7 @@ int cmd_image(int argc, char **argv)
         char *sl = strrchr(home, '\\');
         if (sl) *sl = 0;
         JOB("browser", cmd_browser, NULL, RULE_FLAGGED, NULL, "--home", home);
+        JOB("activities", cmd_activities, NULL, RULE_FLAGGED, NULL, "--home", home);
         for (int i = 0; i < nj; i++) {
             jm_node *doc = run_json(jobs[i].fn, jobs[i].args);
             if (doc) collect(&fl, jobs[i].name, p->name, doc, jobs[i].list, jobs[i].rule, jobs[i].fixed);

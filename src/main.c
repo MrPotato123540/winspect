@@ -94,6 +94,11 @@
 #include "timeline.h"
 #include "image.h"
 #include "browser.h"
+#include "pca.h"
+#include "activities.h"
+#include "mftcmd.h"
+#include "usncmd.h"
+#include "srum.h"
 #include "tasks.h"
 
 // cmd_modules lives in modules.c: a live process's loaded modules
@@ -239,6 +244,10 @@ static const struct {
     { "comhijack",cmd_comhijack,"per-user COM classes overriding HKLM ones",  "security" },
     { "bits",     cmd_bits,     "BITS jobs: files, owner, notify command",   "security" },
     { "recyclebin", cmd_recyclebin, "Recycle Bin: deleted files, owner, time", "file" },
+    { "srum",     cmd_srum,     "SRUM: network bytes and app use per hour",   "file" },
+    { "usn",      cmd_usn,      "NTFS change journal copy ($UsnJrnl:$J)",     "file" },
+    { "mft",      cmd_mft,      "NTFS $MFT copy: paths, times, timestomping", "file" },
+    { "activities", cmd_activities, "Windows 10 Timeline: app use and documents", "file" },
     { "browser",  cmd_browser,  "browser history and downloads (Chromium, Firefox)", "file" },
     { "pshistory", cmd_pshistory, "PowerShell command history (PSReadLine)", "file" },
     { "shellbags", cmd_shellbags, "folders browsed in Explorer (ShellBags)", "file" },
@@ -281,6 +290,7 @@ static const struct {
     { "certstore",cmd_certstore,"certificates in a system store (Root)",    "system" },
     { "objects",  cmd_objects,  "named kernel objects (BaseNamedObjects)",  "system" },
     { "usb",      cmd_usb,      "USB storage history (Enum\\USBSTOR)",       "system" },
+    { "pca",      cmd_pca,      "PCA launch records (Windows 11 22H2+)",      "system" },
     { "prefetch", cmd_prefetch, "execution evidence from Prefetch (*.pf)",   "system" },
     { "shimcache",cmd_shimcache,"AppCompatCache entries (programs seen)",    "system" },
     { "bam",      cmd_bam,      "BAM: last run per program per user",        "system" },

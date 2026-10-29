@@ -130,6 +130,52 @@ static const struct { const char *name, *text; } usage_table[] = {
         "flagged. Other users' folders need admin. A file or folder argument reads a\n"
         "copy (e.g. from a disk image). Read-only. Usage:\n"
         "  winspect recyclebin [<$I file | INFO2 | folder>] [--flagged] [--json | --csv]\n" },
+    { "srum",
+        "winspect srum - System Resource Usage Monitor (SRUDB.dat, an ESE database\n"
+        "read with winspect's own reader): per application and user, hour by hour,\n"
+        "the bytes sent and received on each network interface (--network, the\n"
+        "default), CPU / disk use (--apps) and network connection spans\n"
+        "(--connectivity). --summary adds the network bytes up per application,\n"
+        "largest upload first - the quickest way to spot data leaving. Flags\n"
+        "programs in user-writable folders that sent data. The live file\n"
+        "(%SystemRoot%\\System32\\sru\\SRUDB.dat) is locked: pass a copy (e.g.\n"
+        "esentutl /y ... /vss). Read-only. Usage:\n"
+        "  winspect srum <SRUDB.dat> [--network | --apps | --connectivity | --summary]\n"
+        "                [--find <app text>] [--flagged] [--json | --csv]\n" },
+    { "usn",
+        "winspect usn - the NTFS change journal ($Extend\\$UsnJrnl:$J, copied with a\n"
+        "triage tool): every create, delete, rename, data change... with time, file\n"
+        "name and reasons, oldest first. With --mft the folder of each entry is\n"
+        "rebuilt from a copy of the same volume's $MFT. Flags deleted programs /\n"
+        "scripts and files renamed into a program / script name (pdf -> exe).\n"
+        "--find filters by name, --reason by reason words (create, delete, rename,\n"
+        "data, security, close...). --live <drive> reads the running system's\n"
+        "journal and folder names through the documented FSCTL_QUERY_USN_JOURNAL /\n"
+        "FSCTL_READ_USN_JOURNAL / FSCTL_ENUM_USN_DATA (administrator). Read-only.\n"
+        "Usage:\n"
+        "  winspect usn <$J file> [--mft <$MFT>] | --live <drive> [--find <text>] [--reason <words>] [--flagged] [--json | --csv]\n" },
+    { "mft",
+        "winspect mft - files from a copied NTFS $MFT (collected with a triage tool\n"
+        "or taken from a mounted image): full path (deleted files included, broken\n"
+        "chains under $Orphan), size, the four $STANDARD_INFORMATION times and the\n"
+        "$FILE_NAME creation time, and the Object ID's creation time / MAC when\n"
+        "there is one. --timestomp lists only files whose $SI creation time is\n"
+        "earlier than their $FN creation time - a timestomping CANDIDATE list, not\n"
+        "a verdict: files from install media and archives look the same (on a real\n"
+        "XP image a third of all files did). --find filters by path text,\n"
+        "--deleted keeps records that are no longer in use. Read-only. Usage:\n"
+        "  winspect mft <$MFT file> [--find <text>] [--deleted] [--timestomp] [--json | --csv]\n" },
+    { "activities",
+        "winspect activities - Windows 10 Timeline (ActivitiesCache.db under\n"
+        "%LOCALAPPDATA%\\ConnectedDevicesPlatform\\<account>\\): which application was\n"
+        "used when and for how long, and the documents it opened, read with\n"
+        "winspect's own SQLite reader. Rows: start / end time, the application (exe\n"
+        "path or app id), activity type (opened, in focus...), what was shown\n"
+        "(document, page) and the focus duration. Flags applications run from\n"
+        "user-writable folders. Default: the current user; --home reads one user\n"
+        "folder (e.g. in a mounted image); a file argument reads a copied\n"
+        "database. Windows 11 no longer records new activity. Read-only. Usage:\n"
+        "  winspect activities [<ActivitiesCache.db> | --home <user folder>] [--flagged] [--json | --csv]\n" },
     { "browser",
         "winspect browser - web history and downloads from Chrome, Edge, Brave\n"
         "(Chromium \"History\" databases, every profile) and Firefox (places.sqlite\n"
@@ -346,7 +392,7 @@ static const struct { const char *name, *text; } usage_table[] = {
     { "sweep",
         "winspect sweep - one-shot machine triage: runs the system-wide checks in\n"
         "\"findings only\" mode (posture --warn, hunt, hidden, net, autoruns/services/tasks/\n"
-        "taskcache/firewall/prefetch --flagged, defender, wmi, users/comhijack/bits/recyclebin --flagged,\n"
+        "taskcache/firewall/prefetch/pca --flagged, defender, wmi, users/comhijack/bits/recyclebin --flagged,\n"
         "pshistory / browser --all-users --flagged, events) and prints them as one\n"
         "report. With --json the result is a single object, one key per check; a\n"
         "check that could not run (e.g. needs elevation) is null instead of breaking\n"
@@ -465,6 +511,15 @@ static const struct { const char *name, *text; } usage_table[] = {
         "tied to the serial. A standard DFIR question (\"which USB sticks were\n"
         "plugged in, and when?\"). Read-only.\n"
         "Usage: winspect usb [--hive <SYSTEM>] [--json | --csv]\n" },
+    { "pca",
+        "winspect pca - Program Compatibility Assistant records (Windows 11 22H2+):\n"
+        "C:\\Windows\\appcompat\\pca\\PcaAppLaunchDic.txt (full path + last launch time,\n"
+        "UTC) and PcaGeneralDb0/1.txt (time, run status, path, description, vendor,\n"
+        "version, program id). Execution evidence that survives Prefetch being\n"
+        "disabled. Lines whose shape does not match the documented layout are shown\n"
+        "raw instead of being guessed at. Flags programs in user-writable folders.\n"
+        "A folder argument reads a copy (e.g. from a disk image). Read-only. Usage:\n"
+        "  winspect pca [<folder>] [--flagged] [--json | --csv]\n" },
     { "prefetch",
         "winspect prefetch - evidence of execution from %SystemRoot%\\Prefetch\\*.pf:\n"
         "executable name, run count, last run time(s) and - from the file's own\n"
