@@ -105,9 +105,9 @@ int main(int argc, char** argv) {
 
 ### `strcmp` ile doğrusal tarama, neden?
 
-Sadece ~10 komut var. "Daha hızlı" diye hash tablosu ya da ikili arama kurmak
-burada mantıksız: 10 elemanlık bir listede `strcmp` döngüsü zaten anında biter ve
-çok daha basittir. Bu arama program başına **bir kez** çalışır, hız kritik değil.
+Bu bölüm yazıldığında ~10 komut vardı; bugün 59 var ve gerekçe hâlâ geçerli.
+"Daha hızlı" diye hash tablosu ya da ikili arama kurmak burada mantıksız: 59
+elemanlık bir listede `strcmp` döngüsü zaten anında biter ve çok daha basittir. Bu arama program başına **bir kez** çalışır, hız kritik değil.
 Basitlik > erken optimizasyon.
 
 ### `argc - 2, argv + 2`: argüman kaydırma

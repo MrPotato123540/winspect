@@ -25,8 +25,13 @@ bir modüle çıkar ve Linux'ta test et.** Bugün bu modüller:
 | `artparse.c` (posture) | Sertleştirme kuralı değerlendirmesi |
 | `rights.c` | Nesne türüne göre erişim maskesi adları (kesme güvenliği dahil) |
 | `artparse.c` (events) | Olay XML'inden alan çekme, entity çözümü, kesik XML |
+| `destlist.c`, `shellitem.c` | Jump List DestList sürümleri; kabuk öğeleri (kök, sürücü, dosya, ağ, delege), DOS zamanları |
+| `artparse.c` (kalıcılık) | exefile ve zaman sağlayıcısı stok değerleri, ağ sağlayıcıları, sistem adlarının taklidi, COM sunucu yolu karşılaştırması, BITS kuralları |
+| `artparse.c` (izler) | Amcache SHA-1, UserAssist, MRU listeleri, Geri Dönüşüm Kutusu (`$I` v1/v2, INFO2), SAM `F` kaydı ve makine SID'i, hesap kuralları, görev XML'i, sertifika blob'ları |
+| `ioc.c` (PowerShell) | PSReadLine satırı kuralları (şifreli komut, indirme, AMSI/Defender, kimlik bilgisi dökümü, günlük silme, kalıcılık) |
+| `jsonmini.c` | Her değer türü, kaçışlar ve vekil çiftleri, 18 bozuk örnek, derinlik sınırı |
 
-Toplam **217** doğrulama. Her biri pozitif durum **ve** kenar durumları (kesik
+Toplam **475** doğrulama. Her biri pozitif durum **ve** kenar durumları (kesik
 buffer, sınır dışı offset, eski format, benzer ama farklı isim) içerir.
 
 ## Katman 2 — Wine altında smoke test (`tests/wine/wsmoke.py`)
@@ -193,17 +198,38 @@ geliyordu: LnkParse3 `0x2E` öğelerini GUID ile gösteriyor, biz bilinen adıyl
 Ham GUID alanı eklendi ve 34/34 öğe düzeyinde de eşleşiyor. LinkInfo taşımayan
 kısayolların hedefi artık IDList'ten kuruluyor (LECmd'in yaptığı gibi).
 
+Daha sonra eklenen karşılaştırmalar (hepsi yalnızca o projelerin **test
+verisini** kullanır, kodlarını çalıştırmaz):
+
+| Ayrıştırıcı | Kahin | Sonuç |
+|---|---|---|
+| Jump List DestList | JumpList projesinin Win7–10 dosyaları | ilk turda 2 hata bulundu, düzeltildi |
+| Hive okuyucu, ShimCache, BAM, UserAssist, Amcache, ShellBags | regipy'nin test hive'ları ve doğrulama değerleri | sayı farkları regipy'nin çift saymasından çıktı (belge 19) |
+| SAM (`users --sam`) | regipy `samparse` / `local_sid` doğrulama durumları | hepsi tuttu |
+| Geri Dönüşüm Kutusu | plaso'nun `$I` ve `INFO2` test dosyaları ve testlerindeki değerler | hepsi tuttu |
+| Çevrimdışı sertifikalar | `openssl x509` + `hashlib` | 23/23 |
+| `jsonmini` | Python `json` modülü, rastgele binlerce belge (`tests/jm_diff.py`) | bir vekil çifti hatası bulundu, düzeltildi |
+| Test hive yazıcısı | C okuyucusu, rastgele ağaçlar (`tests/regf_roundtrip.py`) | 0 fark |
+
 ## CI'da hepsi
 
 `.github/workflows/ci.yml` üç işi paralel koşar:
 
-1. **unit** (Linux) — birim testleri (normal + ASan/UBSan) ve sanitizer fuzz,
-2. **wine** (Linux) — MinGW çapraz derleme + fixture'lar + smoke,
-3. **build** (Windows, MSVC + MinGW) — gerçek Windows'ta derleme + her komutun
-   smoke testi (yönetici hakkıyla; prefetch/shimcache gibi komutlar burada
-   gerçek veri okur) + wine'ın taklit edemediği şeyler için **fonksiyonel
-   kontroller**: gerçek NTFS'te alternate data stream ve Mark-of-the-Web
-   (`streams`), gerçek olay günlüğü (`events`).
+1. **unit** (Linux): yardım metni senkron mu, birim testleri (normal +
+   ASan/UBSan), sanitizer fuzz, CFB ve hive gidiş-dönüşleri, yukarıdaki
+   bütün diferansiyel karşılaştırmalar (veriler sabit commit'lere iğneli).
+2. **wine** (Linux): MinGW çapraz derleme, fixture'lar, smoke, fuzz ve gerçek
+   hive'larla çevrimdışı modlar.
+3. **build** (Windows, MSVC + MinGW): gerçek Windows'ta derleme, her komutun
+   smoke testi (yönetici hakkıyla) ve wine'ın taklit edemediği fonksiyonel
+   kontroller: NTFS akışları ve Mark-of-the-Web, Security günlüğünde parola
+   püskürtme özeti, açık tutulan bir dosyanın `handles --find` ile bulunması,
+   canlı kayıt defteri ile `reg save` kopyasının aynı sonucu vermesi, askıya
+   alınmış bir BITS işi, kullanıcı başına COM kaydı, `$` ile biten devre dışı
+   bir hesap. Her geçici değişiklik adımın sonunda geri alınır.
+
+Not: CI dosyası hazır ama henüz gerçek bir GitHub Actions koşusu görmedi.
+Windows'a özgü kontrollerin ilk gerçek sonucu o koşuda alınacak.
 
 ## Dürüst sınırlar
 

@@ -43,16 +43,31 @@ API'ler ve iyi bilinen yapılarla çalışırız.
     Mark-of-the-Web.
   - `lnkparse.c` — .lnk ([MS-SHLLINK]) ayrıştırıcı.
   - `cfb.c` — Compound File ([MS-CFB]) okuyucu (Jump List'ler, MSI, eski Office).
+  - `destlist.c` — Jump List DestList akışı; `shellitem.c` — kabuk öğeleri
+    (ShellBags ve .lnk IDList yolları).
+  - `regf.c` — kayıt defteri hive dosyası okuyucusu; `regsrc.c` aynı kodun
+    canlı kayıt defteri ya da hive dosyasıyla çalışmasını sağlayan ince katman
+    (Windows'a bağlı, ama hive yolu taşınabilir `regf.c`'yi kullanır).
+  - `jsonmini.c` — küçük, sıkı JSON okuyucu (`timeline` diğer komutların
+    `--json` çıktısını bununla okur).
+  - `artparse.c` ayrıca: Geri Dönüşüm Kutusu (`$I`, `INFO2`), SAM `F` kaydı ve
+    makine SID'i, görev XML'i, sertifika blob'ları, COM sunucu yolu
+    karşılaştırması, BITS ve hesap kuralları.
   - `capa.c` — import yetenek kategorileri + packer section adları.
   - `rights.c` — nesne türüne göre erişim maskesi adları (secinfo + handles).
+  - `capture.c` — bir komutun stdout'unu yakalayıp metin olarak döndürür
+    (`sweep` ve `timeline` diğer komutları böyle çağırır).
+  - `res/winspect.manifest` — exe'ye gömülü manifest: süreç kod sayfası UTF-8
+    (aşağıda 3. desen).
   - `usage.c` — `winspect help <komut>` metinleri; başlık yorumlarından
     `tools/gen_usage.py` ile **üretilir**.
-  Yukarıdaki modüllerin hepsi **Windows başlığı içermez**: Linux'ta derlenip
-  test edilir ve sanitizer altında fuzz edilir.
+  `regsrc.c` ve `capture.c` dışındaki modüller **Windows başlığı içermez**:
+  Linux'ta derlenip test edilir ve sanitizer altında fuzz edilir.
 - `tests/test_util.c` — taşınabilir modüllerin host'ta koşan birim testleri;
   `tests/fuzz_parsers.c` — aynı modüllerin ASan/UBSan altında mutasyon fuzz'ı;
-  `tests/wine/` — gerçek `.exe`'nin wine altında smoke, fonksiyonel fixture ve
-  fuzz testleri. Ayrıntı: [17 — Test stratejisi](17-test-stratejisi.md).
+  `tests/wine/` — gerçek `.exe`'nin wine altında smoke, fonksiyonel fixture,
+  gerçek hive ve fuzz testleri; `tests/wine/regfwrite.py` çevrimdışı
+  fixture'lar için yalnızca testte kullanılan hive yazıcısı. Ayrıntı: [17 — Test stratejisi](17-test-stratejisi.md).
   Bir çekirdek mantığı modüle çıkarıp burada test etmek, Windows'ta çalıştıramadan
   doğruluğu kanıtlamanın yoludur.
 
@@ -93,17 +108,25 @@ API'ler ve iyi bilinen yapılarla çalışırız.
 
 ## Komut aileleri
 
-- **Statik dosya** (`pe`, `sign`, `strings`, `hash`, `lnk`, `streams`): dosyayı
+- **Statik dosya** (`pe`, `sign`, `strings`, `hash`, `streams`): dosyayı
   çalıştırmadan okur.
-- **Canlı process** (`list`, `inspect`, `modules`, `threads`, `handles`, `regions`,
-  `token`, `launch`): hedefi `OpenProcess` ile açıp user-mode okur.
-- **Güvenlik/triyaj** (`secinfo`, `verify`, `triage`, `ssn`, `hunt`, `hidden`,
-  `posture`, `firewall`, `taskcache`, `wmi`, `defender`, `events`, `sweep`):
-  erişim, güven, çelişki, sertleştirme ve tek komutla makine taraması.
-- **Sistem geneli** (`net`, `arp`, `routes`, `sessions`, `shares`, `services`,
-  `drivers`, `autoruns`, `tasks`, `pipes`, `hosts`, `certstore`, `objects`,
-  `usb`, `prefetch`, `shimcache`, `bam`): makine çapında görünümler ve DFIR
-  artefaktları.
+- **Canlı process** (`list`, `inspect`, `modules`, `threads`, `handles`,
+  `regions`, `token`, `secinfo`, `verify`, `triage`, `launch`, `ssn`, `net`):
+  hedefi `OpenProcess` ile açıp user-mode okur.
+- **Kalıcılık** (`autoruns`, `services`, `drivers`, `tasks`, `taskcache`,
+  `wmi`, `bits`, `comhijack`, `defender`, `firewall`, `certstore`,
+  `programs`): bir şeyi makinede tutan yerler.
+- **Etkinlik kanıtı** (`prefetch`, `amcache`, `shimcache`, `bam`,
+  `userassist`, `mru`, `jumplist`, `lnk`, `shellbags`, `recyclebin`,
+  `pshistory`, `rdp`, `usb`, `events`): ne çalıştı, ne açıldı, ne silindi.
+- **Makine ve hesaplar** (`sysinfo`, `users`, `posture`, `hunt`, `hidden`,
+  `hosts`, `arp`, `routes`, `sessions`, `shares`, `pipes`, `objects`, `hive`).
+- **Birleştiriciler** (`sweep`, `timeline`): diğer komutları süreç içinde
+  çalıştırıp çıktılarını tek rapora ya da tek zaman çizelgesine toplar.
+
+`winspect` (argümansız) ekranındaki dört başlık (file / process / security /
+system) daha kaba bir gruplamadır; yeni komutlar oraya en yakın başlıkla
+eklenir.
 
 ## İşaretleme ilkesi (bütün komutlarda)
 
