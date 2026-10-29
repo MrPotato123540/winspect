@@ -211,6 +211,26 @@ rc, out = run('certstore', '--software', hive('SOFTWARE'), '--store', 'AuthRoot'
 ca = json.loads(out) if rc == 0 else []
 check(len(ca) == 17 and all(c['thumbprint'].upper() == c['location'].rsplit('\\', 1)[-1] for c in ca),
       f'certstore --software AuthRoot: {len(ca)} certificates, key name = SHA-1 of the DER')
+# image: the regipy hives arranged as an installation (SYSTEM / SOFTWARE / SAM
+# under Windows\System32\config, one profile). Machine facts come from the
+# same values sysinfo / users are checked against above; the SOFTWARE hive's
+# Run key really holds c:\windows\system32\dllhost\svchost.exe.
+for n in ('SYSTEM', 'SOFTWARE', 'SAM', 'NTUSER.DAT', 'UsrClass.dat'):
+    hive(n)
+iroot = os.path.join(hdir, 'img')
+for sub in ('Windows/System32/config', 'Users/bob/AppData/Local/Microsoft/Windows'):
+    os.makedirs(os.path.join(iroot, sub), exist_ok=True)
+for n in ('SYSTEM', 'SOFTWARE', 'SAM'):
+    shutil.copy(os.path.join(hdir, n), os.path.join(iroot, 'Windows', 'System32', 'config', n))
+shutil.copy(os.path.join(hdir, 'NTUSER.DAT'), os.path.join(iroot, 'Users', 'bob', 'NTUSER.DAT'))
+shutil.copy(os.path.join(hdir, 'UsrClass.dat'), os.path.join(iroot, 'Users', 'bob', 'AppData', 'Local', 'Microsoft', 'Windows', 'UsrClass.dat'))
+rc, out = run('image', 'C:\\hives\\img', '--json')
+im = json.loads(out) if rc == 0 else {}
+check(im.get('computer') == 'WKS-WIN732BITA' and im.get('build') == '7601' and im.get('installed') == '2010-11-10 16:28:55',
+      f"image: machine facts from the regipy hives ({im.get('computer')}, build {im.get('build')})")
+check(any(f['source'] == 'autoruns' and 'dllhost\\svchost.exe' in f['detail'] and 'masquerading' in f['reason']
+          for f in im.get('findings', [])), 'image: masquerading svchost in the real SOFTWARE Run key is a finding')
+check(im.get('evidence', {}).get('profiles') == ['bob'], 'image: one user profile found')
 # comhijack offline: per-user COM classes in a real UsrClass.dat (OneDrive and
 # Dropbox register theirs per user, under AppData). Values were read from the
 # raw hive with tests/regf_dump.c; per-user-only classes must not be flagged.

@@ -729,6 +729,61 @@ if certs:
 else:
     print('skipped certstore offline check (openssl not installed)')
 
+# image: a whole (synthetic) offline Windows installation under C:\img2 -
+# hives from the test writer, a Prefetch file, a dropped task, a Recycle Bin
+# record and a PowerShell history - every planted item must come back as a
+# finding with its source (and user for per-user evidence); nothing benign.
+img = os.path.join(pfx, 'drive_c', 'img2')
+cfg = os.path.join(img, 'Windows', 'System32', 'config')
+for d in (cfg, os.path.join(img, 'Windows', 'Prefetch'), os.path.join(img, 'Windows', 'System32', 'Tasks'),
+          os.path.join(img, 'Users', 'bob', 'AppData', 'Local', 'Microsoft', 'Windows'),
+          os.path.join(img, 'Users', 'bob', 'AppData', 'Roaming', 'Microsoft', 'Windows', 'PowerShell', 'PSReadLine'),
+          os.path.join(img, '$Recycle.Bin', 'S-1-5-21-1-2-3-1001')):
+    os.makedirs(d, exist_ok=True)
+system_hive = K('ROOT', [], [
+    K('Select', [rw.Value('Current', rw.REG_DWORD, rw.dword(1))]),
+    K('ControlSet001', [], [K('Services', [], [
+        K('WsImgSvc', [rw.Value('ImagePath', rw.REG_EXPAND_SZ, rw.sz(r'C:\Users\Public\svc.exe')),
+                       rw.Value('Start', rw.REG_DWORD, rw.dword(2)), rw.Value('Type', rw.REG_DWORD, rw.dword(16)),
+                       rw.Value('ObjectName', rw.REG_SZ, rw.sz('LocalSystem'))])])])])
+with open(os.path.join(cfg, 'SYSTEM'), 'wb') as f:
+    f.write(rw.build(system_hive))
+_sh.copy(os.path.join(off, 'SOFTWARE'), os.path.join(cfg, 'SOFTWARE'))
+_sh.copy(os.path.join(off, 'SAM'), os.path.join(cfg, 'SAM'))
+ntu = K('ROOT', [], [K('Software', [], [K('Microsoft', [], [K('Windows', [], [K('CurrentVersion', [], [
+    K('Run', [rw.Value('Updater', rw.REG_SZ, rw.sz(r'C:\Users\bob\AppData\Local\Temp\upd.exe'))])])])])])])
+with open(os.path.join(img, 'Users', 'bob', 'NTUSER.DAT'), 'wb') as f:
+    f.write(rw.build(ntu))
+_sh.copy(os.path.join(off, 'UsrClass.dat'), os.path.join(img, 'Users', 'bob', 'AppData', 'Local', 'Microsoft', 'Windows', 'UsrClass.dat'))
+with open(os.path.join(img, 'Users', 'bob', 'AppData', 'Roaming', 'Microsoft', 'Windows', 'PowerShell', 'PSReadLine',
+                       'ConsoleHost_history.txt'), 'w', newline='') as f:
+    f.write('dir\r\nwevtutil cl Security\r\n')
+with open(os.path.join(img, 'Windows', 'Prefetch', 'EVIL.EXE-DEADBEEF.pf'), 'wb') as f:
+    f.write(make_pf())
+_sh.copy(os.path.join(pfx, 'drive_c', 'tasks_copy', 'Sub', 'Dropped'), os.path.join(img, 'Windows', 'System32', 'Tasks', 'Dropped'))
+_sh.copy(os.path.join(rbd, '$IAB12CD.exe'), os.path.join(img, '$Recycle.Bin', 'S-1-5-21-1-2-3-1001', '$IAB12CD.exe'))
+rc, out, err = wine([exe, 'image', r'C:\img2', '--json'], timeout=300)
+try:
+    im = json.loads(out)
+    got = {(x['source'], x['user']) for x in im['findings']}
+    want = {('users', ''), ('services', ''), ('prefetch', ''), ('tasks', ''), ('recyclebin', ''), ('autoruns', 'bob'),
+            ('comhijack', 'bob'), ('pshistory', 'bob')}
+    if certs:
+        want.add(('certstore', ''))
+    detail = ' '.join(x['detail'] for x in im['findings'])
+    if not want <= got:
+        print(f'FAIL image: missing findings {sorted(want - got)}; got {sorted(got)}'); fails += 1
+    elif 'HASHCANARY' in out:
+        print('FAIL image: SAM V content leaked'); fails += 1
+    elif not all(k in detail for k in ('svc.exe', 'EVIL.EXE', 'upd.exe', 'dropper.exe', 'wevtutil cl')):
+        print(f'FAIL image: finding details incomplete: {detail[:300]}'); fails += 1
+    elif im['evidence']['profiles'] != ['bob'] or not im['evidence']['sam']:
+        print(f"FAIL image: evidence summary wrong: {im['evidence']}"); fails += 1
+    else:
+        print(f"checked image --json  ({len(im['findings'])} findings, every planted item found)")
+except Exception as e:
+    print('FAIL image check:', e, out[:300]); fails += 1
+
 # sweep: one valid JSON document with every check as a key; checks that
 # cannot run under wine (WMI, event logs) must be null or empty, not broken.
 rc, out, err = wine([exe, 'sweep', '--json'], timeout=600)

@@ -61,6 +61,17 @@ static const struct { const char *name, *text; } usage_table[] = {
         "each item also shows its target, arguments and timestamps. Flags items that\n"
         "launch a script host or point into a user-writable dir. Read-only. Usage:\n"
         "  winspect jumplist [<file | folder>] [--json | --csv]\n" },
+    { "image",
+        "winspect image - triage of a Windows installation that is NOT running: a\n"
+        "mounted disk image, a copied system drive or a collection that keeps the\n"
+        "original folder layout. Give the root (the folder holding Windows\\ and\n"
+        "Users\\); winspect finds the registry hives, Amcache, Prefetch, scheduled\n"
+        "tasks, event logs, the Recycle Bin and every user's NTUSER.DAT,\n"
+        "UsrClass.dat and PowerShell history, runs each offline-capable command on\n"
+        "them and prints one findings-only report: machine facts, local accounts,\n"
+        "then every flagged entry with its source, user and reason (one JSON object\n"
+        "with --json). Read-only. Usage:\n"
+        "  winspect image <root> [--json]\n" },
     { "timeline",
         "winspect timeline - one time-ordered view of what the evidence commands\n"
         "already know: program runs (prefetch, bam, userassist), files opened and\n"

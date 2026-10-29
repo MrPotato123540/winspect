@@ -279,3 +279,58 @@ Dosya "temiz kapanmadı" işaretliyse (çalışırken kopyalanmış) bu not edil
 - Windows CI: canlı System günlüğü `wevtutil epl` ile dışa aktarılır; dışa
   aktarma anından önceki satırlar canlı API ile dosya okuyucusunda **aynı**
   olmalı (henüz gerçek koşu görmedi).
+
+## image: bütün bir kurulumu tek komutla incelemek
+
+Çevrimdışı seçenekler tek tek güçlü ama bir disk imajında hepsini doğru
+dosyayla çalıştırmak zahmetli. `image`, bağlanmış bir imajın (ya da klasör
+yapısını koruyan bir toplama işinin) kök klasörünü alır, kanıtları kendisi
+bulur ve ilgili komutları çalıştırır:
+
+| Kanıt | Komutlar |
+|---|---|
+| `Windows\System32\config\SYSTEM`, `SOFTWARE`, `SAM` | sysinfo, users, posture, autoruns, services, programs, defender, certstore, shimcache, bam |
+| `Windows\AppCompat\Programs\Amcache.hve` | amcache |
+| `Windows\Prefetch`, `Windows\System32\Tasks` | prefetch, tasks |
+| `Windows\System32\winevt\Logs\*.evtx` (6 kanal) | events |
+| `$Recycle.Bin` | recyclebin |
+| her `Users\<ad>`: NTUSER.DAT, UsrClass.dat, PSReadLine geçmişi | autoruns (kullanıcı), userassist, mru, comhijack, pshistory |
+
+Komutlar süreç içinde `--json` ile çalıştırılır (sweep ve timeline'daki
+yakalama mekanizması); çıktılar `jsonmini` ile okunur. Bir kaydın bulgu
+sayılma kuralı tek ve şeffaf:
+
+- komut onu işaretlemişse (`suspicious: true` + gerekçe),
+- posture'da `WARN` satırları,
+- defender'da her satır (dışlamalar ve kapatılmış koruma zaten başlı başına bulgu),
+- bam / shimcache'te kullanıcının yazabildiği klasördeki programlar.
+
+Rapor: makine bilgileri, yerel hesaplar, sonra bulgular **kaynak, kullanıcı ve
+gerekçeye göre gruplu**. Her grupta en fazla 5 örnek gösterilir; birebir aynı
+satırlar (aynı önbellek kaydının tekrarları) sayaçla birleşir. JSON'da hepsi
+vardır.
+
+Gruplama gerçek veride gerekli çıktı. regipy'nin hive'larıyla kurulan imajda
+ilk sürüm 434 satır bastı: 368'i Amcache'te `ProgramData\chocolatey`
+altındaki araçlar (kural doğru, ProgramData kullanıcıların yazabildiği bir
+yer), 47'si ShimCache'te aynı `a.exe`'nin tekrarlarıydı. Gruplu rapor aynı
+bilgiyi bir ekranda veriyor.
+
+**Doğrulama:**
+
+- Test yazıcısıyla kurulan sentetik imaj (`C:\img2`). İçine şunlar
+  yerleştirildi:
+  - kullanıcının yazabildiği bir yolda servis,
+  - Downloads'tan çalışmış bir Prefetch kaydı,
+  - Temp'ten çalışan görev,
+  - silinmiş bir dropper,
+  - bob'un Run anahtarı, COM override'ı ve günlük silen PowerShell satırı,
+  - Guest'i etkin bir SAM,
+  - elle düzenlenmiş kök sertifika.
+
+  Hepsi doğru kaynak ve kullanıcıyla bulgu olarak geliyor; SAM `V`
+  değerindeki kanarya hiçbir çıktıda yok.
+- regipy hive'larıyla kurulan imaj: makine adı, build ve kurulum tarihi
+  sysinfo'nun doğrulanmış değerleriyle aynı. Gerçek SOFTWARE hive'ının Run
+  anahtarındaki `system32\dllhost\svchost.exe` "masquerading" bulgusu olarak
+  çıkıyor.
