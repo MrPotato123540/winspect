@@ -784,6 +784,22 @@ try:
 except Exception as e:
     print('FAIL image check:', e, out[:300]); fails += 1
 
+# timeline --root: the synthetic image as a timeline; per-user rows name bob.
+rc, out, err = wine([exe, 'timeline', '--root', r'C:\img2', '--json'], timeout=300)
+try:
+    tr = json.loads(out)
+    keys = {(r['source'], r['user']) for r in tr}
+    if not {('prefetch', ''), ('recyclebin', ''), ('users', ''), ('comhijack', 'bob'), ('pshistory', 'bob')} <= keys:
+        print(f'FAIL timeline --root: sources missing: {sorted(keys)}'); fails += 1
+    elif [r['time'] for r in tr] != sorted((r['time'] for r in tr), reverse=True):
+        print('FAIL timeline --root: not newest first'); fails += 1
+    elif not any(r['source'] == 'prefetch' and 'EVIL.EXE' in r['event'] and r['suspicious'] for r in tr):
+        print('FAIL timeline --root: prefetch run missing'); fails += 1
+    else:
+        print(f'checked timeline --root  ({len(tr)} rows from the synthetic image)')
+except Exception as e:
+    print('FAIL timeline --root check:', e, out[:200]); fails += 1
+
 # sweep: one valid JSON document with every check as a key; checks that
 # cannot run under wine (WMI, event logs) must be null or empty, not broken.
 rc, out, err = wine([exe, 'sweep', '--json'], timeout=600)

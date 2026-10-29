@@ -82,9 +82,12 @@ static const struct { const char *name, *text; } usage_table[] = {
         "shutdown / profile loads (sysinfo). Each source command is\n"
         "run with --json and its timestamps become rows (UTC, newest first); a row\n"
         "keeps the source's \"suspicious\" mark. Per-user sources read the CURRENT\n"
-        "user. --since keeps the last <hours>; --sources picks a comma-separated\n"
-        "subset. Read-only (it only calls read-only commands). Usage:\n"
-        "  winspect timeline [--since <hours>] [--sources a,b,...] [--flagged] [--json | --csv]\n" },
+        "user. --root <folder> builds the same timeline from an offline Windows\n"
+        "installation (a mounted image): its hives, Prefetch, Amcache, Recycle Bin,\n"
+        "tasks, event logs and every user profile, each row naming its user.\n"
+        "--since keeps the last <hours>; --sources picks a comma-separated subset.\n"
+        "Read-only (it only calls read-only commands). Usage:\n"
+        "  winspect timeline [--root <folder>] [--since <hours>] [--sources a,b,...] [--flagged] [--json | --csv]\n" },
     { "users",
         "winspect users - local accounts: name, RID, enabled, member of the local\n"
         "Administrators group, last logon, password last set, logon and bad-password\n"

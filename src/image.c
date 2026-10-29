@@ -23,6 +23,7 @@
 
 #include "image.h"
 #include "capture.h"
+#include "imgpaths.h"
 #include "jsonmini.h"
 #include "jsonutil.h"
 #include "sysinfo.h"
@@ -85,12 +86,6 @@ static void fadd(flist *l, const char *src, const char *user, const char *reason
     snprintf(f->reason, sizeof f->reason, "%s", reason);
     snprintf(f->detail, sizeof f->detail, "%s", detail);
     f->count = 1;
-}
-
-static int exists(const char *p, int dir)
-{
-    DWORD a = GetFileAttributesA(p);
-    return a != INVALID_FILE_ATTRIBUTES && (dir ? (a & FILE_ATTRIBUTE_DIRECTORY) != 0 : (a & FILE_ATTRIBUTE_DIRECTORY) == 0);
 }
 
 // Run a command with --json; returns the parsed document (caller frees) or NULL.
@@ -193,61 +188,18 @@ int cmd_image(int argc, char **argv)
         fputs("image: give the root folder of the Windows installation (e.g. E:\\)\n", stderr);
         return 1;
     }
-    char R[MAX_PATH];
-    snprintf(R, sizeof R, "%s", root);
-    size_t rl = strlen(R);
-    while (rl > 0 && (R[rl - 1] == '\\' || R[rl - 1] == '/')) R[--rl] = 0;
-
-    // ---- locate the evidence --------------------------------------------------
-    static char sys[MAX_PATH], sw[MAX_PATH], sam[MAX_PATH], amc[MAX_PATH], pf[MAX_PATH], tk[MAX_PATH], rb[MAX_PATH];
-    snprintf(sys, sizeof sys, "%s\\Windows\\System32\\config\\SYSTEM", R);
-    snprintf(sw, sizeof sw, "%s\\Windows\\System32\\config\\SOFTWARE", R);
-    snprintf(sam, sizeof sam, "%s\\Windows\\System32\\config\\SAM", R);
-    snprintf(amc, sizeof amc, "%s\\Windows\\AppCompat\\Programs\\Amcache.hve", R);
-    snprintf(pf, sizeof pf, "%s\\Windows\\Prefetch", R);
-    snprintf(tk, sizeof tk, "%s\\Windows\\System32\\Tasks", R);
-    snprintf(rb, sizeof rb, "%s\\$Recycle.Bin", R);
-    int has_sys = exists(sys, 0), has_sw = exists(sw, 0), has_sam = exists(sam, 0), has_amc = exists(amc, 0);
-    int has_pf = exists(pf, 1), has_tk = exists(tk, 1), has_rb = exists(rb, 1);
-    if (!has_sys && !has_sw) {
-        fprintf(stderr, "image: no Windows\\System32\\config\\SYSTEM or SOFTWARE under '%s'\n", R);
+    static img_paths ip;
+    if (img_find(root, &ip) != 0) {
+        fprintf(stderr, "image: no Windows\\System32\\config\\SYSTEM or SOFTWARE under '%s'\n", root);
         return 1;
     }
-    static const char *const logs[] = {
-        "System.evtx", "Security.evtx", "Microsoft-Windows-Windows Defender%4Operational.evtx",
-        "Microsoft-Windows-TaskScheduler%4Operational.evtx",
-        "Microsoft-Windows-TerminalServices-RemoteConnectionManager%4Operational.evtx",
-        "Microsoft-Windows-PowerShell%4Operational.evtx",
-    };
-    static char evtx[6][MAX_PATH * 2];
-    int nev = 0;
-    for (size_t i = 0; i < sizeof logs / sizeof logs[0]; i++) {
-        snprintf(evtx[nev], sizeof evtx[nev], "%s\\Windows\\System32\\winevt\\Logs\\%s", R, logs[i]);
-        if (exists(evtx[nev], 0)) nev++;
-    }
-    // User profiles: every Users\<name> with an NTUSER.DAT.
-    typedef struct { char name[128], ntuser[MAX_PATH * 2], usrclass[MAX_PATH * 2], pshist[MAX_PATH * 2]; } prof;
-    static prof users[64];
-    int nu = 0;
-    char pat[MAX_PATH + 16];
-    snprintf(pat, sizeof pat, "%s\\Users\\*", R);
-    WIN32_FIND_DATAA fd;
-    HANDLE h = FindFirstFileA(pat, &fd);
-    if (h != INVALID_HANDLE_VALUE) {
-        do {
-            if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || fd.cFileName[0] == '.' || nu >= 64) continue;
-            prof *u = &users[nu];
-            snprintf(u->ntuser, sizeof u->ntuser, "%s\\Users\\%s\\NTUSER.DAT", R, fd.cFileName);
-            if (!exists(u->ntuser, 0)) continue;
-            snprintf(u->name, sizeof u->name, "%s", fd.cFileName);
-            snprintf(u->usrclass, sizeof u->usrclass, "%s\\Users\\%s\\AppData\\Local\\Microsoft\\Windows\\UsrClass.dat", R, fd.cFileName);
-            if (!exists(u->usrclass, 0)) u->usrclass[0] = 0;
-            snprintf(u->pshist, sizeof u->pshist, "%s\\Users\\%s\\AppData\\Roaming\\Microsoft\\Windows\\PowerShell\\PSReadLine\\ConsoleHost_history.txt", R, fd.cFileName);
-            if (!exists(u->pshist, 0)) u->pshist[0] = 0;
-            nu++;
-        } while (FindNextFileA(h, &fd));
-        FindClose(h);
-    }
+    const char *R = ip.root;
+    const char *sys = ip.system, *sw = ip.software, *sam = ip.sam, *amc = ip.amcache;
+    const char *pf = ip.prefetch, *tk = ip.tasks, *rb = ip.recycle;
+    int has_sys = sys[0] != 0, has_sw = sw[0] != 0, has_sam = sam[0] != 0, has_amc = amc[0] != 0;
+    int has_pf = pf[0] != 0, has_tk = tk[0] != 0, has_rb = rb[0] != 0;
+    int nev = ip.nevtx, nu = ip.nusers;
+    const img_user *users = ip.users;
 
     // ---- machine facts and accounts -------------------------------------------
     flist fl = { NULL, 0, 0 };
@@ -295,7 +247,7 @@ int cmd_image(int argc, char **argv)
         memset(j, 0, sizeof *j);
         j->name = "events"; j->fn = cmd_events; j->rule = RULE_FLAGGED;
         int k = 0;
-        for (int i = 0; i < nev && k < 8; i++) { j->args[k++] = "--evtx"; j->args[k++] = evtx[i]; }
+        for (int i = 0; i < nev && k < 8; i++) { j->args[k++] = "--evtx"; j->args[k++] = ip.evtx[i]; }
     }
     for (int i = 0; i < nj; i++) {
         jm_node *doc = run_json(jobs[i].fn, jobs[i].args);
@@ -304,7 +256,7 @@ int cmd_image(int argc, char **argv)
     }
     // ---- per user --------------------------------------------------------------
     for (int u = 0; u < nu; u++) {
-        const prof *p = &users[u];
+        const img_user *p = &users[u];
         nj = 0;
         JOB("autoruns", cmd_autoruns, NULL, RULE_FLAGGED, NULL, "--ntuser", p->ntuser);
         JOB("userassist", cmd_userassist, NULL, RULE_FLAGGED, NULL, "--hive", p->ntuser);

@@ -231,6 +231,15 @@ check(im.get('computer') == 'WKS-WIN732BITA' and im.get('build') == '7601' and i
 check(any(f['source'] == 'autoruns' and 'dllhost\\svchost.exe' in f['detail'] and 'masquerading' in f['reason']
           for f in im.get('findings', [])), 'image: masquerading svchost in the real SOFTWARE Run key is a finding')
 check(im.get('evidence', {}).get('profiles') == ['bob'], 'image: one user profile found')
+# timeline --root on the same regipy image: rows from the SYSTEM shimcache,
+# the profile's UserAssist / ShellBags / per-user COM classes, all tagged bob.
+rc, out = run('timeline', '--root', 'C:\\hives\\img', '--json')
+tr = json.loads(out) if rc == 0 else []
+srcs = {(r['source'], r['user']) for r in tr}
+check({('shimcache', ''), ('userassist', 'bob'), ('shellbags', 'bob'), ('comhijack', 'bob'), ('sysinfo', '')} <= srcs,
+      f'timeline --root: {len(tr)} rows, per-user sources tagged with the profile')
+check(any(r['source'] == 'sysinfo' and r['time'] == '2010-11-10 16:28:55' for r in tr),
+      'timeline --root: Windows install time from the SOFTWARE hive')
 # comhijack offline: per-user COM classes in a real UsrClass.dat (OneDrive and
 # Dropbox register theirs per user, under AppData). Values were read from the
 # raw hive with tests/regf_dump.c; per-user-only classes must not be flagged.

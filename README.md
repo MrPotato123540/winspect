@@ -46,7 +46,7 @@ takes. The tables below are a map, not the full reference.
 | Command | What it does |
 | --- | --- |
 | `sweep` | Runs every system-wide check in findings-only mode and prints one report (one JSON object with `--json`). |
-| `timeline` | Merges the timestamps from the evidence commands below into one UTC list, newest first. `--since <hours>`, `--sources a,b`, `--flagged`. |
+| `timeline` | Merges the timestamps from the evidence commands below into one UTC list, newest first. `--since <hours>`, `--sources a,b`, `--flagged`. `--root <folder>` builds it from a mounted image instead, with every per-user row naming its profile. |
 | `image <root>` | Triage of a Windows installation that is not running: point it at a mounted image or a copied system drive and it finds the hives, Amcache, Prefetch, tasks, event logs, the Recycle Bin and every user profile, runs the offline modes of the commands below, and prints machine facts, local accounts and every finding grouped by source, user and reason. |
 | `posture` | Hardening settings: UAC, LSA protection, WDigest, NTLM level, LM hashes, Credential Guard, SMBv1 and SMB signing, LLMNR, RDP/NLA, firewall profiles, AlwaysInstallElevated, PowerShell logging. Each check is OK, WARN or INFO with a one-line explanation. |
 | `hunt` | Process lineage checks in the spirit of the SANS "Hunt Evil" poster: wrong parent, duplicate singletons, core names outside System32, wrong account, boot processes started late. |
