@@ -73,6 +73,8 @@ add_executable(winspect
     src/evtx.c
     src/image.c
     src/imgpaths.c
+    src/sqlite.c
+    src/browser.c
     src/timeline.c
     src/jumplist.c
     src/tasks.c

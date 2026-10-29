@@ -130,6 +130,21 @@ static const struct { const char *name, *text; } usage_table[] = {
         "flagged. Other users' folders need admin. A file or folder argument reads a\n"
         "copy (e.g. from a disk image). Read-only. Usage:\n"
         "  winspect recyclebin [<$I file | INFO2 | folder>] [--flagged] [--json | --csv]\n" },
+    { "browser",
+        "winspect browser - web history and downloads from Chrome, Edge, Brave\n"
+        "(Chromium \"History\" databases, every profile) and Firefox (places.sqlite\n"
+        "with its -wal file), read with winspect's own SQLite reader: visited URLs\n"
+        "with title, visit count and last visit time, and downloads with source\n"
+        "URL, saved path, size and the browser's own danger verdict. Flags\n"
+        "downloads the browser warned about (or that the user kept anyway),\n"
+        "downloads from a bare IP address, downloaded programs/scripts and visits\n"
+        "to bare IP addresses. Default: the current user; --all-users reads every\n"
+        "profile under C:\\Users (admin); --home reads one user folder (e.g. a\n"
+        "profile in a mounted image); a file argument reads one copied database.\n"
+        "Read-only (files are opened with full sharing; a running browser is fine).\n"
+        "Usage:\n"
+        "  winspect browser [<History | places.sqlite> | --home <user folder> | --all-users] [--downloads]\n"
+        "                   [--since <hours>] [--flagged] [--json | --csv]\n" },
     { "pshistory",
         "winspect pshistory - PowerShell command history kept by PSReadLine\n"
         "(%APPDATA%\\Microsoft\\Windows\\PowerShell\\PSReadLine\\ConsoleHost_history.txt):\n"
@@ -332,7 +347,7 @@ static const struct { const char *name, *text; } usage_table[] = {
         "winspect sweep - one-shot machine triage: runs the system-wide checks in\n"
         "\"findings only\" mode (posture --warn, hunt, hidden, net, autoruns/services/tasks/\n"
         "taskcache/firewall/prefetch --flagged, defender, wmi, users/comhijack/bits/recyclebin --flagged,\n"
-        "pshistory --all-users --flagged, events) and prints them as one\n"
+        "pshistory / browser --all-users --flagged, events) and prints them as one\n"
         "report. With --json the result is a single object, one key per check; a\n"
         "check that could not run (e.g. needs elevation) is null instead of breaking\n"
         "the document. Read-only - it only calls the read-only commands. Usage:\n"

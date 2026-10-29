@@ -34,6 +34,7 @@
 #include "events.h"
 #include "sysinfo.h"
 #include "amcache.h"
+#include "browser.h"
 #include "imgpaths.h"
 
 #include <windows.h>
@@ -277,6 +278,17 @@ static void x_amcache(tl *t, const jm_node *r)
     add(t, S(r, "recorded"), w, d, B(r, "suspicious"));
 }
 
+static void x_browser(tl *t, const jm_node *r)
+{
+    char w[2400];
+    const char *kind = S(r, "kind");
+    if (strcmp(kind, "download") == 0)
+        snprintf(w, sizeof w, "%s download: %s -> %s", S(r, "browser"), S(r, "url"), S(r, "saved_to"));
+    else
+        snprintf(w, sizeof w, "%s visit (last): %s", S(r, "browser"), S(r, "url"));
+    add(t, S(r, "time"), w, S(r, "reason"), B(r, "suspicious"));
+}
+
 // sysinfo prints one object, not a list. Network first/last-connected times
 // are LOCAL time in the registry, so they are left out of this UTC view.
 static void x_sysinfo(tl *t, const jm_node *doc)
@@ -322,6 +334,7 @@ static const source sources[] = {
     { "comhijack",  cmd_comhijack,  { "--all", NULL },      NULL, x_comhijack, NULL },
     { "events",     cmd_events,     { "--max", "200", NULL }, NULL, x_events, NULL },
     { "sysinfo",    cmd_sysinfo,    { NULL },               NULL, x_sysinfo, NULL },
+    { "browser",    cmd_browser,    { NULL },               NULL, x_browser, NULL },
 };
 
 // The same sources for an offline installation under root (timeline --root):
@@ -365,6 +378,14 @@ static size_t image_sources(const img_paths *ip, source *out, size_t cap)
         if (p->autodest[0]) ADD("jumplist", cmd_jumplist, x_jumplist, NULL, p->name, p->autodest);
         if (p->recent[0])   ADD("lnk", cmd_lnk, x_lnk, NULL, p->name, p->recent);
         if (p->pshist[0])   ADD("pshistory", cmd_pshistory, x_pshistory, NULL, p->name, p->pshist);
+        {
+            // The user folder is the one holding NTUSER.DAT.
+            static char homes[IMG_MAX_USERS][MAX_PATH * 2];
+            snprintf(homes[u], sizeof homes[u], "%s", p->ntuser);
+            char *sl = strrchr(homes[u], '\\');
+            if (sl) *sl = 0;
+            ADD("browser", cmd_browser, x_browser, NULL, p->name, "--home", homes[u]);
+        }
         if (p->usrclass[0] && ip->software[0])
             ADD("comhijack", cmd_comhijack, x_comhijack, NULL, p->name, "--usrclass", p->usrclass, "--software", ip->software, "--all");
     }

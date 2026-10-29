@@ -21,6 +21,7 @@
 #include "pfparse.h"
 #include "artparse.h"
 #include "jsonmini.h"
+#include "sqlite.h"
 #include "capa.h"
 #include "lnkparse.h"
 #include "destlist.h"
@@ -801,6 +802,31 @@ int main(void)
             check_int("np stock", asep_netprovider_default("%SystemRoot%\\System32\\ntlanman.dll"), 1);
             check_int("np stock bare", asep_netprovider_default("drprov.dll"), 1);
             check_int("np wsl", asep_netprovider_default("C:\\Windows\\system32\\P9NP.dll"), 1);
+            {
+                char cn[16][64];
+                const char *q = "CREATE TABLE downloads (id INTEGER PRIMARY KEY,guid VARCHAR NOT NULL,"
+                                "\"target path\" LONGVARCHAR NOT NULL, start_time INTEGER DEFAULT (0), [state] INTEGER,"
+                                " danger_type INTEGER NOT NULL, mime_type VARCHAR(255) NOT NULL DEFAULT \"\", "
+                                "UNIQUE(guid), CONSTRAINT x CHECK (state >= 0))";
+                int nc = sqlite_parse_columns(q, strlen(q), cn, 16);
+                check_int("sqcols count", nc, 7);
+                check_str("sqcols ipk", nc > 0 ? cn[0] : "", "id");
+                check_str("sqcols quoted", nc > 2 ? cn[2] : "", "target path");
+                check_str("sqcols default paren", nc > 3 ? cn[3] : "", "start_time");
+                check_str("sqcols bracket", nc > 4 ? cn[4] : "", "state");
+                check_str("sqcols last", nc > 6 ? cn[6] : "", "mime_type");
+                check_int("sqcols no paren", sqlite_parse_columns("CREATE TABLE x", 14, cn, 16), -1);
+                check_int("sqcols max", sqlite_parse_columns(q, strlen(q), cn, 2), 2);
+            }
+            check_str("br kept", browser_reason(1, "https://x.example/a.zip", "C:\\a.zip", 6) ?
+                      browser_reason(1, "https://x.example/a.zip", "C:\\a.zip", 6) : "", "user kept a download the browser warned about");
+            check_int("br warned", browser_reason(1, "https://x.example/a.zip", "C:\\a.zip", 3) != NULL, 1);
+            check_int("br ip dl", browser_reason(1, "http://203.0.113.9:8080/a.bin", "C:\\a.bin", 0) != NULL, 1);
+            check_int("br exe dl", browser_reason(1, "https://x.example/setup.exe", "C:\\Users\\u\\Downloads\\setup.exe", 0) != NULL, 1);
+            check_int("br pdf dl", browser_reason(1, "https://x.example/a.pdf", "C:\\Users\\u\\Downloads\\a.pdf", 0) == NULL, 1);
+            check_int("br ip visit", browser_reason(0, "http://10.1.1.1/x?y=1", NULL, 0) != NULL, 1);
+            check_int("br ip query", browser_reason(0, "https://example.com/?ip=10.1.1.1", NULL, 0) == NULL, 1);
+            check_int("br file url", browser_reason(0, "file:///C:/10.1.1.1/a.html", NULL, 0) == NULL, 1);
             check_int("xpm sys", evt_xpath_match("*[System[(EventID=7045 or EventID=104)]]", 104, 4), 1);
             check_int("xpm sys no", evt_xpath_match("*[System[(EventID=7045 or EventID=104)]]", 1040, 4), 0);
             check_int("xpm level ok", evt_xpath_match("*[System[(EventID=4104) and (Level=3)]]", 4104, 3), 1);

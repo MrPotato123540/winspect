@@ -46,6 +46,7 @@
 #include "rdp.h"
 #include "comhijack.h"
 #include "events.h"
+#include "browser.h"
 
 #include <windows.h>
 #include <stdio.h>
@@ -264,6 +265,11 @@ int cmd_image(int argc, char **argv)
         if (p->usrclass[0] && has_sw)
             JOB("comhijack", cmd_comhijack, NULL, RULE_FLAGGED, NULL, "--usrclass", p->usrclass, "--software", sw);
         if (p->pshist[0]) JOB("pshistory", cmd_pshistory, NULL, RULE_FLAGGED, NULL, p->pshist);
+        char home[MAX_PATH * 2];
+        snprintf(home, sizeof home, "%s", p->ntuser);
+        char *sl = strrchr(home, '\\');
+        if (sl) *sl = 0;
+        JOB("browser", cmd_browser, NULL, RULE_FLAGGED, NULL, "--home", home);
         for (int i = 0; i < nj; i++) {
             jm_node *doc = run_json(jobs[i].fn, jobs[i].args);
             if (doc) collect(&fl, jobs[i].name, p->name, doc, jobs[i].list, jobs[i].rule, jobs[i].fixed);

@@ -83,6 +83,7 @@ takes. The tables below are a map, not the full reference.
 | `jumplist` / `lnk` | Jump Lists and shortcut files: targets, times, volume and the machine that created them. Flags shortcuts crafted to hide their command line. |
 | `shellbags` | Folders browsed in Explorer, including removable drives and deleted folders. |
 | `recyclebin` | What was deleted, by which account and when (`$I` files and the old `INFO2`). |
+| `browser` | Chrome, Edge, Brave and Firefox history and downloads, read with a built-in SQLite reader (Firefox's `-wal` file included): URL, title, last visit, saved path, size and the browser's own danger verdict. Flags downloads the browser warned about or the user kept anyway, downloads from a bare IP, downloaded programs and scripts. |
 | `pshistory` | PowerShell console history (PSReadLine); suspicious lines are flagged. `--all-users` reads every profile. |
 | `rdp` | Outgoing Remote Desktop connections of a user. |
 | `usb` | USB storage devices with first install, last connect and last removal times. |
@@ -127,7 +128,7 @@ takes. The tables below are a map, not the full reference.
 | `--usrclass` with `--software` | `comhijack` |
 | `--sam <SAM>` | `users` (account names and the fixed `F` record only) |
 | `--evtx <file>` (repeatable) | `events`, including `--summary` |
-| a copied file or folder | `prefetch` (file or `--dir`), `amcache`, `lnk`, `jumplist`, `recyclebin`, `pshistory`, `tasks --dir` |
+| a copied file or folder | `prefetch` (file or `--dir`), `amcache`, `lnk`, `jumplist`, `recyclebin`, `pshistory`, `tasks --dir`, `browser` (database file or `--home <user folder>`) |
 
 ## Building
 
@@ -154,14 +155,14 @@ came back from the ANSI file APIs as `Gülsen` and was silently skipped.
 ## Testing
 
 Parsers that do not need Windows (Prefetch, ShimCache, `.lnk`, shell items,
-Jump List DestList, compound files, registry hives, `.evtx` event logs, Recycle Bin, SAM records,
+Jump List DestList, compound files, registry hives, `.evtx` event logs, SQLite databases, Recycle Bin, SAM records,
 task XML, the JSON reader and the various rule tables) live in portable C files
 and are tested on Linux:
 
 ```sh
 SRC="src/md5.c src/jsonutil.c src/ioc.c src/entropy.c src/pecksum.c src/imphash_ords.c \
      src/pfparse.c src/artparse.c src/capa.c src/lnkparse.c src/rights.c src/destlist.c \
-     src/shellitem.c src/jsonmini.c"     # src/evtx.c has its own checks (tests/evtx_check.py)
+     src/shellitem.c src/jsonmini.c src/sqlite.c"   # evtx.c: tests/evtx_check.py
 cc -I inc -std=c11 $SRC tests/test_util.c -o test_util -lm && ./test_util
 ```
 
@@ -176,6 +177,7 @@ third-party code is run):
 - Recycle Bin and `.evtx` event logs: plaso's test files and the values its tests assert.
 - Certificates read offline: checked against `openssl x509` and `hashlib`.
 - The JSON reader: random documents compared with Python's `json` module.
+- The SQLite reader: random databases (page sizes, UTF-16, overflow pages, uncheckpointed WAL) compared row by row with Python's `sqlite3` module.
 
 Functional tests run the real executable under wine (`tests/wine/`).
 `fixtures.py` plants known-bad artifacts in a throw-away prefix and checks

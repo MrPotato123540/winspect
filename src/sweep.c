@@ -31,6 +31,7 @@
 #include "recyclebin.h"
 #include "comhijack.h"
 #include "users.h"
+#include "browser.h"
 
 #include <windows.h>
 #include <stdio.h>
@@ -64,6 +65,7 @@ static const check checks[] = {
     { "bits",      "BITS jobs with notify commands / risky downloads", cmd_bits, { "--flagged", NULL } },
     { "pshistory", "suspicious PowerShell history lines (all users)", cmd_pshistory, { "--all-users", "--flagged", NULL } },
     { "recyclebin","deleted programs and scripts",           cmd_recyclebin, { "--flagged", NULL } },
+    { "browser",   "risky downloads / bare-IP visits (all users)", cmd_browser, { "--all-users", "--flagged", NULL } },
     { "events",    "high-signal events (latest 10 per channel)", cmd_events, { "--max", "10", NULL } },
 };
 

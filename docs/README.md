@@ -72,6 +72,9 @@ Sırayla oku. Her dosya bir öncekinin üstüne kurulu:
 22. **[21 — Zaman çizelgesi](21-zaman-cizelgesi.md)**
     `timeline`: kanıt komutlarının zamanlarını tek sıralı listede birleştirmek;
     hangi zaman ne anlama gelir; küçük JSON okuyucu ve diferansiyel testi.
+23. **[22 — Tarayıcı geçmişi](22-tarayici-gecmisi.md)**
+    `browser`: Chrome/Edge/Brave/Firefox geçmişi ve indirmeler; kendi SQLite
+    okuyucumuz (B-ağacı, taşma sayfaları, WAL) ve Python'la diferansiyel testi.
 
 ## Aklında tut: tek cümlelik fikir
 
