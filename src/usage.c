@@ -130,6 +130,17 @@ static const struct { const char *name, *text; } usage_table[] = {
         "flagged. Other users' folders need admin. A file or folder argument reads a\n"
         "copy (e.g. from a disk image). Read-only. Usage:\n"
         "  winspect recyclebin [<$I file | INFO2 | folder>] [--flagged] [--json | --csv]\n" },
+    { "activities",
+        "winspect activities - Windows 10 Timeline (ActivitiesCache.db under\n"
+        "%LOCALAPPDATA%\\ConnectedDevicesPlatform\\<account>\\): which application was\n"
+        "used when and for how long, and the documents it opened, read with\n"
+        "winspect's own SQLite reader. Rows: start / end time, the application (exe\n"
+        "path or app id), activity type (opened, in focus...), what was shown\n"
+        "(document, page) and the focus duration. Flags applications run from\n"
+        "user-writable folders. Default: the current user; --home reads one user\n"
+        "folder (e.g. in a mounted image); a file argument reads a copied\n"
+        "database. Windows 11 no longer records new activity. Read-only. Usage:\n"
+        "  winspect activities [<ActivitiesCache.db> | --home <user folder>] [--flagged] [--json | --csv]\n" },
     { "browser",
         "winspect browser - web history and downloads from Chrome, Edge, Brave\n"
         "(Chromium \"History\" databases, every profile) and Firefox (places.sqlite\n"

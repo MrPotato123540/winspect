@@ -95,3 +95,29 @@ Format" belgesi):
 - `image`: her profil için `browser --home` çalıştırılır; işaretli satırlar
   bulgu olur.
 - `sweep`: `browser --all-users --flagged`.
+
+## activities — Windows 10 Timeline
+
+SQLite okuyucusu bir kanıtı daha ucuza getirdi: **Windows Timeline**.
+Windows 10, kullanıcının uygulama kullanımını
+`%LOCALAPPDATA%\ConnectedDevicesPlatform\<hesap>\ActivitiesCache.db` içindeki
+`Activity` tablosunda tutar. Windows 11 yeni kayıt eklemiyor, ama Windows
+10'dan yükseltilmiş makinelerde ve Windows 10 imajlarında dosya duruyor.
+
+| Sütun | İçerik |
+|---|---|
+| `AppId` | JSON dizisi: `{application, platform}`. `x_exe_path` / `windows_win32` girdisi programın yoludur |
+| `ActivityType` | 5 = açıldı (uygulama ya da belge), 6 = odakta (ön planda) |
+| `Payload` | JSON: `displayText`, `appDisplayName`, `description` (çoğu zaman belgenin yolu), `activeDurationSeconds` |
+| `StartTime`, `EndTime` | 1970'ten beri saniye, UTC |
+
+Sütunlar yine adla bulunur; JSON parçaları `jsonmini` ile çözülür. Yol
+kullanıcının yazabildiği bir yerdeyse işaretlenir. Program yolu bazen bir
+"bilinen klasör" GUID'iyle başlar (ör. `{1AC14E77-…}` = System32); olduğu gibi
+gösterilir.
+
+**Doğrulama:** wine'da Windows 10 sütun düzeniyle üretilmiş bir veritabanı:
+Temp'teki `rclone.exe` 345 saniye odakta (işaretli), Notepad'in açtığı
+`passwords.txt` (işaretsiz). Gerçek bir Windows 10 veritabanıyla henüz
+karşılaştırılmadı. `timeline` (canlı ve `--root`) ve `image` de bu kaynağı
+kullanır.

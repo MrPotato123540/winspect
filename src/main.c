@@ -95,6 +95,7 @@
 #include "image.h"
 #include "browser.h"
 #include "pca.h"
+#include "activities.h"
 #include "tasks.h"
 
 // cmd_modules lives in modules.c: a live process's loaded modules
@@ -240,6 +241,7 @@ static const struct {
     { "comhijack",cmd_comhijack,"per-user COM classes overriding HKLM ones",  "security" },
     { "bits",     cmd_bits,     "BITS jobs: files, owner, notify command",   "security" },
     { "recyclebin", cmd_recyclebin, "Recycle Bin: deleted files, owner, time", "file" },
+    { "activities", cmd_activities, "Windows 10 Timeline: app use and documents", "file" },
     { "browser",  cmd_browser,  "browser history and downloads (Chromium, Firefox)", "file" },
     { "pshistory", cmd_pshistory, "PowerShell command history (PSReadLine)", "file" },
     { "shellbags", cmd_shellbags, "folders browsed in Explorer (ShellBags)", "file" },

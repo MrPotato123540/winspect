@@ -85,6 +85,7 @@ takes. The tables below are a map, not the full reference.
 | `shellbags` | Folders browsed in Explorer, including removable drives and deleted folders. |
 | `recyclebin` | What was deleted, by which account and when (`$I` files and the old `INFO2`). |
 | `browser` | Chrome, Edge, Brave and Firefox history and downloads, read with a built-in SQLite reader (Firefox's `-wal` file included): URL, title, last visit, saved path, size and the browser's own danger verdict. Flags downloads the browser warned about or the user kept anyway, downloads from a bare IP, downloaded programs and scripts. |
+| `activities` | Windows 10 Timeline (`ActivitiesCache.db`): which application was used when and for how long, and the documents it opened. |
 | `pshistory` | PowerShell console history (PSReadLine); suspicious lines are flagged. `--all-users` reads every profile. |
 | `rdp` | Outgoing Remote Desktop connections of a user. |
 | `usb` | USB storage devices with first install, last connect and last removal times. |
@@ -129,7 +130,7 @@ takes. The tables below are a map, not the full reference.
 | `--usrclass` with `--software` | `comhijack` |
 | `--sam <SAM>` | `users` (account names and the fixed `F` record only) |
 | `--evtx <file>` (repeatable) | `events`, including `--summary` |
-| a copied file or folder | `prefetch` (file or `--dir`), `pca`, `amcache`, `lnk`, `jumplist`, `recyclebin`, `pshistory`, `tasks --dir`, `browser` (database file or `--home <user folder>`) |
+| a copied file or folder | `prefetch` (file or `--dir`), `pca`, `amcache`, `lnk`, `jumplist`, `recyclebin`, `pshistory`, `tasks --dir`, `browser` and `activities` (database file or `--home <user folder>`) |
 
 ## Building
 

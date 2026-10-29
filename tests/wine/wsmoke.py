@@ -101,7 +101,9 @@ cases += [['ssn','NtOpenProcess'], ['ssn','NtOpenProcess','--json'], ['modules',
           ['timeline','--root','C:\\img2','--csv'], ['timeline','--root','C:\\nonexistent'], ['timeline','--root','C:\\img2','--sources','amcache,prefetch'],
           ['browser'], ['browser','--csv'], ['browser','--downloads','--json'], ['browser','--all-users','--flagged'], ['browser','--since','5'],
           ['browser','--home','C:\\img2\\Users\\bob'], ['browser','C:\\windows\\win.ini'], ['browser','C:\\nonexistent'], ['browser','--since','0'],
-          ['pca'], ['pca','--csv'], ['pca','--flagged','--json'], ['pca','C:\\nonexistent'], ['pca','a','b']]
+          ['pca'], ['pca','--csv'], ['pca','--flagged','--json'], ['pca','C:\\nonexistent'], ['pca','a','b'],
+          ['activities'], ['activities','--csv'], ['activities','--flagged','--json'], ['activities','--home','C:\\img2\\Users\\bob'],
+          ['activities','C:\\windows\\win.ini'], ['activities','C:\\nonexistent']]
 
 bad = 0
 for args in cases:

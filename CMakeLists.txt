@@ -76,6 +76,7 @@ add_executable(winspect
     src/sqlite.c
     src/browser.c
     src/pca.c
+    src/activities.c
     src/timeline.c
     src/jumplist.c
     src/tasks.c
