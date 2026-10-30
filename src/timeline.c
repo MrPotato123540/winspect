@@ -449,13 +449,30 @@ int cmd_timeline(int argc, char **argv)
 {
     int mode = 0, only_flagged = 0;
     long hours = 0;
-    const char *pick = NULL, *root = NULL;
+    const char *pick = NULL, *root = NULL, *since_date = NULL;
     for (int a = 0; a < argc; a++) {
         if (strcmp(argv[a], "--root") == 0 && a + 1 < argc)         root = argv[++a];
         else if (strcmp(argv[a], "--json") == 0)                    mode = 1;
         else if (strcmp(argv[a], "--csv") == 0)                     mode = 2;
         else if (strcmp(argv[a], "--flagged") == 0)                 only_flagged = 1;
-        else if (strcmp(argv[a], "--since") == 0 && a + 1 < argc)   hours = strtol(argv[++a], NULL, 10);
+        else if (strcmp(argv[a], "--since") == 0 && a + 1 < argc) {
+            // A number of hours, or a UTC date "YYYY-MM-DD[ hh:mm:ss]".
+            const char *v = argv[++a];
+            char *end;
+            hours = strtol(v, &end, 10);
+            if (*end) {
+                char tmp[20];
+                if (strlen(v) == 10) snprintf(tmp, sizeof tmp, "%s 00:00:00", v);
+                else snprintf(tmp, sizeof tmp, "%s", v);
+                char norm[20];
+                if (!norm_time(tmp, norm)) {
+                    fprintf(stderr, "timeline: --since takes hours or a date like 2026-10-01, not '%s'\n", v);
+                    return 1;
+                }
+                since_date = v;
+                hours = 0;
+            }
+        }
         else if (strcmp(argv[a], "--sources") == 0 && a + 1 < argc) pick = argv[++a];
         else {
             fprintf(stderr, "timeline: unexpected argument '%s'\n", argv[a]);
@@ -499,7 +516,12 @@ int cmd_timeline(int argc, char **argv)
     }
     tl t;
     memset(&t, 0, sizeof t);
-    if (hours > 0) {
+    if (since_date) {
+        char tmp[20];
+        if (strlen(since_date) == 10) snprintf(tmp, sizeof tmp, "%s 00:00:00", since_date);
+        else snprintf(tmp, sizeof tmp, "%s", since_date);
+        norm_time(tmp, t.since);
+    } else if (hours > 0) {
         time_t cut = time(NULL) - (time_t)hours * 3600;
         struct tm *g = gmtime(&cut);
         if (g) strftime(t.since, sizeof t.since, "%Y-%m-%d %H:%M:%S", g);
@@ -514,7 +536,10 @@ int cmd_timeline(int argc, char **argv)
         av[ac] = NULL;
         int rc = 1;
         char *text = capture_stdout(src->fn, ac, av, &rc);
-        if (text == NULL) continue;
+        if (text == NULL) {
+            fprintf(stderr, "timeline: could not capture the output of %s\n", src->name);
+            continue;
+        }
         jm_node *doc = jm_parse(text, strlen(text));
         free(text);
         if (doc == NULL) {

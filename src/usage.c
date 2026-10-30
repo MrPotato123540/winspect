@@ -85,9 +85,9 @@ static const struct { const char *name, *text; } usage_table[] = {
         "user. --root <folder> builds the same timeline from an offline Windows\n"
         "installation (a mounted image): its hives, Prefetch, Amcache, Recycle Bin,\n"
         "tasks, event logs and every user profile, each row naming its user.\n"
-        "--since keeps the last <hours>; --sources picks a comma-separated subset.\n"
+        "--since keeps the last <hours>, or everything from a UTC date (YYYY-MM-DD); --sources picks a comma-separated subset.\n"
         "Read-only (it only calls read-only commands). Usage:\n"
-        "  winspect timeline [--root <folder>] [--since <hours>] [--sources a,b,...] [--flagged] [--json | --csv]\n" },
+        "  winspect timeline [--root <folder>] [--since <hours | YYYY-MM-DD>] [--sources a,b,...] [--flagged] [--json | --csv]\n" },
     { "users",
         "winspect users - local accounts: name, RID, enabled, member of the local\n"
         "Administrators group, last logon, password last set, logon and bad-password\n"
