@@ -7,16 +7,30 @@
 
 #include "capture.h"
 
+#include <windows.h>
 #include <io.h>
 #include <stdio.h>
 #include <stdlib.h>
+
+// A temporary file in %TEMP%, deleted when closed. Not tmpfile(): the
+// msvcrt version creates its file in the root of the current drive, which a
+// standard user cannot write to, so every capture failed without admin.
+static FILE *temp_file(void)
+{
+    char dir[MAX_PATH], path[MAX_PATH];
+    DWORD n = GetTempPathA(MAX_PATH, dir);
+    if (n == 0 || n >= MAX_PATH || GetTempFileNameA(dir, "wsp", 0, path) == 0) return NULL;
+    FILE *f = fopen(path, "w+bTD");             // T: short-lived, D: delete on close
+    if (f == NULL) DeleteFileA(path);
+    return f;
+}
 
 // Runs fn with stdout redirected to a temp file; returns the captured text
 // (malloc'd, may be empty) and the command's exit code via *rc.
 char *capture_stdout(capture_fn fn, int argc, char **argv, int *rc)
 {
     *rc = 1;
-    FILE *tmp = tmpfile();
+    FILE *tmp = temp_file();
     if (tmp == NULL) return NULL;
     fflush(stdout);
     int saved = _dup(_fileno(stdout));
