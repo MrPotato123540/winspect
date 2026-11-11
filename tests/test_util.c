@@ -1468,6 +1468,50 @@ int main(void)
         check_str("dec name", patch_kind_name(PATCH_JMP_MEM), "jmp [mem]");
     }
 
+    // --- $ATTRIBUTE_LIST: where a fragmented $MFT's later extents are named -----
+    {
+        unsigned char al[32 * 4];
+        memset(al, 0, sizeof al);
+        // type, entry length, name length, start VCN, record
+        static const struct { uint32_t t; uint64_t vcn, rec; } rows[4] = {
+            { 0x10, 0, 0 }, { 0x80, 900, 31 }, { 0x80, 0, 0 }, { 0x80, 300, 17 } };
+        for (int i = 0; i < 4; i++) {
+            unsigned char *q = al + 32 * i;
+            q[0] = (unsigned char)rows[i].t; q[4] = 32; q[7] = 26;
+            for (int k = 0; k < 8; k++) q[8 + k] = (unsigned char)(rows[i].vcn >> (8 * k));
+            for (int k = 0; k < 6; k++) q[16 + k] = (unsigned char)(rows[i].rec >> (8 * k));
+            q[22] = 1;                                   // sequence number in the high 16 bits
+        }
+        mft_ext ex[4];
+        check_int("alist count", mft_alist_data(al, sizeof al, 0, ex, 4), 2);
+        check_int("alist sorted by vcn", ex[0].start_vcn == 300 && ex[0].recno == 17 && ex[1].start_vcn == 900 && ex[1].recno == 31, 1);
+        check_int("alist beyond max", mft_alist_data(al, sizeof al, 0, ex, 1), 2);
+        check_int("alist truncated entry", mft_alist_data(al, 32 + 20, 0, ex, 4), 0);
+        al[32 + 6] = 4;                                  // a NAMED $DATA stream is not the file's content
+        check_int("alist named stream skipped", mft_alist_data(al, sizeof al, 0, ex, 4), 1);
+        al[4] = 8;                                       // entry length below the header: stop, do not loop
+        check_int("alist bad length", mft_alist_data(al, sizeof al, 0, ex, 4), 0);
+
+        // Resident attribute lookup + a continued (start VCN != 0) run list.
+        unsigned char r[256];
+        memset(r, 0, sizeof r);
+        memcpy(r, "FILE", 4);
+        r[20] = 56;
+        unsigned char *at = r + 56;                      // resident 0x20, 5 content bytes at +24
+        at[0] = 0x20; at[4] = 32; at[16] = 5; at[20] = 24; memcpy(at + 24, "hello", 5);
+        at = r + 88;                                     // non-resident 0x80, start VCN 6, one run: 4 clusters at LCN 40
+        at[0] = 0x80; at[4] = 72; at[8] = 1; at[16] = 6; at[32] = 64; at[64] = 0x11; at[65] = 4; at[66] = 40;
+        memset(r + 160, 0xFF, 4);
+        const unsigned char *cp; size_t cl;
+        check_int("attr resident", mft_attr_resident(r, sizeof r, 0x20, &cp, &cl) == 0 && cl == 5 && memcmp(cp, "hello", 5) == 0, 1);
+        check_int("attr resident: non-resident", mft_attr_resident(r, sizeof r, 0x80, &cp, &cl), 1);
+        check_int("attr resident: absent", mft_attr_resident(r, sizeof r, 0x30, &cp, &cl), -1);
+        mft_run rr[4]; uint64_t real, vcn;
+        check_int("attr runs continued", mft_attr_runs(r, sizeof r, 0x80, rr, 4, &real, &vcn) == 1 && vcn == 6 && rr[0].lcn == 40 && rr[0].clusters == 4, 1);
+        r[56 + 16] = 200;                                // resident size past the attribute
+        check_int("attr resident oversize", mft_attr_resident(r, sizeof r, 0x20, &cp, &cl), -1);
+    }
+
     fprintf(stderr, "\n%s (%d failure%s)\n",
             failures == 0 ? "ALL PASSED" : "FAILED", failures, failures == 1 ? "" : "s");
     return failures == 0 ? 0 : 1;

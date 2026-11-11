@@ -165,8 +165,15 @@ static const struct { const char *name, *text; } usage_table[] = {
         "XP image a third of all files did). --find filters by path text,\n"
         "--deleted keeps records that are no longer in use. --live <drive> reads\n"
         "the running system's $MFT through a read-only volume handle (boot sector\n"
-        "-> the $MFT's own record -> its data runs; administrator). Read-only. Usage:\n"
-        "  winspect mft <$MFT file> | --live <drive> [--find <text>] [--deleted] [--timestomp] [--json | --csv]\n" },
+        "-> the $MFT's own record -> its data runs; administrator). --image <file>\n"
+        "does the same on a raw image of one NTFS partition (dd / FTK \"raw\"), so no\n"
+        "mounting is needed. A fragmented $MFT is followed through record 0's\n"
+        "attribute list; if its extents still cannot all be found, a WARNING on\n"
+        "stderr says the listing is incomplete. A file created and deleted within\n"
+        "seconds may never reach the on-disk $MFT at all (NTFS writes records\n"
+        "lazily): cross-check with `usn`. Read-only. Usage:\n"
+        "  winspect mft <$MFT file> | --live <drive> | --image <volume image>\n"
+        "               [--find <text>] [--deleted] [--timestomp] [--json | --csv]\n" },
     { "activities",
         "winspect activities - Windows 10 Timeline (ActivitiesCache.db under\n"
         "%LOCALAPPDATA%\\ConnectedDevicesPlatform\\<account>\\): which application was\n"

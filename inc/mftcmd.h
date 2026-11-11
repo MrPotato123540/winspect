@@ -11,8 +11,15 @@
 // XP image a third of all files did). --find filters by path text,
 // --deleted keeps records that are no longer in use. --live <drive> reads
 // the running system's $MFT through a read-only volume handle (boot sector
-// -> the $MFT's own record -> its data runs; administrator). Read-only. Usage:
-//   winspect mft <$MFT file> | --live <drive> [--find <text>] [--deleted] [--timestomp] [--json | --csv]
+// -> the $MFT's own record -> its data runs; administrator). --image <file>
+// does the same on a raw image of one NTFS partition (dd / FTK "raw"), so no
+// mounting is needed. A fragmented $MFT is followed through record 0's
+// attribute list; if its extents still cannot all be found, a WARNING on
+// stderr says the listing is incomplete. A file created and deleted within
+// seconds may never reach the on-disk $MFT at all (NTFS writes records
+// lazily): cross-check with `usn`. Read-only. Usage:
+//   winspect mft <$MFT file> | --live <drive> | --image <volume image>
+//                [--find <text>] [--deleted] [--timestomp] [--json | --csv]
 int cmd_mft(int argc, char **argv);
 
 #endif

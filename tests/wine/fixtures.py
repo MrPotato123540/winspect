@@ -1046,5 +1046,40 @@ if cc:
             print(f'FAIL verify patches ({mode}):', e); fails += 1
         sp.kill()
         wine(['taskkill', '/f', '/im', 'selfpatch.exe'])
+
+# mft --image: a raw NTFS volume image whose $MFT lies in three fragments,
+# the last two described only by an extension record reached through record
+# 0's $ATTRIBUTE_LIST (a fragmented $MFT on a real disk looks like this; the
+# same code reads --live volumes). invoice.exe's record is in the LAST
+# fragment, so it is found only when the list is followed. Without the list
+# the read must say on stderr that it is incomplete instead of looking as if
+# the file did not exist.
+frags = [(4, 6), (40, 4), (20, 6)]
+with open(os.path.join(ntd, 'vol.img'), 'wb') as f:
+    f.write(nw.volume(nw.mft(ents, 64), frags, split=1))
+with open(os.path.join(ntd, 'vol_nolist.img'), 'wb') as f:
+    f.write(nw.volume(nw.mft(ents, 64), frags, split=1, attr_list=False))
+with open(os.path.join(ntd, 'vol_whole.img'), 'wb') as f:
+    f.write(nw.volume(nw.mft(ents, 64), frags))
+try:
+    rc, out, err = wine([exe, 'mft', '--image', r'C:\ntfs\vol.img', '--find', 'invoice', '--json'])
+    a = [r['path'] for r in json.loads(out)]
+    rc2, out2, err2 = wine([exe, 'mft', '--image', r'C:\ntfs\vol_nolist.img', '--find', 'invoice', '--json'])
+    b = json.loads(out2)
+    rc3, out3, err3 = wine([exe, 'mft', '--image', r'C:\ntfs\vol_whole.img', '--find', 'invoice', '--json'])
+    c = [r['path'] for r in json.loads(out3)]
+    rc4, out4, err4 = wine([exe, 'mft', '--image', r'C:\ntfs\MFT'])
+    if a != ['\\Users\\bob\\Downloads\\invoice.exe'] or 'WARNING' in err:
+        print(f'FAIL mft --image (attribute list): {a} {err[:200]}'); fails += 1
+    elif b != [] or 'WARNING' not in err2 or 'missing' not in err2:
+        print(f'FAIL mft --image (no list): expected an incomplete-read warning: {b} {err2[:200]}'); fails += 1
+    elif c != a or 'WARNING' in err3:
+        print(f'FAIL mft --image (all runs in record 0): {c} {err3[:200]}'); fails += 1
+    elif rc4 != 1 or 'not an image of an NTFS volume' not in err4:
+        print(f'FAIL mft --image on a non-volume: rc={rc4} {err4[:200]}'); fails += 1
+    else:
+        print('checked mft --image  (fragmented $MFT followed through its attribute list; incomplete read warned)')
+except Exception as e:
+    print('FAIL mft --image check:', e); fails += 1
 print(f'\n{fails} failure(s)')
 sys.exit(1 if fails else 0)
