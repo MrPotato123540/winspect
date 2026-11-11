@@ -81,6 +81,10 @@ Sırayla oku. Her dosya bir öncekinin üstüne kurulu:
 25. **[24 — SRUM ve ESE](24-srum-ese.md)**
     `srum`: uygulama başına ağ baytları; kendi ESE (JET Blue) okuyucumuz ve
     plaso'nun gerçek veritabanıyla doğrulaması.
+26. **[25 — Yama raporu, oturum geçmişi ve yeni komutlar](25-yama-raporu-oturumlar-ve-yeni-komutlar.md)**
+    `verify` / `triage` artık hangi baytların değiştiğini ve atlamanın hangi
+    modüle gittiğini gösteriyor; parçalanmış `$MFT` ve `mft --image`;
+    `logons` (Windows'un `last`'ı), `dns`, `wer`, `office`, `magic`, `hash --match`.
 
 ## Aklında tut: tek cümlelik fikir
 
