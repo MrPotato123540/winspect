@@ -1008,5 +1008,43 @@ try:
         print(f'FAIL autoruns: sethc.exe reported {n} times, expected 1'); fails += 1
 except Exception as e:
     print('FAIL autoruns dedupe check:', e); fails += 1
+
+# verify / triage patch report: a helper overwrites the start of one of its
+# own functions, first with a direct jump, then with a jump through a private
+# trampoline page (what hooking libraries do). The report must name the
+# section, show the original and the new bytes, decode the jump and say which
+# module finally receives control - the evidence needed to tell a hooking
+# product from a replaced image.
+if cc:
+    subprocess.run([cc, '-O1', os.path.join(here, '..', 'selfpatch.c'), '-o', os.path.join(fake, 'selfpatch.exe')], check=True)
+    for mode in ('direct', 'tramp'):
+        sp = subprocess.Popen([WINE, r'C:\fake\selfpatch.exe', mode], env=env, stdout=subprocess.PIPE,
+                              stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, text=True)
+        sp.stdout.readline()
+        try:
+            rc, out, err = wine([exe, 'list', '--json'])
+            pid = [p['pid'] for p in json.loads(out) if p.get('name', '').lower() == 'selfpatch.exe'][-1]
+            rc, out, err = wine([exe, 'verify', str(pid), '--json'])
+            t = json.loads(out)['checks']['image_tamper']
+            ps = t.get('patches', [])
+            ok = (t['modified_sections'] == 1 and t['patch_count'] == 1 and len(ps) == 1 and ps[0]['section'] == '.text'
+                  and ps[0]['disk'] != ps[0]['memory'] and int(ps[0]['target'], 16) != 0)
+            if mode == 'direct':
+                ok = ok and ps[0]['kind'] == 'jmp' and ps[0]['target_module'].lower() == 'selfpatch.exe' and ps[0]['memory'].startswith('E9')
+            else:
+                ok = ok and ps[0]['target_module'] == '' and ps[0]['final_module'].lower() == 'selfpatch.exe'
+            rc, out2, err = wine([exe, 'triage', str(pid), '--json'])
+            tj = json.loads(out2)['signals']
+            ok = ok and tj['image_patch_count'] == 1 and len(tj['image_patches']) == 1
+            rc, txt, err = wine([exe, 'triage', str(pid)])
+            ok = ok and 'disk:' in txt and 'mem :' in txt and 'selfpatch.exe' in txt.split('image tamper')[1]
+            if not ok:
+                print(f'FAIL verify patches ({mode}): {json.dumps(t)[:400]}'); fails += 1
+            else:
+                print(f'checked verify/triage patch report ({mode}: bytes, jump decoded, destination module named)')
+        except Exception as e:
+            print(f'FAIL verify patches ({mode}):', e); fails += 1
+        sp.kill()
+        wine(['taskkill', '/f', '/im', 'selfpatch.exe'])
 print(f'\n{fails} failure(s)')
 sys.exit(1 if fails else 0)

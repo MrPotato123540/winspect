@@ -29,6 +29,7 @@
 #include "destlist.h"
 #include "shellitem.h"
 #include "rights.h"
+#include "patchdec.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -966,6 +967,11 @@ int main(void)
                 check_int("boot record", (int)nbt.record_size, 1024);
                 boot[13] = 0xF4;                                        // 2^12 sectors per cluster (64K-cluster volumes use this form)
                 check_int("boot big cluster", ntfs_parse_boot(boot, sizeof boot, &nbt) == 0 && nbt.cluster_size == 512u * 4096u, 1);
+                boot[13] = 0x81;                                        // would be a shift by 127
+                check_int("boot absurd cluster shift", ntfs_parse_boot(boot, sizeof boot, &nbt), -1);
+                boot[13] = 8; boot[64] = 0x80;                          // record size 2^128
+                check_int("boot absurd record shift", ntfs_parse_boot(boot, sizeof boot, &nbt), -1);
+                boot[64] = 0xF6;
                 memcpy(boot + 3, "FAT32   ", 8);
                 check_int("boot not ntfs", ntfs_parse_boot(boot, sizeof boot, &nbt), -1);
                 // A record whose non-resident $DATA has three runs: +0x100000 x 0x40,
@@ -1412,6 +1418,54 @@ int main(void)
     if (i != n) {
         fprintf(stderr, "FAIL: expected %zu output lines, read %zu\n", n, i);
         failures++;
+    }
+
+    // --- patchdec: grouping changed bytes and recognising hook shapes -----------
+    {
+        unsigned char a[64], b[64];
+        memset(a, 0x90, sizeof a);
+        memcpy(b, a, sizeof b);
+        patch_run pr[4];
+        uint32_t td = 99;
+        check_int("patch none", (int)patch_runs(a, b, sizeof a, pr, 4, &td), 0);
+        check_int("patch none diff", (int)td, 0);
+        b[10] = 0xE9; b[11] = 1; b[13] = 2;                 // one equal byte inside (b[12])
+        b[40] = 0xCC;                                       // far away: a second patch
+        check_int("patch two runs", (int)patch_runs(a, b, sizeof a, pr, 4, &td), 2);
+        check_int("patch run0 off", (int)pr[0].off, 10);
+        check_int("patch run0 len", (int)pr[0].len, 4);
+        check_int("patch run0 diff", (int)pr[0].diff, 3);
+        check_int("patch run1 off", (int)pr[1].off, 40);
+        check_int("patch total diff", (int)td, 4);
+        b[15 + PATCH_GAP] = 0x11;                           // gap of PATCH_GAP+1 equal bytes after b[13]: new run
+        check_int("patch gap splits", (int)patch_runs(a, b, sizeof a, pr, 4, &td), 3);
+        b[14 + PATCH_GAP] = 0x11;                           // gap of exactly PATCH_GAP: merged
+        check_int("patch gap merges", (int)patch_runs(a, b, sizeof a, pr, 4, &td) == 2 && pr[0].len == 10 + PATCH_GAP - 4, 1);
+        check_int("patch count beyond max", (int)patch_runs(a, b, sizeof a, pr, 1, NULL), 2);
+
+        uint64_t t = 0;
+        const unsigned char jmp[] = { 0xE9, 0x37, 0x00, 0x00, 0x00 };
+        check_int("dec jmp", patch_decode(jmp, sizeof jmp, 0x140001480ULL, 1, &t) == PATCH_JMP_REL && t == 0x1400014BCULL, 1);
+        const unsigned char jback[] = { 0xE9, 0xFB, 0xFF, 0xFF, 0xFF };   // rel32 = -5: jumps to itself
+        check_int("dec jmp negative", patch_decode(jback, sizeof jback, 0x1000, 1, &t) == PATCH_JMP_REL && t == 0x1000, 1);
+        const unsigned char call[] = { 0xE8, 0x10, 0x00, 0x00, 0x00 };
+        check_int("dec call", patch_decode(call, sizeof call, 0x2000, 1, &t) == PATCH_CALL_REL && t == 0x2015, 1);
+        const unsigned char shortj[] = { 0xEB, 0xFE };
+        check_int("dec short jmp", patch_decode(shortj, sizeof shortj, 0x3000, 1, &t) == PATCH_JMP_REL && t == 0x3000, 1);
+        const unsigned char jm[] = { 0xFF, 0x25, 0x00, 0x01, 0x00, 0x00 };
+        check_int("dec jmp mem x64", patch_decode(jm, sizeof jm, 0x4000, 1, &t) == PATCH_JMP_MEM && t == 0x4106, 1);
+        check_int("dec jmp mem x86", patch_decode(jm, sizeof jm, 0x4000, 0, &t) == PATCH_JMP_MEM && t == 0x100, 1);
+        const unsigned char mj[] = { 0x48, 0xB8, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0xFF, 0xE0 };
+        check_int("dec mov rax jmp", patch_decode(mj, sizeof mj, 0, 1, &t) == PATCH_MOV_JMP && t == 0x1122334455667788ULL, 1);
+        const unsigned char mr11[] = { 0x49, 0xBB, 1, 0, 0, 0, 0, 0, 0, 0, 0x41, 0xFF, 0xE3 };
+        check_int("dec mov r11 jmp", patch_decode(mr11, sizeof mr11, 0, 1, &t) == PATCH_MOV_JMP && t == 1, 1);
+        const unsigned char pr32[] = { 0x68, 0x78, 0x56, 0x34, 0x12, 0xC3 };
+        check_int("dec push ret", patch_decode(pr32, sizeof pr32, 0, 0, &t) == PATCH_PUSH_RET && t == 0x12345678, 1);
+        check_int("dec truncated jmp", patch_decode(jmp, 4, 0, 1, &t) == PATCH_OTHER && t == 0, 1);
+        const unsigned char nop[] = { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 };
+        check_int("dec other", patch_decode(nop, sizeof nop, 0, 1, &t), PATCH_OTHER);
+        check_int("dec empty", patch_decode(nop, 0, 0, 1, &t), PATCH_OTHER);
+        check_str("dec name", patch_kind_name(PATCH_JMP_MEM), "jmp [mem]");
     }
 
     fprintf(stderr, "\n%s (%d failure%s)\n",

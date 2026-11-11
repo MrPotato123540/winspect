@@ -16,6 +16,23 @@
 // section by section, after undoing relocations so a rebased module does not look
 // modified. A non-zero modified_sections is the shape of process hollowing or an
 // in-memory code patch.
+#define TAMPER_MAX_PATCHES 24
+#define TAMPER_PATCH_BYTES 16
+struct tamper_patch {
+    char     section[9];
+    DWORD    rva;                // first changed byte
+    DWORD    len;                // span of the patch
+    DWORD    diff;               // changed bytes inside the span
+    unsigned shown;              // bytes kept in disk[] / mem[]
+    unsigned char disk[TAMPER_PATCH_BYTES];
+    unsigned char mem[TAMPER_PATCH_BYTES];
+    int      kind;               // enum patch_kind (patchdec.h)
+    DWORD64  target;             // where the jump/call goes (0 = not a control transfer)
+    char     target_module[64];  // module holding target; "" = unbacked (private) memory
+    DWORD64  final_target;       // after following one trampoline in private memory, else 0
+    char     final_module[64];
+};
+
 struct tamper_result {
     int      checked;            // 1 if the on-disk image could be read + compared
     int      modified_sections;  // executable sections whose bytes differ
@@ -23,6 +40,15 @@ struct tamper_result {
     unsigned diff_bytes;         // differing bytes counted in that section
     DWORD    first_diff_rva;     // RVA of the first differing byte
     char     note[128];          // why checked==0, when it is
+    // The detail needed to judge a mismatch instead of guessing: every patch
+    // (run of changed bytes) with the original and current bytes and, when the
+    // new bytes are a jump/call, where it leads. A handful of 5..14 byte jumps
+    // into a named module is a hooking product; megabytes of difference is a
+    // replaced image.
+    unsigned total_diff_bytes;   // across all executable sections
+    unsigned patch_count;        // total patches found (may exceed TAMPER_MAX_PATCHES)
+    unsigned npatches;           // entries filled in patches[]
+    struct tamper_patch patches[TAMPER_MAX_PATCHES];
 };
 
 // Result of checking the main image's Import Address Table: each resolved slot
@@ -66,6 +92,13 @@ struct secperm_result {
 // Each returns the suspicious count and fills *out. A return of 0 with
 // checked==1 means "looked, found nothing".
 int detect_image_tamper(HANDLE proc, struct tamper_result *out);
+// Renders the patch list of a tamper result: text lines prefixed by indent, or
+// a JSON array (no trailing newline). Both show at most the stored patches and
+// say so when more exist. tamper_summary writes one line that characterises
+// the whole difference ("3 patch(es), 15 byte(s): 3 jump(s) into foo.dll").
+void detect_print_patches(const struct tamper_result *t, const char *indent);
+void detect_json_patches(const struct tamper_result *t);
+void detect_tamper_summary(const struct tamper_result *t, char *out, size_t n);
 int detect_iat_hooks(HANDLE proc, struct iathook_result *out);
 int detect_unbacked_threads(HANDLE proc, DWORD pid, struct thread_result *out);
 int detect_section_perms(HANDLE proc, struct secperm_result *out);

@@ -399,6 +399,9 @@ static int check_image_tamper(HANDLE h, int json)
             fputs(",\"first_section\":", stdout); json_str(t.first_section);
             printf(",\"diff_bytes\":%u,\"first_diff_rva\":\"0x%08lX\"",
                    t.diff_bytes, (unsigned long)t.first_diff_rva);
+            printf(",\"total_diff_bytes\":%u,\"patch_count\":%u,\"patches\":",
+                   t.total_diff_bytes, t.patch_count);
+            detect_json_patches(&t);
         }
         if (!t.checked && t.note[0]) {
             fputs(",\"note\":", stdout); json_str(t.note);
@@ -416,8 +419,10 @@ static int check_image_tamper(HANDLE h, int json)
     } else {
         printf("  [WARN] %d executable section(s) differ from disk "
                "(hollowing / patched code)\n", t.modified_sections);
-        printf("         first: section %s, %u byte(s) changed, from RVA 0x%08lX\n",
-               t.first_section, t.diff_bytes, (unsigned long)t.first_diff_rva);
+        char sum[256];
+        detect_tamper_summary(&t, sum, sizeof sum);
+        printf("         %s\n", sum);
+        detect_print_patches(&t, "         ");
     }
     return t.modified_sections;
 }

@@ -20,6 +20,7 @@ add_executable(winspect
     src/net.c
     src/triage.c
     src/detect.c
+    src/patchdec.c
     src/strings.c
     src/services.c
     src/drivers.c

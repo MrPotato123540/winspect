@@ -174,10 +174,14 @@ int ntfs_parse_boot(const unsigned char *b, size_t n, ntfs_boot *nb)
     if (n < 512 || memcmp(b + 3, "NTFS    ", 8) != 0) return -1;
     nb->bytes_per_sector = rd16(b + 11);
     uint8_t spc = b[13];
+    // Above 0x80 the byte is a negative power of two (0xF4 = 2^12 sectors).
+    // A corrupt boot sector must not turn that into an undefined shift.
+    if (spc > 0x80 && 256 - spc > 20) return -1;
     uint32_t sectors = spc <= 0x80 ? spc : (1u << (256 - spc));
     nb->cluster_size = nb->bytes_per_sector * sectors;
     nb->mft_lcn = rd64(b + 48);
     int8_t cpr = (int8_t)b[64];
+    if (cpr < -16) return -1;                 // record size 2^-cpr; 64 KiB is the cap below
     nb->record_size = cpr > 0 ? (uint32_t)cpr * nb->cluster_size : (1u << (-cpr));
     if (nb->bytes_per_sector < 256 || nb->bytes_per_sector > 4096 || nb->cluster_size == 0 ||
             nb->cluster_size > (2u << 20) || nb->record_size < 512 || nb->record_size > 65536) return -1;

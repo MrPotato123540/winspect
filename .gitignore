@@ -12,3 +12,6 @@ CMakeUserPresets.json
 *.exe
 *.pdb
 *.ilk
+# Test leftovers
+__pycache__/
+wpfx/
