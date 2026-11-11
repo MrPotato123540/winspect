@@ -1187,5 +1187,22 @@ try:
         print('checked office  (live + offline hive: trusted documents, settings, locations; benign controls unflagged)')
 except Exception as e:
     print('FAIL office check:', e); fails += 1
+
+# timeline picks up the new sources: the crash report and the macro-enabled
+# download become flagged rows; settings / locations (no user-action time)
+# and the edit-only document's row stays unflagged.
+try:
+    rc, out, err = wine([exe, 'timeline', '--sources', 'wer,office', '--json'], timeout=300)
+    tr2 = json.loads(out)
+    crash = [r for r in tr2 if r['source'] == 'wer' and 'upd.exe' in r['event']]
+    docs = [r for r in tr2 if r['source'] == 'office']
+    if not (len(crash) == 1 and crash[0]['suspicious'] and crash[0]['time'] == '2024-01-17 21:20:00' and 'APPCRASH' in crash[0]['event']):
+        print(f'FAIL timeline (wer): {crash}'); fails += 1
+    elif len(docs) != 3 or sum(1 for r in docs if r['suspicious']) != 1 or not all('Office document trusted' in r['event'] for r in docs):
+        print(f'FAIL timeline (office): {docs}'); fails += 1
+    else:
+        print('checked timeline --sources wer,office  (crash and macro-enabled download as flagged rows)')
+except Exception as e:
+    print('FAIL timeline new sources check:', e, out[:300]); fails += 1
 print(f'\n{fails} failure(s)')
 sys.exit(1 if fails else 0)
