@@ -85,6 +85,10 @@ Sırayla oku. Her dosya bir öncekinin üstüne kurulu:
     `verify` / `triage` artık hangi baytların değiştiğini ve atlamanın hangi
     modüle gittiğini gösteriyor; parçalanmış `$MFT` ve `mft --image`;
     `logons` (Windows'un `last`'ı), `dns`, `wer`, `office`, `magic`, `hash --match`.
+27. **[26 — Defender tespit geçmişi ve açılış / kapanış geçmişi](26-defender-gecmisi-ve-acilis-kapanis.md)**
+    `detections`: Defender'ın Detection History dosyaları ve biçimi;
+    `boots`: açılış / kapanış, kimin istediği, saat değişiklikleri ve neden
+    kayıt sırası; EVTX okuyucusunda klasik olay dizgileri düzeltmesi.
 
 ## Aklında tut: tek cümlelik fikir
 
