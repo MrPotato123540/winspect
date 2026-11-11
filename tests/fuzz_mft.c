@@ -57,6 +57,23 @@ int main(int argc, char **argv)
         for (size_t i = 0; i < n; i++) {
             mft_path(nodes, n, (uint32_t)i, path, sizeof path);
             mft_timestomp_reason(tab[i].si, tab[i].fn);
+            // The volume-reading helpers see the same corrupted records: run
+            // lists of any attribute, resident content, attribute lists, and
+            // arbitrary bytes taken as a boot sector.
+            static const uint32_t types[] = { 0x20, 0x80, 0xA0 };
+            mft_run rr[16];
+            uint64_t real, vcn;
+            const unsigned char *cp;
+            size_t cl;
+            mft_ext ex[8];
+            for (int t = 0; t < 3; t++) {
+                mft_attr_runs(buf + i * rs, rs, types[t], rr, 16, &real, &vcn);
+                if (mft_attr_resident(buf + i * rs, rs, types[t], &cp, &cl) == 0) mft_alist_data(cp, cl, 0, ex, 8);
+            }
+            mft_alist_data(buf + i * rs, rs, i, ex, 8);
+            ntfs_boot nb;
+            memcpy(buf + i * rs + 3, "NTFS    ", 8);
+            ntfs_parse_boot(buf + i * rs, rs, &nb);
         }
     }
     printf("fuzz_mft: %ld rounds, %lu records parsed, no sanitizer findings\n", rounds, parsed);
