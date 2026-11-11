@@ -106,6 +106,7 @@
 #include "dnscache.h"
 #include "wer.h"
 #include "office.h"
+#include "magic.h"
 
 // cmd_modules lives in modules.c: a live process's loaded modules
 #include "modules.h"
@@ -241,6 +242,7 @@ static const struct {
     { "sign",    cmd_sign,    "Authenticode signature + trust (or --scan)", "file" },
     { "strings", cmd_strings, "printable strings + indicators from a file", "file" },
     { "hash",    cmd_hash,    "MD5/SHA1/SHA256 of a file",                  "file" },
+    { "magic",   cmd_magic,   "real file type by content; disguised programs", "file" },
     { "lnk",      cmd_lnk,      "shortcut files (default: Recent folder)",  "file" },
     { "streams",  cmd_streams,  "alternate data streams + Mark-of-the-Web", "file" },
     { "jumplist", cmd_jumplist, "Jump Lists: recent items per application",  "file" },

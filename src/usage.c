@@ -33,6 +33,20 @@ static const struct { const char *name, *text; } usage_table[] = {
         "winspect hash - compute a file's MD5, SHA1 and SHA256 digests, the identifiers\n"
         "used to look a sample up in threat-intel. Read-only. Usage:\n"
         "  winspect hash <path> [--json]\n" },
+    { "magic",
+        "winspect magic - what a file really is, from its content instead of its\n"
+        "name (the idea of the Unix `file` command): PE programs / DLLs / drivers\n"
+        "with their architecture, ELF, archives and disk images (zip, rar, 7z, cab,\n"
+        "iso, vhd, wim), documents (PDF, OLE2 and Open XML Office, RTF, OneNote,\n"
+        "CHM), shortcuts, pictures, media, scripts (batch, HTA), Windows artifacts\n"
+        "(evtx, hive, SQLite, Prefetch, ESE, dumps) and plain text; anything else\n"
+        "is \"data\". For a folder every file is listed (-r descends). Flagged, with\n"
+        "the reason: a program behind a picture / document / media extension, a\n"
+        "double extension (invoice.pdf.exe), a right-to-left override character in\n"
+        "the name, a long run of spaces hiding the extension. --flagged keeps only\n"
+        "those - a quick way to sweep a Downloads folder or a mounted image.\n"
+        "Reads at most the first 36 KiB of each file. Read-only. Usage:\n"
+        "  winspect magic <file | folder> [-r] [--flagged] [--json | --csv]\n" },
     { "lnk",
         "winspect lnk - parse Windows shortcut (.lnk) files: target path, arguments,\n"
         "working directory, the target's timestamps, the volume it was on (type,\n"

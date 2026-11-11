@@ -1204,5 +1204,46 @@ try:
         print('checked timeline --sources wer,office  (crash and macro-enabled download as flagged rows)')
 except Exception as e:
     print('FAIL timeline new sources check:', e, out[:300]); fails += 1
+
+# magic: a "Downloads" folder with a program renamed to .jpg, a double
+# extension, a right-to-left override name and, as controls, a real JPEG, a
+# PDF, a .docx-shaped zip and a normally named program (in a sub-folder, so
+# -r is needed to see it).
+mg = os.path.join(pfx, 'drive_c', 'magic'); os.makedirs(os.path.join(mg, 'sub'), exist_ok=True)
+with open(exe, 'rb') as f:
+    pe_bytes = f.read(8192)
+def put(name, data):
+    with open(os.path.join(mg, name), 'wb') as f:
+        f.write(data)
+put('holiday.jpg', pe_bytes)
+put('real.jpg', b'\xff\xd8\xff\xe0\x00\x10JFIF\x00' + b'\x00' * 64)
+put('invoice.pdf.exe', pe_bytes)
+put('report.pdf', b'%PDF-1.7\n%\xe2\xe3\xcf\xd3\n')
+put('letter.docx', b'PK\x03\x04' + b'\x00' * 22 + struct.pack('<HH', 19, 0) + b'[Content_Types].xml' + b'<x/>')
+put('ann\u202efdp.exe', pe_bytes)
+put(os.path.join('sub', 'tool.exe'), pe_bytes)
+try:
+    rc, out, err = wine([exe, 'magic', r'C:\magic', '--json'])
+    rows = {os.path.basename(r['path'].replace('\\', '/')): r for r in json.loads(out)}
+    rc2, out2, err2 = wine([exe, 'magic', r'C:\magic', '-r', '--flagged', '--csv'])
+    rc3, out3, err3 = wine([exe, 'magic', r'C:\magic\sub\tool.exe', '--json'])
+    fl = {n: r['reason'] for n, r in rows.items() if r['suspicious']}
+    if set(fl) != {'holiday.jpg', 'invoice.pdf.exe', 'ann\u202efdp.exe'}:
+        print(f'FAIL magic: flagged {sorted(fl)}'); fails += 1
+    elif 'picture' not in fl['holiday.jpg'] or 'double extension' not in fl['invoice.pdf.exe'] or 'right-to-left' not in fl['ann\u202efdp.exe']:
+        print(f'FAIL magic: reasons {fl}'); fails += 1
+    elif not rows['holiday.jpg']['type'].startswith('PE executable') or rows['real.jpg']['type'] != 'JPEG image' or \
+            rows['report.pdf']['type'] != 'PDF document' or not rows['letter.docx']['type'].startswith('Office Open XML'):
+        print(f"FAIL magic: types {[(n, r['type']) for n, r in rows.items()]}"); fails += 1
+    elif 'tool.exe' in rows:
+        print('FAIL magic: sub-folder listed without -r'); fails += 1
+    elif len(out2.strip().splitlines()) != 4 or 'tool.exe' in out2:
+        print(f'FAIL magic -r --flagged --csv: {out2}'); fails += 1
+    elif json.loads(out3)[0]['type'][:13] != 'PE executable' or json.loads(out3)[0]['suspicious']:
+        print(f'FAIL magic <file>: {out3}'); fails += 1
+    else:
+        print('checked magic  (disguised program, double extension, RTLO flagged; real picture / PDF / docx / program not)')
+except Exception as e:
+    print('FAIL magic check:', e); fails += 1
 print(f'\n{fails} failure(s)')
 sys.exit(1 if fails else 0)

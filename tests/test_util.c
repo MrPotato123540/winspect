@@ -29,6 +29,7 @@
 #include "destlist.h"
 #include "shellitem.h"
 #include "rights.h"
+#include "magicparse.h"
 #include "officeparse.h"
 #include "werparse.h"
 #include "logonparse.h"
@@ -1693,6 +1694,100 @@ int main(void)
 
     check_int("loc temp exact", trustloc_reason("C:\\Windows\\Temp") != NULL && trustloc_reason("c:\\temp\\x") != NULL, 1);
     check_int("loc public", trustloc_reason("C:\\Users\\Public\\Documents") != NULL && trustloc_reason("C:\\Users\\PublicRelations") == NULL, 1);
+
+    // --- magic: file type by content, name vs content ---------------------------
+    {
+        const char *g;
+        unsigned char pe[0x200];
+        memset(pe, 0, sizeof pe);
+        pe[0] = 'M'; pe[1] = 'Z'; pe[0x3C] = 0x80;
+        memcpy(pe + 0x80, "PE\0\0", 4);
+        pe[0x84] = 0x64; pe[0x85] = 0x86;                       // machine x64
+        pe[0x80 + 24 + 68] = 3;                                 // console subsystem
+        check_str("magic pe exe", magic_sniff(pe, sizeof pe, &g), "PE executable (x64)");
+        check_str("magic pe group", g, "program");
+        pe[0x80 + 22] = 0x00; pe[0x80 + 23] = 0x20;             // IMAGE_FILE_DLL
+        check_str("magic pe dll", magic_sniff(pe, sizeof pe, &g), "PE DLL (x64)");
+        pe[0x80 + 24 + 68] = 1;
+        check_str("magic pe driver", magic_sniff(pe, sizeof pe, &g), "PE driver (x64)");
+        pe[0x3C] = 0xF0; pe[0x3D] = 0xFF;                       // e_lfanew past the buffer
+        check_str("magic mz only", magic_sniff(pe, sizeof pe, &g), "DOS executable (MZ)");
+        check_str("magic mz tiny (two letters are just text)", magic_sniff((const unsigned char *)"MZ", 2, &g), "text");
+
+        unsigned char z[64];
+        memset(z, 0, sizeof z);
+        memcpy(z, "PK\x03\x04", 4);
+        z[26] = 19; memcpy(z + 30, "[Content_Types].xml", 19);
+        check_str("magic ooxml", magic_sniff(z, sizeof z, &g), "Office Open XML document (docx / xlsx / pptx)");
+        check_str("magic ooxml group", g, "document");
+        z[26] = 9; memcpy(z + 30, "META-INF/", 9);
+        check_str("magic jar", magic_sniff(z, sizeof z, &g), "Java archive (JAR)");
+        z[26] = 200;                                            // name length past the buffer
+        check_str("magic zip clipped name", magic_sniff(z, 40, &g), "Java archive (JAR)");
+        z[26] = 3; memcpy(z + 30, "a.t", 3);
+        check_str("magic zip", magic_sniff(z, sizeof z, &g), "ZIP archive");
+        check_str("magic zip short", magic_sniff(z, 10, &g), "ZIP archive");
+
+        static unsigned char iso[0x8010];
+        memcpy(iso + 0x8001, "CD001", 5);
+        check_str("magic iso", magic_sniff(iso, sizeof iso, &g), "ISO 9660 disc image");
+        check_str("magic iso cut", magic_sniff(iso, 0x8003, &g), "data");
+
+        static const struct { const char *bytes; size_t n; const char *type, *group; } sig[] = {
+            { "%PDF-1.7\n", 9, "PDF document", "document" },
+            { "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1....", 12, "OLE2 compound file (legacy Office document / MSI)", "document" },
+            { "{\\rtf1\\ansi", 11, "Rich Text Format document", "document" },
+            { "\x4C\x00\x00\x00\x01\x14\x02\x00....", 12, "Windows shortcut (LNK)", "shortcut" },
+            { "\x89PNG\r\n\x1A\n....", 12, "PNG image", "image" },
+            { "\xFF\xD8\xFF\xE0..JFIF", 10, "JPEG image", "image" },
+            { "GIF89a....", 10, "GIF image", "image" },
+            { "Rar!\x1A\x07\x01\x00", 8, "RAR archive", "archive" },
+            { "7z\xBC\xAF\x27\x1C..", 8, "7-Zip archive", "archive" },
+            { "MSCF\0\0\0\0", 8, "Microsoft Cabinet (CAB)", "archive" },
+            { "ElfFile\0....", 12, "Windows event log (EVTX)", "system" },
+            { "regf....", 8, "registry hive", "system" },
+            { "SQLite format 3\0", 16, "SQLite database", "system" },
+            { "\x7F" "ELF\x02\x01\x01", 7, "ELF executable", "program" },
+            { "<HTML><head><HTA:APPLICATION id=x>", 34, "HTML application (HTA)", "script" },
+            { "\r\n  @ECHO OFF\r\ndel x", 20, "batch script", "script" },
+            { "#!/bin/sh\necho", 14, "script (shebang)", "script" },
+            { "<?xml version='1.0'?><a/>", 25, "XML text", "text" },
+            { "<!DOCTYPE html><html>", 21, "HTML text", "text" },
+            { "hello, world\r\n", 14, "text", "text" },
+            { "\xFF\xFEh\0i\0", 6, "text (UTF-16)", "text" },
+            { "ab\0cd", 5, "data", "data" },
+            { "", 0, "empty", "data" },
+            { "BM", 2, "text", "text" },                       // two letters are not a bitmap
+        };
+        for (size_t i = 0; i < sizeof sig / sizeof sig[0]; i++) {
+            char label[48];
+            snprintf(label, sizeof label, "magic sig %zu", i);
+            const char *t = magic_sniff((const unsigned char *)sig[i].bytes, sig[i].n, &g);
+            check_int(label, strcmp(t, sig[i].type) == 0 && strcmp(g, sig[i].group) == 0, 1);
+        }
+        check_int("magic null group ok", magic_sniff((const unsigned char *)"%PDF-", 5, NULL) != NULL, 1);
+
+        check_int("name pe as jpg", magic_name_reason("holiday.jpg", "program") != NULL, 1);
+        check_int("name jpg as jpg", magic_name_reason("holiday.jpg", "image") == NULL, 1);
+        check_int("name pe as exe", magic_name_reason("setup.exe", "program") == NULL, 1);
+        check_int("name pe as mui (odd but normal)", magic_name_reason("shell32.dll.mui", "program") == NULL, 1);
+        check_int("name pe as tmp", magic_name_reason("is-AB12.tmp", "program") == NULL, 1);
+        check_int("name double ext", magic_name_reason("invoice.pdf.exe", "program") != NULL &&
+                  strstr(magic_name_reason("invoice.pdf.exe", "program"), "double extension") != NULL, 1);
+        check_int("name double ext script", magic_name_reason("photo.JPG.Vbs", "text") != NULL, 1);
+        check_int("name version dots", magic_name_reason("setup.1.2.exe", "program") == NULL, 1);
+        check_int("name dotted product", magic_name_reason("node.js.exe", "program") == NULL, 1);
+        check_int("name archive then exe", magic_name_reason("tool.zip.exe", "program") != NULL, 1);
+        check_int("name dll config", magic_name_reason("app.exe.config", "text") == NULL, 1);
+        check_int("name rtlo", magic_name_reason("ann\xE2\x80\xAE" "fdp.exe", "program") != NULL &&
+                  strstr(magic_name_reason("ann\xE2\x80\xAE" "fdp.exe", "program"), "right-to-left") != NULL, 1);
+        check_int("name spaces", magic_name_reason("invoice.pdf            .exe", "program") != NULL &&
+                  strstr(magic_name_reason("invoice.pdf            .exe", "program"), "spaces") != NULL, 1);
+        check_int("name few spaces + doc ext", magic_name_reason("my file.pdf .exe", "program") != NULL, 1);
+        check_int("name no ext", magic_name_reason("README", "text") == NULL && magic_name_reason(".gitignore", "text") == NULL, 1);
+        check_int("name leading dot double", magic_name_reason(".pdf.exe", "program") != NULL, 1);
+        check_int("name null group", magic_name_reason("a.jpg", NULL) == NULL, 1);
+    }
 
     fprintf(stderr, "\n%s (%d failure%s)\n",
             failures == 0 ? "ALL PASSED" : "FAILED", failures, failures == 1 ? "" : "s");
