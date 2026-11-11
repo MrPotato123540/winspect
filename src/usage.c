@@ -457,6 +457,19 @@ static const struct { const char *name, *text; } usage_table[] = {
         "With a pid, only that process's endpoints are shown; without one, all. Each\n"
         "row names the owning process. --tcp/--udp pick a family; --listening shows\n"
         "listening/bound sockets, --established only live TCP connections.\n" },
+    { "dns",
+        "winspect dns - the DNS resolver cache: the names this machine looked up\n"
+        "recently and what they resolved to (what `ipconfig /displaydns` prints),\n"
+        "one row per record: name, type (A, AAAA, CNAME, PTR, SRV, MX, TXT ...),\n"
+        "data and remaining TTL. Names are still listed minutes to hours after the\n"
+        "process that asked for them has exited, which makes the cache a quick\n"
+        "answer to \"did this host talk to that domain?\". Entries that come from\n"
+        "the hosts file are in the cache too (see `winspect hosts`). Nothing is\n"
+        "flagged: a name is not suspicious by its look. --find keeps rows whose\n"
+        "name or data contains the text. The cache is answered from memory\n"
+        "(DNS_QUERY_NO_WIRE_ONLY): no query leaves the machine. Needs the DNS Client\n"
+        "service; an empty or unavailable cache is said so. Read-only. Usage:\n"
+        "  winspect dns [--find <text>] [--json | --csv]\n" },
     { "arp",
         "winspect arp - the IPv4 neighbour (ARP) cache: which IP maps to which MAC on\n"
         "the local segment. Read-only. Usage: winspect arp [--json | --csv]\n" },
