@@ -1128,5 +1128,64 @@ try:
         print('checked wer  (UTF-16 reports: Temp program flagged, Word hang with add-in not; folder / --find / --modules)')
 except Exception as e:
     print('FAIL wer check:', e); fails += 1
+
+# office: Trusted Documents, macro settings and trusted locations - once in
+# the live HKCU (reg add) and once in an offline NTUSER.DAT built by the test
+# hive writer. A macro-enabled download and a mail attachment are flagged; a
+# macro-enabled workbook in Documents and an edit-only download are not;
+# VBAWarnings=1 is flagged, the default 2 produces no row; a trusted location
+# in Downloads is flagged, the stock Templates one is not.
+def trec(ft, flags):
+    return struct.pack('<QQII', ft, 0, 0, flags)
+OT = 133500000000000000
+OSEC = HKCU + r'Software\Microsoft\Office\16.0\Word\Security'
+reg(OSEC + r'\Trusted Documents\TrustRecords', '/v', '%USERPROFILE%/Downloads/invoice.docm', '/t', 'REG_BINARY', '/d', trec(OT, 0x7FFFFFFF).hex())
+reg(OSEC + r'\Trusted Documents\TrustRecords', '/v', '%USERPROFILE%/Downloads/readme.docx', '/t', 'REG_BINARY', '/d', trec(OT, 1).hex())
+reg(OSEC + r'\Trusted Documents\TrustRecords', '/v', '%USERPROFILE%/Documents/budget.docm', '/t', 'REG_BINARY', '/d', trec(OT, 0x7FFFFFFF).hex())
+reg(OSEC, '/v', 'VBAWarnings', '/t', 'REG_DWORD', '/d', '1')
+reg(HKCU + r'Software\Microsoft\Office\16.0\Excel\Security', '/v', 'VBAWarnings', '/t', 'REG_DWORD', '/d', '2')
+reg(OSEC + r'\Trusted Locations\Location9', '/v', 'Path', '/t', 'REG_SZ', '/d', 'C:\\Users\\bob\\Downloads\\')
+reg(OSEC + r'\Trusted Locations\Location0', '/v', 'Path', '/t', 'REG_SZ', '/d', '%APPDATA%\\Microsoft\\Templates')
+osec = K('Security', [rw.Value('AccessVBOM', rw.REG_DWORD, rw.dword(1))], [
+    K('Trusted Documents', [], [K('TrustRecords', [
+        rw.Value(r'C:/Users/bob/AppData/Local/Microsoft/Windows/INetCache/Content.Outlook/AB12/po.xlsm', rw.REG_BINARY, trec(OT + 600000000, 0x7FFFFFFF)),
+        rw.Value('short', rw.REG_BINARY, b'\x01\x02\x03')])])])
+pol = K('Policies', [], [K('Microsoft', [], [K('Office', [], [K('16.0', [], [K('Excel', [], [
+    K('Security', [rw.Value('BlockContentExecutionFromInternet', rw.REG_DWORD, rw.dword(0))])])])])])])
+with open(os.path.join(off, 'NTUSER_office.DAT'), 'wb') as f:
+    f.write(rw.build(K('ROOT', [], [K('Software', [], [K('Microsoft', [], [K('Office', [], [
+        K('Common', [], [K('Excel', [], [K('Security', [rw.Value('VBAWarnings', rw.REG_DWORD, rw.dword(1))])])]),
+        K('16.0', [], [K('Excel', [], [osec])])])]), pol])])))
+try:
+    rc, out, err = wine([exe, 'office', '--json'])
+    rows = json.loads(out)
+    fl = {(r['kind'], r['item']): r['reason'] for r in rows if r['suspicious']}
+    items = {r['item']: r for r in rows}
+    want = {('document', '%USERPROFILE%\\Downloads\\invoice.docm'): 'macros enabled for a downloaded document',
+            ('setting', 'VBAWarnings'): 'all macros run without notification (VBAWarnings=1)',
+            ('location', 'C:\\Users\\bob\\Downloads\\'): 'trusted location in a download folder'}
+    rc2, out2, err2 = wine([exe, 'office', '--hive', r'C:\offline\NTUSER_office.DAT', '--json'])
+    hrows = json.loads(out2)
+    hfl = sorted((r['kind'], r['application'], r['scope'], r['reason']) for r in hrows if r['suspicious'])
+    hwant = sorted([('document', 'Excel', 'user', 'macros enabled for a mail attachment'),
+                    ('setting', 'Excel', 'user', 'programmatic access to the VBA project is allowed (AccessVBOM=1)'),
+                    ('setting', 'Excel', 'policy', 'macros in files from the internet are not blocked (policy set to 0)')])
+    rc3, out3, err3 = wine([exe, 'office', '--flagged', '--csv'])
+    if fl != want:
+        print(f'FAIL office (live): flags {fl}'); fails += 1
+    elif items['%USERPROFILE%\\Downloads\\invoice.docm']['time'] != '2024-01-17 21:20:00' or \
+            'editing enabled' not in items['%USERPROFILE%\\Downloads\\readme.docx']['detail'] or \
+            '%USERPROFILE%\\Documents\\budget.docm' not in items or '%APPDATA%\\Microsoft\\Templates' not in items:
+        print(f'FAIL office (live): rows {rows}'); fails += 1
+    elif sum(1 for r in rows if r['kind'] == 'setting') != 1:
+        print('FAIL office: the default VBAWarnings=2 must not produce a row'); fails += 1
+    elif hfl != hwant or len(hrows) != 3:
+        print(f'FAIL office --hive: {hrows}'); fails += 1
+    elif len(out3.strip().splitlines()) != 4:
+        print(f'FAIL office --flagged --csv: {out3}'); fails += 1
+    else:
+        print('checked office  (live + offline hive: trusted documents, settings, locations; benign controls unflagged)')
+except Exception as e:
+    print('FAIL office check:', e); fails += 1
 print(f'\n{fails} failure(s)')
 sys.exit(1 if fails else 0)

@@ -29,6 +29,7 @@
 #include "destlist.h"
 #include "shellitem.h"
 #include "rights.h"
+#include "officeparse.h"
 #include "werparse.h"
 #include "logonparse.h"
 #include "patchdec.h"
@@ -1649,6 +1650,49 @@ int main(void)
         char t6[] = "Sig[x].Name=a\nSig[-1].Name=b\nSig[99999999999999999999].Name=c\nLoadedModule[1\nEventType";
         check_int("wer malformed indexes", wer_parse(t6, &w), -1);
     }
+
+    // --- office: Trusted Documents records, macro settings, trusted locations ---
+    {
+        unsigned char tr[24];
+        memset(tr, 0, sizeof tr);
+        uint64_t when = 133500000000000000ULL;
+        for (int i = 0; i < 8; i++) tr[i] = (unsigned char)(when >> (8 * i));
+        tr[20] = 0xFF; tr[21] = 0xFF; tr[22] = 0xFF; tr[23] = 0x7F;
+        uint64_t ft; int en;
+        check_int("trustrec parse", trustrec_parse(tr, sizeof tr, &ft, &en) == 0 && ft == when && en == 1, 1);
+        tr[20] = 1; tr[21] = 0; tr[22] = 0; tr[23] = 0;
+        check_int("trustrec editing only", trustrec_parse(tr, sizeof tr, &ft, &en) == 0 && en == 0, 1);
+        check_int("trustrec short", trustrec_parse(tr, 23, &ft, &en), -1);
+        char p[260];
+        trustrec_path("%USERPROFILE%/Downloads/invoice.docm", p, sizeof p);
+        check_str("trustrec path slashes", p, "%USERPROFILE%\\Downloads\\invoice.docm");
+        trustrec_path("https://example.org/a/b.xlsm", p, sizeof p);
+        check_str("trustrec url kept", p, "https://example.org/a/b.xlsm");
+        check_str("trustrec downloaded", trustrec_reason("%USERPROFILE%\\Downloads\\invoice.docm", 1), "macros enabled for a downloaded document");
+        check_int("trustrec downloaded, editing only", trustrec_reason("%USERPROFILE%\\Downloads\\invoice.docm", 0) == NULL, 1);
+        check_str("trustrec attachment", trustrec_reason("C:\\Users\\bob\\AppData\\Local\\Microsoft\\Windows\\INetCache\\Content.Outlook\\AB12\\po.xlsm", 1),
+                  "macros enabled for a mail attachment");
+        check_str("trustrec url", trustrec_reason("https://example.org/a/b.xlsm", 1), "macros enabled for a document opened from a URL");
+        check_int("trustrec temp", trustrec_reason("C:\\Users\\bob\\AppData\\Local\\Temp\\7zO1\\x.xls", 1) != NULL, 1);
+        check_int("trustrec documents not flagged", trustrec_reason("%USERPROFILE%\\Documents\\budget.xlsm", 1) == NULL, 1);
+        check_int("trustrec share not flagged", trustrec_reason("\\\\fileserver\\finance\\budget.xlsm", 1) == NULL, 1);
+        check_int("setting vbawarnings 1", office_setting_reason("VBAWarnings", 1) != NULL, 1);
+        check_int("setting vbawarnings 2", office_setting_reason("VBAWarnings", 2) == NULL, 1);
+        check_int("setting accessvbom", office_setting_reason("accessvbom", 1) != NULL, 1);
+        check_int("setting block=0", office_setting_reason("BlockContentExecutionFromInternet", 0) != NULL, 1);
+        check_int("setting block=1", office_setting_reason("BlockContentExecutionFromInternet", 1) == NULL, 1);
+        check_int("setting other name", office_setting_reason("VBAWarningsX", 1) == NULL, 1);
+        check_int("loc downloads", trustloc_reason("C:\\Users\\bob\\Downloads\\") != NULL, 1);
+        check_int("loc unc", trustloc_reason("\\\\10.0.0.5\\share") != NULL, 1);
+        check_int("loc url", trustloc_reason("http://intranet/templates") != NULL, 1);
+        check_int("loc drive", trustloc_reason("D:\\") != NULL, 1);
+        check_int("loc stock templates", trustloc_reason("%APPDATA%\\Microsoft\\Templates") == NULL, 1);
+        check_int("loc program files", trustloc_reason("C:\\Program Files\\Microsoft Office\\Root\\Templates\\") == NULL, 1);
+        check_int("loc empty", trustloc_reason("") == NULL, 1);
+    }
+
+    check_int("loc temp exact", trustloc_reason("C:\\Windows\\Temp") != NULL && trustloc_reason("c:\\temp\\x") != NULL, 1);
+    check_int("loc public", trustloc_reason("C:\\Users\\Public\\Documents") != NULL && trustloc_reason("C:\\Users\\PublicRelations") == NULL, 1);
 
     fprintf(stderr, "\n%s (%d failure%s)\n",
             failures == 0 ? "ALL PASSED" : "FAILED", failures, failures == 1 ? "" : "s");

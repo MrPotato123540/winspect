@@ -85,6 +85,8 @@ add_executable(winspect
     src/dnscache.c
     src/werparse.c
     src/wer.c
+    src/officeparse.c
+    src/office.c
     src/activities.c
     src/mft.c
     src/mftcmd.c

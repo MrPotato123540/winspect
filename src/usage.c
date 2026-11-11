@@ -98,6 +98,25 @@ static const struct { const char *name, *text; } usage_table[] = {
         "hashes are never read; group membership is not shown offline). Read-only.\n"
         "Usage:\n"
         "  winspect users [--sam <SAM>] [--flagged] [--json | --csv]\n" },
+    { "office",
+        "winspect office - Microsoft Office macro trust, per user:\n"
+        "  documents  every document the user clicked \"Enable Editing\" or \"Enable\n"
+        "             Content\" for (Trusted Documents \\ TrustRecords): path, when,\n"
+        "             which application, and whether active content (macros) was\n"
+        "             enabled. The usual first step of a phishing compromise leaves\n"
+        "             exactly this record. Flagged when macros were enabled for a\n"
+        "             mail attachment, a browser-cache / downloaded / temp-folder\n"
+        "             file or a document opened from a URL.\n"
+        "  settings   macro security values that weaken the defaults (VBAWarnings=1,\n"
+        "             AccessVBOM=1, BlockContentExecutionFromInternet=0), user and\n"
+        "             policy keys.\n"
+        "  locations  trusted locations (files there skip every macro check);\n"
+        "             flagged in download / temp / Public folders, on the network,\n"
+        "             or when a whole drive is trusted.\n"
+        "All Office versions and applications found under the key are read. Live:\n"
+        "the current user; --hive reads another user's NTUSER.DAT. --flagged keeps\n"
+        "only flagged rows. Read-only. Usage:\n"
+        "  winspect office [--hive <NTUSER.DAT>] [--flagged] [--json | --csv]\n" },
     { "comhijack",
         "winspect comhijack - per-user COM class registrations (HKCU\\Software\\Classes\n"
         "\\CLSID, also the WOW6432Node view) compared with the machine ones (HKLM).\n"

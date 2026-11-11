@@ -105,6 +105,7 @@
 #include "logons.h"
 #include "dnscache.h"
 #include "wer.h"
+#include "office.h"
 
 // cmd_modules lives in modules.c: a live process's loaded modules
 #include "modules.h"
@@ -246,6 +247,7 @@ static const struct {
     { "image",    cmd_image,    "offline triage of a mounted Windows image", "security" },
     { "timeline", cmd_timeline, "merged, time-ordered evidence (UTC)",        "security" },
     { "users",    cmd_users,    "local accounts: admin, last logon, flags",  "security" },
+    { "office",   cmd_office,   "Office macro trust: enabled documents, settings", "security" },
     { "comhijack",cmd_comhijack,"per-user COM classes overriding HKLM ones",  "security" },
     { "bits",     cmd_bits,     "BITS jobs: files, owner, notify command",   "security" },
     { "recyclebin", cmd_recyclebin, "Recycle Bin: deleted files, owner, time", "file" },
