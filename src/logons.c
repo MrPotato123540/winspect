@@ -77,7 +77,7 @@ static int by_time(const void *a, const void *b)
 // "YYYY-MM-DD HH:MM:SS" -> seconds since 1970 (proleptic Gregorian), -1 if malformed.
 static int64_t to_epoch(const char *t)
 {
-    int Y, M, D, h, m, s;
+    int Y = 0, M = 0, D = 0, h = 0, m = 0, s = 0;
     if (sscanf(t, "%4d-%2d-%2d %2d:%2d:%2d", &Y, &M, &D, &h, &m, &s) != 6) return -1;
     // Days from civil date (Howard Hinnant's public-domain formulation of the
     // standard era arithmetic): shift the year so it starts in March.
