@@ -86,6 +86,35 @@ rc, out = run('logons', '--evtx', r'C:\evtx\System2.evtx', '--csv')
 check(rc == 0 and out.splitlines()[0].startswith('time,event,id,') and len(out.splitlines()) == len(quiet) + 1, 'logons --csv: header + one line per row')
 rc, out = run('logons', '--evtx', r'C:\windows\win.ini', '--json')
 check(rc == 1 and out.strip() == '[]', 'logons --evtx on a non-evtx file: rc 1, empty JSON array')
+# boots on plaso's System.evtx. Independent counts (regex over the rendered
+# XML, provider + event ID): 8 boots (Kernel-General 12), 5 shutdowns (13),
+# 9 shutdown requests (User32 1074), 2 Kernel-Power 41, 1 EventLog 6008, and
+# 6 clock changes of which 3 are a minute or more. The first restart was
+# asked for by winlogon.exe as NT AUTHORITY\\SYSTEM for an OS upgrade.
+rc, out = run('boots', '--evtx', r'C:\evtx\System.evtx', '--json')
+bt = json.loads(out) if rc == 0 else []
+cnt = {}
+for r in bt:
+    cnt[r['event']] = cnt.get(r['event'], 0) + 1
+check(cnt == {'boot': 8, 'shutdown': 5, 'requested': 9, 'no clean stop': 2, 'unexpected': 1, 'clock': 3},
+      f'boots --evtx: event counts {cnt}')
+first_req = [r for r in bt if r['event'] == 'requested'][-1]
+check(first_req['time'] == '2015-06-23 06:03:54' and first_req['action'] == 'restart' and first_req['user'] == 'NT AUTHORITY\\SYSTEM'
+      and first_req['process'].lower().endswith('winlogon.exe') and 'Operating System: Upgrade (Planned)' in first_req['detail'],
+      'boots: first restart request - process, account, reason from the seven insertion strings')
+bo = [r for r in bt if r['event'] == 'boot']
+check(bo[-1]['time'] == '2015-06-23 06:00:04' and bo[-1]['clean_shutdown'] is True and bo[-1]['uptime_s'] == 235,
+      'boots: first boot paired with its shutdown (06:00:04 -> 06:03:59 = 235 s)')
+check(sum(1 for r in bo if r['clean_shutdown'] is False) == 3, 'boots: three boots with no shutdown event before the next one')
+ck = [r for r in bt if r['event'] == 'clock']
+check(all(abs(r['clock_delta_s']) >= 60 for r in ck) and any(r['clock_delta_s'] == -32399 for r in ck),
+      'boots: clock set back by 8h 59m 59s listed; sub-minute corrections left out')
+wrote = [r['time'] for r in bt]
+check(wrote != sorted(wrote, reverse=True), 'boots: rows kept in written order (the clock change makes times jump backwards)')
+rc, out = run('boots', '--evtx', r'C:\evtx\System.evtx', '--since', '24', '--csv')
+check(rc == 0 and len(out.strip().splitlines()) == 1, 'boots --since 24 --csv: header only')
+rc, out = run('boots', '--evtx', r'C:\windows\win.ini', '--json')
+check(rc == 1 and out.strip() == '[]', 'boots --evtx on a non-evtx file: rc 1, empty JSON array')
 if have_attack:
     rc, out = run('logons', '--evtx', r'C:\evtx\DE_RDP_Tunneling_4624.evtx', '--flagged', '--json')
     fl = json.loads(out) if rc == 0 else []

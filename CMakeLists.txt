@@ -83,6 +83,8 @@ add_executable(winspect
     src/evsrc.c
     src/logonparse.c
     src/logons.c
+    src/bootparse.c
+    src/boots.c
     src/dnscache.c
     src/werparse.c
     src/wer.c
@@ -90,6 +92,8 @@ add_executable(winspect
     src/office.c
     src/magicparse.c
     src/magic.c
+    src/defhist.c
+    src/detections.c
     src/activities.c
     src/mft.c
     src/mftcmd.c

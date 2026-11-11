@@ -22,6 +22,7 @@
 #include "shellitem.h"
 #include "ioc.h"
 #include "logonparse.h"
+#include "bootparse.h"
 #include "werparse.h"
 #include "hashlist.h"
 #include "magicparse.h"
@@ -267,6 +268,10 @@ int main(int argc, char **argv)
         "Sig[3].Name=Fault Module Name\r\nSig[3].Value=x.dll\r\nUI[2]=C:\\Temp\\upd.exe\r\nLoadedModule[0]=C:\\Users\\b\\AppData\\upd.exe\r\nAppPath=C:\\x\r\n",
         "# list\nD41D8CD98F00B204E9800998ECF8427E\nda39a3ee5e6b4b0d3255bfef95601890afd80709  empty.bin\n"
         "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855,Empty File,high\n",
+        "<Event><System><Provider Name='User32' Guid='{x}'/><EventID>1074</EventID><TimeCreated SystemTime='2024-05-01T12:34:56.5Z'/></System>"
+        "<EventData><Data>C:\\w\\winlogon.exe (H)</Data><Data>H</Data><Data>r &amp; r</Data><Data>0x5</Data><Data>restart</Data><Data/><Data>H\\A</Data></EventData></Event>",
+        "<Event><System><Provider Name=\"Microsoft-Windows-Kernel-General\"/><EventID>1</EventID></System><EventData>"
+        "<Data Name='NewTime'>2015-08-08T09:12:25.85Z</Data><Data Name='OldTime'>2015-08-08T18:12:24.32Z</Data></EventData></Event>",
         "invoice.pdf            .exe", "ann\xE2\x80\xAE" "fdp.exe", "%USERPROFILE%/Downloads/a.b.docm",
     };
     for (long it = 0; it < iters; it++) {
@@ -380,6 +385,12 @@ int main(int argc, char **argv)
             {
                 // The newer text parsers. Those that cut lines in place get a copy.
                 static const char *const chans[] = { "Security", "Microsoft-Windows-TerminalServices-LocalSessionManager/Operational", "x" };
+                boot_rec bk;
+                boot_parse(text, &bk);
+                char nth[64];
+                evt_data_nth(text, (int)(rnd() % 8), nth, sizeof nth);
+                evt_provider(text, nth, sizeof nth);
+                iso_epoch(text);
                 logon_rec lr;
                 if (logon_parse(text, chans[rnd() % 3], &lr)) { logon_reason(&lr); logon_is_noise(&lr); logon_type_name(lr.type); }
                 char copy[8192];

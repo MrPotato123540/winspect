@@ -53,6 +53,7 @@ takes. The tables below are a map, not the full reference.
 | `hidden` | Cross-view: processes visible to one API but not another, services in the registry that the SCM does not list. |
 | `sysinfo` | Computer name, Windows build and install date, last shutdown, time zone, interfaces, profiles, networks joined. |
 | `logons` | Logon history, the Windows counterpart of `last`: who logged on, how (interactive, network, RDP...), from where and for how long. Joins logons with their logoff and with the "special privileges" event (admin sessions), adds explicit-credential use and the Terminal Services session log. Service and system-account logons are hidden unless `--all`. Flags RDP / network logons from public addresses, RDP from loopback (a tunnel), cleartext and new-credentials logons, NTLMv1. `--summary`, `--evtx <file>`. |
+| `boots` | When the machine was on: every boot and shutdown with the session length and whether it ended cleanly, who or what asked for each shutdown or restart (process, account, reason), reboots without a clean shutdown, and system clock changes of a minute or more. Rows stay in the order the events were written, so a clock set back cannot mis-pair them. `--evtx <System.evtx>`. |
 | `users` | Local accounts with RID, admin membership, last logon and password age. Flags `$`-suffixed accounts, an enabled Guest and accounts without a password requirement. |
 
 ### Persistence
@@ -67,6 +68,7 @@ takes. The tables below are a map, not the full reference.
 | `bits` | BITS jobs, their files and notify command lines. |
 | `comhijack` | Per-user COM classes that override a machine-wide registration with a different DLL. |
 | `office` | Office macro trust per user: every document "Enable Content" / "Enable Editing" was clicked for (Trusted Documents), macro settings that weaken the defaults, trusted locations. Flags macros enabled for mail attachments, downloads, temp-folder files and URLs. `--hive <NTUSER.DAT>`. |
+| `detections` | What Defender has caught, from its Detection History files: threat, file (with the archive it was in and the URL it came from when recorded), SHA-256, user, process, remediation. These remain after the event log is cleared. Accepts a copied file or folder. |
 | `defender` | Defender exclusions and policy switches that turn protection off. |
 | `firewall` | Firewall rules; flags inbound allow rules for programs in user-writable folders. |
 | `certstore` | Certificates in a system store (Root by default); flags locally generated roots, roots that are not self-signed, and entries whose stored SHA-1 does not match the certificate. |
@@ -138,8 +140,8 @@ takes. The tables below are a map, not the full reference.
 | `--ntuser`, `--usrclass` | `shellbags` |
 | `--usrclass` with `--software` | `comhijack` |
 | `--sam <SAM>` | `users` (account names and the fixed `F` record only) |
-| `--evtx <file>` (repeatable) | `events` and `logons`, including `--summary` |
-| a copied file or folder | `prefetch` (file or `--dir`), `pca`, `wer`, `amcache`, `lnk`, `jumplist`, `recyclebin`, `pshistory`, `tasks --dir`, `browser`, `activities` and `webcache` (database file or `--home <user folder>`) |
+| `--evtx <file>` (repeatable) | `events`, `logons` and `boots` |
+| a copied file or folder | `prefetch` (file or `--dir`), `pca`, `wer`, `detections`, `amcache`, `lnk`, `jumplist`, `recyclebin`, `pshistory`, `tasks --dir`, `browser`, `activities` and `webcache` (database file or `--home <user folder>`) |
 
 ## Building
 
@@ -174,7 +176,8 @@ and are tested on Linux:
 SRC="src/md5.c src/jsonutil.c src/ioc.c src/entropy.c src/pecksum.c src/imphash_ords.c \
      src/pfparse.c src/artparse.c src/capa.c src/lnkparse.c src/rights.c src/destlist.c \
      src/shellitem.c src/jsonmini.c src/sqlite.c src/mft.c src/usn.c src/patchdec.c \
-     src/logonparse.c src/werparse.c src/officeparse.c src/magicparse.c src/hashlist.c"   # evtx.c: tests/evtx_check.py
+     src/logonparse.c src/werparse.c src/officeparse.c src/magicparse.c src/hashlist.c \
+     src/defhist.c src/bootparse.c"   # evtx.c: tests/evtx_check.py
 cc -I inc -std=c11 $SRC tests/test_util.c -o test_util -lm && ./test_util
 ```
 
@@ -189,6 +192,8 @@ third-party code is run):
 - Recycle Bin, `.evtx` event logs, `$MFT`, the USN journal, SRUM and WebCache: plaso's test files and the values its tests assert.
 - Logon history: the Security events inside plaso's `System2.evtx` (logon / logoff pairing checked against an independent filter) and recorded attacks from EVTX-ATTACK-SAMPLES (RDP through a tunnel, pass-the-hash, WMIC with other credentials).
 - File digests: Python's `hashlib`.
+- Defender Detection History: plaso's three real files (the values its test asserts, the detection GUID against the file name, the EICAR SHA-256).
+- Boot history: provider + event ID counts taken independently from plaso's `System.evtx`.
 - Certificates read offline: checked against `openssl x509` and `hashlib`.
 - The JSON reader: random documents compared with Python's `json` module.
 - The SQLite reader: random databases (page sizes, UTF-16, overflow pages, uncheckpointed WAL) compared row by row with Python's `sqlite3` module.

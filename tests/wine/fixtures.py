@@ -1326,5 +1326,72 @@ try:
         print('checked image / timeline --root  (office trust record and crash reports, machine-wide and per user)')
 except Exception as e:
     print('FAIL image office/wer check:', e, out[:300]); fails += 1
+
+# detections: two Defender Detection History files built here in the layout
+# of real ones (value = u32 size, u32 type, data, padding to 8). One threat
+# was remediated, the other not; the second came out of an archive downloaded
+# from a URL. The parser itself is checked against real files in CI
+# (tests/defhist_check.py); this checks the command, sweep and timeline.
+def dh_val(typ, data):
+    b = struct.pack('<II', len(data), typ) + data
+    return b + b'\0' * (-len(b) % 8)
+def dh_str(s): return dh_val(0x15, (s + '\0').encode('utf-16-le'))
+def dh_u32(v): return dh_val(0x06, struct.pack('<I', v))
+def dh_blob(sha):
+    body = b''
+    for k, v in (('ThreatTrackingSha256', sha), ('ThreatTrackingMD5', '0' * 32)):
+        kb, vb = (k + '\0').encode('utf-16-le'), (v + '\0').encode('utf-16-le')
+        body += struct.pack('<I', len(kb)) + kb + struct.pack('<II', 6, len(vb)) + vb
+    return dh_val(0x28, struct.pack('<IIIII', 1, 20, len(body), len(body) + 20, 0) + struct.pack('<I', len(body)) + body)
+def dh_file(guid, threat, resources, t_status, user, process, t_detect, t_remed, ruser):
+    import uuid
+    out = dh_val(0x08, struct.pack('<Q', 2147519003)) + dh_val(0x1E, uuid.UUID(guid).bytes_le) + dh_str('Magic.Version:1.2') + dh_str(threat)
+    out += b''.join(dh_u32(v) for v in (0, 5, 42, 110, 4, 103, 3, 3, 2, 6, 3))
+    for rtype, loc, sha in resources:
+        out += dh_str('Magic.Version:1.2') + dh_str(rtype) + dh_str(loc) + dh_u32(0x10000002) + dh_u32(20) + dh_blob(sha)
+    out += dh_val(0x0A, struct.pack('<Q', t_status)) + dh_val(0x05, struct.pack('<I', 0)) + dh_u32(0) + dh_val(0x1E, b'\0' * 16) + dh_u32(0) + dh_u32(2)
+    out += dh_str(user) + dh_u32(4) + dh_str(process) + dh_u32(4) + dh_u32(4) + dh_u32(0)
+    out += dh_val(0x0A, struct.pack('<Q', t_detect)) + dh_u32(0) + dh_val(0x0A, struct.pack('<Q', t_remed)) + dh_u32(0) + dh_val(0x00, b'\0' * 4) + dh_u32(0)
+    return out + dh_str(ruser) + b''.join(dh_u32(0) for _ in range(6))
+dhd = os.path.join(pfx, 'drive_c', 'ProgramData', 'Microsoft', 'Windows Defender', 'Scans', 'History', 'Service', 'DetectionHistory')
+os.makedirs(os.path.join(dhd, '01'), exist_ok=True); os.makedirs(os.path.join(dhd, '0F'), exist_ok=True)
+G1, G2 = '11111111-2222-3333-4444-555555555555', 'AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE'
+with open(os.path.join(dhd, '01', G1), 'wb') as f:
+    f.write(dh_file(G1, 'Trojan:Win32/TestOne', [('file', r'C:\Users\bob\Downloads\one.exe', 'ab' * 32)],
+                    OT + 50000000, r'PC\bob', r'C:\Windows\explorer.exe', OT, OT + 50000000, r'NT AUTHORITY\SYSTEM'))
+with open(os.path.join(dhd, '0F', G2), 'wb') as f:
+    f.write(dh_file(G2, 'HackTool:Win32/TestTwo', [('containerfile', r'C:\Users\bob\Downloads\kit.zip', ''),
+                                                   ('file', r'C:\Users\bob\Downloads\kit.zip->two.exe', 'cd' * 32),
+                                                   ('webfile', r'C:\Users\bob\Downloads\kit.zip|https://files.example/kit.zip|pid:4242', 'cd' * 32)],
+                    OT + 700000000, r'PC\bob', 'Unknown', OT + 600000000, 0, ''))
+with open(os.path.join(dhd, '0F', 'not-a-history-file'), 'wb') as f:
+    f.write(b'\0' * 200)
+try:
+    rc, out, err = wine([exe, 'detections', '--json'])
+    dt = json.loads(out)
+    rc2, out2, err2 = wine([exe, 'detections', '--find', 'files.example', '--csv'])
+    rc3, out3, err3 = wine([exe, 'timeline', '--sources', 'detections', '--json'], timeout=300)
+    tl3 = json.loads(out3)
+    rc4, out4, err4 = wine([exe, 'detections', os.path.join('C:\\', 'ProgramData', 'Microsoft', 'Windows Defender', 'Scans', 'History', 'Service', 'DetectionHistory', '01', G1), '--json'])
+    rc5, txt, err5 = wine([exe, 'detections'])
+    if [d['threat'] for d in dt] != ['HackTool:Win32/TestTwo', 'Trojan:Win32/TestOne']:
+        print(f'FAIL detections: order / threats {dt}'); fails += 1
+    elif not (dt[0]['file'].endswith('kit.zip->two.exe') and dt[0]['container'].endswith('kit.zip') and dt[0]['url'] == 'https://files.example/kit.zip'
+              and dt[0]['sha256'] == 'cd' * 32 and dt[0]['remediated'] == '' and dt[0]['process'] == '' and dt[0]['detection_id'] == G2
+              and 'no remediation' in dt[0]['reason'] and len(dt[0]['resources']) == 3):
+        print(f'FAIL detections: archive / URL detection {dt[0]}'); fails += 1
+    elif not (dt[1]['detected'] == '2024-01-17 21:20:00' and dt[1]['remediated'] == '2024-01-17 21:20:05' and dt[1]['remediated_by'] == r'NT AUTHORITY\SYSTEM'
+              and dt[1]['user'] == r'PC\bob' and dt[1]['sha256'] == 'ab' * 32 and 'remediated' in dt[1]['reason']):
+        print(f'FAIL detections: remediated detection {dt[1]}'); fails += 1
+    elif len(out2.strip().splitlines()) != 2 or 'TestTwo' not in out2:
+        print(f'FAIL detections --find --csv: {out2}'); fails += 1
+    elif len(tl3) != 3 or sum(1 for r in tl3 if r['suspicious']) != 2 or not any('remediated' in r['event'] for r in tl3):
+        print(f'FAIL timeline (detections): {tl3}'); fails += 1
+    elif len(json.loads(out4)) != 1 or '1 file(s) not recognised' not in txt or '1 without a recorded remediation' not in txt:
+        print(f'FAIL detections <file> / summary line: {out4} {txt[-200:]}'); fails += 1
+    else:
+        print('checked detections  (remediated and open detection, archive + URL, --find, timeline rows)')
+except Exception as e:
+    print('FAIL detections check:', e); fails += 1
 print(f'\n{fails} failure(s)')
 sys.exit(1 if fails else 0)

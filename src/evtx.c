@@ -250,6 +250,8 @@ static int render(rctx *r, sbuf *b, const unsigned char *p, const unsigned char 
     size_t attr_mark = 0;       // output position before " name=\""
     int attr_empty_opt = 0;     // attribute value so far is only empty optional substitutions
     int attr_has_text = 0;
+    size_t elem_start = 0;      // output position of the innermost open tag's '<'
+    size_t elem_gt = 0;         // ... and just after its '>' (0 = not inside one)
 #define NEED(k) do { if ((size_t)(end - p) < (size_t)(k)) { r->fail = 1; return -1; } } while (0)
 #define POS(q) ((uint32_t)((q) - r->chunk))
     while (p < end && !r->fail) {
@@ -275,6 +277,8 @@ static int render(rctx *r, sbuf *b, const unsigned char *p, const unsigned char 
             if (name == POS(q)) q += name_size(r, name);        // inline name
             if (tok & 0x40) q += 4;                             // attribute list size
             if (q > end) { r->fail = 1; return -1; }
+            elem_start = b->n;
+            elem_gt = 0;
             sb_str(b, "<");
             put_name(r, b, name);
             if (sp < MAX_DEPTH) stack[sp++] = name; else { r->fail = 1; return -1; }
@@ -283,6 +287,7 @@ static int render(rctx *r, sbuf *b, const unsigned char *p, const unsigned char 
         }
         case 0x02:                                              // close start element
             sb_str(b, ">");
+            elem_gt = b->n;
             p++;
             break;
         case 0x03:                                              // close empty element
@@ -390,7 +395,35 @@ static int render(rctx *r, sbuf *b, const unsigned char *p, const unsigned char 
             if (id < nsv && sv != NULL) {
                 const subst *s = &sv[id];
                 size_t before = b->n;
-                put_value(r, b, s->type, s->data, s->size, depth);
+                if (!in_attr && s->type == 0x81 && sp > 0 && elem_gt != 0 && b->n == elem_gt && !b->oom) {
+                    // An array of strings as the content of an element: the
+                    // event API writes the ELEMENT once per string
+                    // (<Data>a</Data><Data>b</Data>), which is how classic
+                    // events carry their insertion strings. Repeat the open
+                    // tag, attributes included, for every string after the first.
+                    size_t ol = elem_gt - elem_start;
+                    char *open = (char *)malloc(ol ? ol : 1);
+                    if (open == NULL) { r->fail = 1; return -1; }
+                    memcpy(open, b->s + elem_start, ol);
+                    size_t units = s->size / 2, i = 0;
+                    int first = 1;
+                    while (i < units) {
+                        size_t j = i;
+                        while (j < units && rd16(s->data + 2 * j)) j++;
+                        if (!first) {
+                            sb_str(b, "</");
+                            put_name(r, b, stack[sp - 1]);
+                            sb_str(b, ">");
+                            sb_put(b, open, ol);
+                        }
+                        sb_u16(b, s->data + 2 * i, j - i, 1);
+                        first = 0;
+                        i = j + 1;
+                    }
+                    free(open);
+                } else {
+                    put_value(r, b, s->type, s->data, s->size, depth);
+                }
                 if (in_attr) {
                     if (b->n > before) attr_has_text = 1;
                     else if (base == 0x0E) attr_empty_opt = 1;

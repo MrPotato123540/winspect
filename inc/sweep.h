@@ -4,7 +4,7 @@
 // winspect sweep - one-shot machine triage: runs the system-wide checks in
 // "findings only" mode (posture --warn, hunt, hidden, net, autoruns/services/tasks/
 // taskcache/firewall/prefetch/pca --flagged, defender, wmi, users/comhijack/bits/recyclebin --flagged,
-// pshistory / browser --all-users --flagged, wer / office / logons --flagged, events) and prints them as one
+// pshistory / browser --all-users --flagged, detections, wer / office / logons --flagged, events) and prints them as one
 // report. With --json the result is a single object, one key per check; a
 // check that could not run (e.g. needs elevation) is null instead of breaking
 // the document. Read-only - it only calls the read-only commands. Usage:
