@@ -8,6 +8,7 @@
 // original. Read-only.
 
 #include "usncmd.h"
+#include "ioc.h"
 #include "usn.h"
 #include "mft.h"
 #include "artparse.h"
@@ -71,7 +72,7 @@ typedef struct { uint64_t journal_id; int64_t first, next, lowest, max; uint64_t
 typedef struct { int64_t start; uint32_t mask, only_on_close; uint64_t timeout, bytes_to_wait, journal_id; } jread_v0;
 typedef struct { uint64_t start_frn; int64_t low, high; } menum_v0;
 
-typedef struct { uint64_t frn, parent; char *name; } lnode;
+typedef struct { uint64_t frn, parent; uint16_t seq; char *name; } lnode;
 typedef struct { lnode *v; size_t n, cap; } ltab;
 
 static int lnode_cmp(const void *a, const void *b)
@@ -82,7 +83,7 @@ static int lnode_cmp(const void *a, const void *b)
 
 static const lnode *lfind(const ltab *t, uint64_t frn)
 {
-    lnode key = { frn & 0xFFFFFFFFFFFFULL, 0, NULL };
+    lnode key = { frn & 0xFFFFFFFFFFFFULL, 0, 0, NULL };
     return (const lnode *)bsearch(&key, t->v, t->n, sizeof *t->v, lnode_cmp);
 }
 
@@ -106,7 +107,7 @@ static void live_names(HANDLE vol, ltab *t)
             }
             char *nm = _strdup(r.name);
             if (nm == NULL) { full = 1; break; }
-            t->v[t->n++] = (lnode){ r.file_ref & 0xFFFFFFFFFFFFULL, r.parent_ref & 0xFFFFFFFFFFFFULL, nm };
+            t->v[t->n++] = (lnode){ r.file_ref & 0xFFFFFFFFFFFFULL, r.parent_ref & 0xFFFFFFFFFFFFULL, (uint16_t)(r.file_ref >> 48), nm };
         }
         med.start_frn = *(uint64_t *)buf;                 // the next file reference to ask for
     }
@@ -114,16 +115,24 @@ static void live_names(HANDLE vol, ltab *t)
     if (t->n > 1) qsort(t->v, t->n, sizeof *t->v, lnode_cmp);
 }
 
-static void live_path(const ltab *t, char drive, uint64_t frn, char *out, size_t n)
+// Full path of the folder whose file reference (number + sequence) is ref.
+// The live table holds the volume as it is NOW: a folder deleted since the
+// journal record was written may have its number reused by another file, so
+// the sequence number must match, or the path would be someone else's.
+// Returns 0 with "" when the folder no longer exists.
+static int live_path(const ltab *t, char drive, uint64_t ref, char *out, size_t n)
 {
     const char *parts[64];
     int np = 0;
-    uint64_t cur = frn & 0xFFFFFFFFFFFFULL;
-    for (int d = 0; d < 64; d++) {
-        const lnode *e = lfind(t, cur);
-        if (e == NULL || e->parent == cur) break;          // the root's parent is itself
+    uint64_t cur = ref & 0xFFFFFFFFFFFFULL;
+    out[0] = 0;
+    const lnode *e = lfind(t, cur);
+    if (e == NULL || e->seq != (uint16_t)(ref >> 48)) return 0;
+    for (int d = 0; d < 64 && e != NULL; d++) {
+        if (e->parent == cur) break;                       // the root's parent is itself
         parts[np++] = e->name;
         cur = e->parent;
+        e = lfind(t, cur);
     }
     size_t o = (size_t)snprintf(out, n, "%c:", drive);
     for (int k = np - 1; k >= 0 && o + 2 < n; k--) {
@@ -131,10 +140,24 @@ static void live_path(const ltab *t, char drive, uint64_t frn, char *out, size_t
         if (w < 0) break;
         o += (size_t)w;
     }
+    return 1;
+}
+
+// Names of files that Windows itself creates and deletes all the time.
+static int routine_name(const char *name)
+{
+    return _strnicmp(name, "__PSScriptPolicyTest_", 21) == 0;   // every PowerShell start
+}
+
+// Old names installers and updaters write before renaming into place.
+static int staging_name(const char *old)
+{
+    size_t L = strlen(old);
+    return (L >= 4 && _stricmp(old + L - 4, ".tmp") == 0) || (L >= 5 && _stricmp(old + L - 5, ".temp") == 0);
 }
 
 #define OLD_SLOTS 4096
-typedef struct { uint64_t ref; char name[260]; } oldname;
+typedef struct { uint64_t ref; char name[260]; int flagged; } oldname;
 
 int cmd_usn(int argc, char **argv)
 {
@@ -253,23 +276,42 @@ int cmd_usn(int argc, char **argv)
         count++;
         oldname *slot = &olds[(r.file_ref * 2654435761u) % OLD_SLOTS];
         const char *old = (slot->ref == r.file_ref && slot->name[0]) ? slot->name : NULL;
-        const char *reason = usn_flag(r.reason, r.name, old, is_prog);
-        if (r.reason & 0x1000) { slot->ref = r.file_ref; snprintf(slot->name, sizeof slot->name, "%s", r.name); }
-        if (reason) flagged++;
-        if (only_flagged && reason == NULL) continue;
-        if (want && !(r.reason & want)) continue;
-        if (find && !ci_contains(r.name, find)) continue;
         folder[0] = 0;
+        int known = 1;                                     // folder resolved (or not needed)
         if (live) {
-            live_path(&lt, drive, r.parent_ref, folder, sizeof folder);
+            if (!live_path(&lt, drive, r.parent_ref, folder, sizeof folder)) {
+                snprintf(folder, sizeof folder, "(folder no longer exists)");
+                known = 0;
+            }
         } else if (nodes) {
             uint32_t p = (uint32_t)(r.parent_ref & 0xFFFFFFFFFFFFULL);
             uint16_t ps = (uint16_t)(r.parent_ref >> 48);
             if (p < nn && nodes[p].valid && (nodes[p].seq == ps || (!nodes[p].in_use && nodes[p].seq == (uint16_t)(ps + 1))))
                 mft_path(nodes, nn, p, folder, sizeof folder);
-            else
+            else {
                 snprintf(folder, sizeof folder, "(folder record %u reused or missing)", p);
+                known = 0;
+            }
         }
+        const char *reason = usn_flag(r.reason, r.name, old, is_prog);
+        if (reason && routine_name(r.name)) reason = NULL;
+        if (reason && (r.reason & 0x2000) && old && staging_name(old)) reason = NULL;
+        // With the folder known, only user-writable places count: deleting or
+        // renaming programs under Program Files / Windows is what installers
+        // and servicing do every day, and needs admin anyway.
+        if (reason && (live || nodes)) {
+            char full[8192 + 300];
+            snprintf(full, sizeof full, "%s\\%s", folder, r.name);
+            if (!known || !ioc_user_writable(full)) reason = NULL;
+        }
+        // A rename is logged twice (RENAME_NEW_NAME, then with CLOSE): judge it once.
+        if (reason && (r.reason & 0x2000) && slot->ref == r.file_ref && slot->flagged) reason = NULL;
+        if (r.reason & 0x1000) { slot->ref = r.file_ref; snprintf(slot->name, sizeof slot->name, "%s", r.name); slot->flagged = 0; }
+        if (reason && (r.reason & 0x2000)) slot->flagged = 1;
+        if (reason) flagged++;
+        if (only_flagged && reason == NULL) continue;
+        if (want && !(r.reason & want)) continue;
+        if (find && !ci_contains(r.name, find)) continue;
         char when[32], rs[512];
         filetime_utc_str(r.time, when, sizeof when);
         usn_reason_str(r.reason, rs, sizeof rs);

@@ -14,6 +14,7 @@
 // Read-only: files are opened for reading only; nothing is resolved or run.
 
 #include "lnk.h"
+#include "artparse.h"
 #include "lnkparse.h"
 #include "ioc.h"
 #include "jsonutil.h"
@@ -77,7 +78,8 @@ static void report(lnk_ctx *c, const char *file, const lnk_info *li)
              li->arguments);
     const char *reason = lnk_anomaly_reason(li->anomalies);
     if (reason == NULL && ioc_script_host(li->target))   reason = "target is a script host / LOLBin";
-    else if (reason == NULL && ioc_user_writable(li->target)) reason = "target in user-writable dir";
+    else if (reason == NULL && ioc_user_writable(li->target) && rb_reason(li->target))
+        reason = "target is a program in a user-writable dir";
     // Where the target lived: "removable, serial 1A2B-3C4D, label "USB"" -
     // a removable or network volume answers "was this opened from a stick /
     // a share?"; the tracker block names the machine the link was made on.
