@@ -103,6 +103,7 @@
 #include "webcache.h"
 #include "tasks.h"
 #include "logons.h"
+#include "boots.h"
 #include "dnscache.h"
 #include "wer.h"
 #include "office.h"
@@ -284,6 +285,7 @@ static const struct {
     { "posture",  cmd_posture,  "host hardening checks (UAC, LSA, SMBv1...)", "security" },
     { "events",   cmd_events,   "high-signal event log timeline",          "security" },
     { "logons",   cmd_logons,   "logon history: who, how, from where, how long", "security" },
+    { "boots",    cmd_boots,    "boot / shutdown history, who asked, clock changes", "security" },
     { "hidden",   cmd_hidden,   "cross-view: hidden processes / services",  "security" },
     { "sweep",    cmd_sweep,    "all system-wide checks, findings only",   "security" },
     { "ssn",     cmd_ssn,     "read an ntdll stub's service number",        "security" },

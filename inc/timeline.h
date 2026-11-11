@@ -7,7 +7,8 @@
 // devices, RDP connections, Run-box entries, PowerShell history, logons and
 // password changes (users), BITS jobs, scheduled task registrations,
 // per-user COM registrations, high-signal events, logon sessions (logons),
-// Defender detections and remediations (detections),
+// Defender detections and remediations (detections), boots / shutdowns and
+// clock changes (boots),
 // crash reports (wer), Office documents the user trusted (office), Windows install / last
 // shutdown / profile loads (sysinfo). Each source command is
 // run with --json and its timestamps become rows (UTC, newest first); a row

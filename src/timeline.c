@@ -38,6 +38,7 @@
 #include "pca.h"
 #include "activities.h"
 #include "logons.h"
+#include "boots.h"
 #include "wer.h"
 #include "office.h"
 #include "detections.h"
@@ -340,6 +341,13 @@ static void x_wer(tl *t, const jm_node *r)
     add(t, S(r, "time"), w, S(r, "fault_module"), B(r, "suspicious"));
 }
 
+static void x_boots(tl *t, const jm_node *r)
+{
+    char w[900];
+    snprintf(w, sizeof w, "%s: %s", S(r, "event"), S(r, "detail"));
+    add(t, S(r, "time"), w, S(r, "process"), 0);
+}
+
 static void x_detections(tl *t, const jm_node *r)
 {
     char w[1500];
@@ -413,6 +421,7 @@ static const source sources[] = {
     { "wer",        cmd_wer,        { NULL },               NULL, x_wer, NULL },
     { "office",     cmd_office,     { NULL },               NULL, x_office, NULL },
     { "detections", cmd_detections, { NULL },               NULL, x_detections, NULL },
+    { "boots",      cmd_boots,      { NULL },               NULL, x_boots, NULL },
 };
 
 // The same sources for an offline installation under root (timeline --root):
@@ -451,6 +460,13 @@ static size_t image_sources(const img_paths *ip, source *out, size_t cap)
         source *s_ = &out[n++];
         memset(s_, 0, sizeof *s_);
         s_->name = "logons"; s_->fn = cmd_logons; s_->x = x_logons;
+        int k = 0;
+        for (int i = 0; i < ip->nevtx && k + 2 <= 12; i++) { s_->args[k++] = "--evtx"; s_->args[k++] = ip->evtx[i]; }
+    }
+    if (ip->nevtx && n < cap) {
+        source *s_ = &out[n++];
+        memset(s_, 0, sizeof *s_);
+        s_->name = "boots"; s_->fn = cmd_boots; s_->x = x_boots;
         int k = 0;
         for (int i = 0; i < ip->nevtx && k + 2 <= 12; i++) { s_->args[k++] = "--evtx"; s_->args[k++] = ip->evtx[i]; }
     }

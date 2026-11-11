@@ -100,7 +100,8 @@ static const struct { const char *name, *text; } usage_table[] = {
         "devices, RDP connections, Run-box entries, PowerShell history, logons and\n"
         "password changes (users), BITS jobs, scheduled task registrations,\n"
         "per-user COM registrations, high-signal events, logon sessions (logons),\n"
-        "Defender detections and remediations (detections),\n"
+        "Defender detections and remediations (detections), boots / shutdowns and\n"
+        "clock changes (boots),\n"
         "crash reports (wer), Office documents the user trusted (office), Windows install / last\n"
         "shutdown / profile loads (sysinfo). Each source command is\n"
         "run with --json and its timestamps become rows (UTC, newest first); a row\n"
@@ -461,6 +462,23 @@ static const struct { const char *name, *text; } usage_table[] = {
         "The Security log needs elevation. Read-only. Usage:\n"
         "  winspect logons [--evtx <file> ...] [--since <hours>] [--user <text>] [--type <n>]\n"
         "                  [--all] [--flagged] [--summary] [--max <n>] [--json | --csv]\n" },
+    { "boots",
+        "winspect boots - when the machine was on: every boot and shutdown from the\n"
+        "System log (the idea of `last -x` / `uptime` on Linux), with how long each\n"
+        "session lasted and whether it ended cleanly; who or what asked for each\n"
+        "shutdown or restart (process, account, stated reason); reboots without a\n"
+        "clean shutdown (power loss, reset, crash with its bugcheck code); and\n"
+        "changes of the system clock of a minute or more. Why it matters: activity\n"
+        "cannot have happened while the machine was off, an unexplained restart or\n"
+        "crash is a lead, and a clock that was set back makes every other timestamp\n"
+        "of that period suspect. Clock changes are shown, not flagged: time-zone\n"
+        "fixes, virtual machines and dual-boot systems produce them legitimately.\n"
+        "Rows are in the order the events were written, so a clock set back shows\n"
+        "as times that jump backwards - which is exactly what happened.\n"
+        "--evtx <file> (repeatable) reads a copied System.evtx. --since <hours>\n"
+        "narrows, --max <n> bounds the events read live (default 5000).\n"
+        "Read-only. Usage:\n"
+        "  winspect boots [--evtx <file> ...] [--since <hours>] [--max <n>] [--json | --csv]\n" },
     { "hidden",
         "winspect hidden - cross-view checks for things hidden from the usual tools:\n"
         "  processes: Toolhelp snapshot vs NtQuerySystemInformation vs opening every\n"
