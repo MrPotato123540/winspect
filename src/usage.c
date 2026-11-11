@@ -398,6 +398,27 @@ static const struct { const char *name, *text; } usage_table[] = {
         "with winspect's own parser, through the same filters.\n"
         "Read-only (EvtQuery). Usage:\n"
         "  winspect events [--evtx <file> ...] [--max <n per channel>] [--since <hours>] [--summary] [--json | --csv]\n" },
+    { "logons",
+        "winspect logons - who logged on, how, from where and for how long: the\n"
+        "Windows counterpart of `last`. Reads the Security log (4624 logon, 4634 /\n"
+        "4647 logoff, 4648 explicit credentials, 4672 administrator-equivalent\n"
+        "session, 4778 / 4779 reconnect / disconnect) and the Terminal Services\n"
+        "LocalSessionManager log (21 / 23 / 24 / 25), pairs each logon with its\n"
+        "logoff by logon ID to give a duration, and marks sessions that received\n"
+        "special privileges as \"admin\". Service logons and the built-in / machine\n"
+        "accounts are most of the log and are hidden unless --all is given.\n"
+        "Flagged, each with a fact that is in the event itself: remote desktop or\n"
+        "network logon from a public address, remote desktop from loopback (a\n"
+        "tunnelled connection), cleartext network logon (type 8),\n"
+        "new-credentials logon by seclogo (type 9: runas /netonly - and what\n"
+        "pass-the-hash tools produce), NTLMv1. Passwords are never in these events.\n"
+        "--summary groups by account, logon type and source (count, first, last).\n"
+        "--evtx <file> (repeatable) reads copied logs with winspect's own parser.\n"
+        "--since <hours>, --user <text>, --type <n> and --flagged narrow the list;\n"
+        "--max <n> bounds the events read per live channel (default 5000).\n"
+        "The Security log needs elevation. Read-only. Usage:\n"
+        "  winspect logons [--evtx <file> ...] [--since <hours>] [--user <text>] [--type <n>]\n"
+        "                  [--all] [--flagged] [--summary] [--max <n>] [--json | --csv]\n" },
     { "hidden",
         "winspect hidden - cross-view checks for things hidden from the usual tools:\n"
         "  processes: Toolhelp snapshot vs NtQuerySystemInformation vs opening every\n"

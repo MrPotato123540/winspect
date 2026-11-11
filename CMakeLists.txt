@@ -79,6 +79,9 @@ add_executable(winspect
     src/pca.c
     src/textfile.c
     src/setupapi.c
+    src/evsrc.c
+    src/logonparse.c
+    src/logons.c
     src/activities.c
     src/mft.c
     src/mftcmd.c

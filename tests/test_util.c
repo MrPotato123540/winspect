@@ -29,6 +29,7 @@
 #include "destlist.h"
 #include "shellitem.h"
 #include "rights.h"
+#include "logonparse.h"
 #include "patchdec.h"
 
 #include <stdio.h>
@@ -1510,6 +1511,99 @@ int main(void)
         check_int("attr runs continued", mft_attr_runs(r, sizeof r, 0x80, rr, 4, &real, &vcn) == 1 && vcn == 6 && rr[0].lcn == 40 && rr[0].clusters == 4, 1);
         r[56 + 16] = 200;                                // resident size past the attribute
         check_int("attr resident oversize", mft_attr_resident(r, sizeof r, 0x20, &cp, &cl), -1);
+    }
+
+    // --- logons: one record type from the logon / logoff events ----------------
+    {
+#define EV(id, data) "<Event xmlns='http://schemas.microsoft.com/win/2004/08/events/event'><System><EventID>" #id \
+        "</EventID><TimeCreated SystemTime='2024-05-01T12:34:56.1234567Z'/><Channel>Security</Channel></System><EventData>" data "</EventData></Event>"
+#define D(n, v) "<Data Name='" n "'>" v "</Data>"
+        logon_rec r;
+        const char *x = EV(4624, D("TargetUserName", "alice") D("TargetDomainName", "CORP") D("TargetLogonId", "0x1a2b")
+                           D("LogonType", "10") D("LogonProcessName", "User32 ") D("AuthenticationPackageName", "Negotiate")
+                           D("WorkstationName", "WS7") D("LmPackageName", "-") D("ProcessName", "C:\\Windows\\System32\\svchost.exe")
+                           D("IpAddress", "::ffff:8.8.4.4"));
+        check_int("logon 4624", logon_parse(x, "Security", &r) == 1 && r.kind == LK_LOGON && r.type == 10, 1);
+        check_str("logon user", r.user, "CORP\\alice");
+        check_str("logon v4-mapped source", r.source, "8.8.4.4");
+        check_str("logon proc trimmed", r.logon_process, "User32");
+        check_str("logon dash blanked", r.lm, "");
+        check_str("logon time", r.time, "2024-05-01 12:34:56");
+        check_str("logon id", r.logon_id, "0x1a2b");
+        check_str("logon reason rdp public", logon_reason(&r), "remote desktop logon from a public address");
+        check_int("logon not noise", logon_is_noise(&r), 0);
+        check_str("logon type name", logon_type_name(r.type), "remote desktop");
+        check_int("logon other channel", logon_parse(x, "Application", &r), 0);
+
+        x = EV(4624, D("TargetUserName", "alice") D("TargetDomainName", "CORP") D("LogonType", "10") D("IpAddress", "127.0.0.1"));
+        logon_parse(x, "Security", &r);
+        check_int("logon rdp loopback flagged", logon_reason(&r) != NULL && strstr(logon_reason(&r), "loopback") != NULL, 1);
+        x = EV(4624, D("TargetUserName", "alice") D("TargetDomainName", "CORP") D("LogonType", "10") D("IpAddress", "10.1.2.3"));
+        logon_parse(x, "Security", &r);
+        check_int("logon rdp private not flagged", logon_reason(&r) == NULL, 1);
+        x = EV(4624, D("TargetUserName", "alice") D("TargetDomainName", "CORP") D("LogonType", "3") D("IpAddress", "203.0.113.9"));
+        logon_parse(x, "Security", &r);
+        check_str("logon network public", logon_reason(&r), "network logon from a public address");
+        x = EV(4624, D("TargetUserName", "web") D("TargetDomainName", "CORP") D("LogonType", "8") D("IpAddress", "10.0.0.9"));
+        logon_parse(x, "Security", &r);
+        check_int("logon type 8 flagged", logon_reason(&r) != NULL && strstr(logon_reason(&r), "cleartext") != NULL, 1);
+        x = EV(4624, D("TargetUserName", "user01") D("TargetDomainName", "EXAMPLE") D("LogonType", "9") D("LogonProcessName", "seclogo") D("IpAddress", "::1"));
+        logon_parse(x, "Security", &r);
+        check_int("logon type 9 seclogo flagged", logon_reason(&r) != NULL && strstr(logon_reason(&r), "pass-the-hash") != NULL, 1);
+        x = EV(4624, D("TargetUserName", "user01") D("TargetDomainName", "EXAMPLE") D("LogonType", "9") D("LogonProcessName", "Advapi  ") D("IpAddress", "-"));
+        logon_parse(x, "Security", &r);
+        check_int("logon type 9 other process not flagged", logon_reason(&r) == NULL, 1);
+        x = EV(4624, D("TargetUserName", "bob") D("TargetDomainName", "CORP") D("LogonType", "3") D("LmPackageName", "NTLM V1") D("IpAddress", "10.0.0.4"));
+        logon_parse(x, "Security", &r);
+        check_str("logon ntlmv1", logon_reason(&r), "NTLMv1 authentication (weak, relayable)");
+        x = EV(4624, D("TargetUserName", "ANONYMOUS LOGON") D("TargetDomainName", "NT AUTHORITY") D("LogonType", "3") D("LmPackageName", "NTLM V1") D("IpAddress", "10.0.0.4"));
+        logon_parse(x, "Security", &r);
+        check_int("logon anonymous ntlmv1 not flagged", logon_reason(&r) == NULL, 1);
+        check_int("logon anonymous is noise", logon_is_noise(&r), 1);
+
+        static const struct { const char *dom, *name; unsigned type; int noise; } nz[] = {
+            { "NT AUTHORITY", "SYSTEM", 5, 1 }, { "CORP", "svc_sql", 5, 1 }, { "CORP", "PC02$", 3, 1 },
+            { "Window Manager", "DWM-2", 2, 1 }, { "Font Driver Host", "UMFD-0", 2, 1 }, { "CORP", "DWM-admin", 2, 0 },
+            { "CORP", "alice", 2, 0 }, { "", "", 3, 1 }, { "CORP", "system", 2, 1 } };
+        for (size_t i = 0; i < sizeof nz / sizeof nz[0]; i++) {
+            memset(&r, 0, sizeof r);
+            r.kind = LK_LOGON;
+            r.type = nz[i].type;
+            snprintf(r.user, sizeof r.user, "%s%s%s", nz[i].dom, nz[i].dom[0] ? "\\" : "", nz[i].name);
+            char label[40];
+            snprintf(label, sizeof label, "logon noise %zu", i);
+            check_int(label, logon_is_noise(&r), nz[i].noise);
+        }
+
+        x = EV(4634, D("TargetUserName", "alice") D("TargetDomainName", "CORP") D("TargetLogonId", "0x1a2b") D("LogonType", "10"));
+        check_int("logoff 4634", logon_parse(x, "Security", &r) == 1 && r.kind == LK_LOGOFF && strcmp(r.logon_id, "0x1a2b") == 0, 1);
+        x = EV(4648, D("SubjectUserName", "user01") D("SubjectDomainName", "EXAMPLE") D("SubjectLogonId", "0x99")
+                     D("TargetUserName", "administrator") D("TargetDomainName", "example") D("TargetServerName", "DC1.example.corp")
+                     D("ProcessName", "C:\\Windows\\System32\\wbem\\WMIC.exe") D("IpAddress", "-"));
+        check_int("explicit 4648", logon_parse(x, "Security", &r) == 1 && r.kind == LK_EXPLICIT, 1);
+        check_str("explicit account", r.user, "example\\administrator");
+        check_str("explicit by", r.by, "EXAMPLE\\user01");
+        check_str("explicit server", r.server, "DC1.example.corp");
+        x = EV(4672, D("SubjectUserName", "alice") D("SubjectDomainName", "CORP") D("SubjectLogonId", "0x1a2b") D("PrivilegeList", "SeDebugPrivilege"));
+        check_int("privileged 4672", logon_parse(x, "Security", &r) == 1 && r.kind == LK_PRIVILEGED && strcmp(r.logon_id, "0x1a2b") == 0, 1);
+        x = EV(4778, D("AccountName", "alice") D("AccountDomain", "CORP") D("LogonID", "0x5") D("SessionName", "RDP-Tcp#3")
+                     D("ClientName", "LAPTOP") D("ClientAddress", "198.51.100.7"));
+        check_int("reconnect 4778", logon_parse(x, "Security", &r) == 1 && r.kind == LK_RECONNECT && strcmp(r.session, "RDP-Tcp#3") == 0, 1);
+        check_str("reconnect public", logon_reason(&r), "remote desktop session from a public address");
+        check_int("unrelated id", logon_parse(EV(4688, D("NewProcessName", "x")), "Security", &r), 0);
+
+        const char *lsm = "<Event><System><EventID>21</EventID><TimeCreated SystemTime='2024-05-02T01:02:03.000Z'/>"
+                          "<Channel>Microsoft-Windows-TerminalServices-LocalSessionManager/Operational</Channel></System>"
+                          "<UserData><EventXML xmlns='Event_NS'><User>CORP\\alice</User><SessionID>2</SessionID><Address>LOCAL</Address></EventXML></UserData></Event>";
+        check_int("lsm 21", logon_parse(lsm, "Microsoft-Windows-TerminalServices-LocalSessionManager/Operational", &r) == 1 && r.kind == LK_SESSION_LOGON, 1);
+        check_str("lsm user", r.user, "CORP\\alice");
+        check_str("lsm console address dropped", r.source, "");
+        check_str("lsm session", r.session, "2");
+        check_int("lsm id 21 in Security is something else", logon_parse(lsm, "Security", &r), 0);
+        check_str("kind name", logon_kind_name(LK_EXPLICIT), "explicit");
+        check_str("type name unknown", logon_type_name(42), "");
+#undef EV
+#undef D
     }
 
     fprintf(stderr, "\n%s (%d failure%s)\n",

@@ -102,6 +102,7 @@
 #include "srum.h"
 #include "webcache.h"
 #include "tasks.h"
+#include "logons.h"
 
 // cmd_modules lives in modules.c: a live process's loaded modules
 #include "modules.h"
@@ -275,6 +276,7 @@ static const struct {
     { "hunt",     cmd_hunt,     "lineage/masquerade checks on all processes", "security" },
     { "posture",  cmd_posture,  "host hardening checks (UAC, LSA, SMBv1...)", "security" },
     { "events",   cmd_events,   "high-signal event log timeline",          "security" },
+    { "logons",   cmd_logons,   "logon history: who, how, from where, how long", "security" },
     { "hidden",   cmd_hidden,   "cross-view: hidden processes / services",  "security" },
     { "sweep",    cmd_sweep,    "all system-wide checks, findings only",   "security" },
     { "ssn",     cmd_ssn,     "read an ntdll stub's service number",        "security" },

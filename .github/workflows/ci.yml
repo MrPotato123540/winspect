@@ -21,13 +21,13 @@ jobs:
           git diff --exit-code src/usage.c || { echo "src/usage.c is stale: run python3 tools/gen_usage.py"; exit 1; }
       - name: Build + run helper tests
         run: |
-          SRC="src/md5.c src/jsonutil.c src/ioc.c src/entropy.c src/pecksum.c src/imphash_ords.c src/pfparse.c src/artparse.c src/capa.c src/lnkparse.c src/rights.c src/destlist.c src/shellitem.c src/jsonmini.c src/sqlite.c src/mft.c src/usn.c"
+          SRC="src/md5.c src/jsonutil.c src/ioc.c src/entropy.c src/pecksum.c src/imphash_ords.c src/pfparse.c src/artparse.c src/capa.c src/lnkparse.c src/rights.c src/destlist.c src/shellitem.c src/jsonmini.c src/sqlite.c src/mft.c src/usn.c src/patchdec.c src/logonparse.c"
           cc -I inc -Wall -Wextra -std=c11 $SRC tests/test_util.c -o test_util -lm
           ./test_util
       - name: Same tests + parser fuzz under AddressSanitizer / UBSan
         run: |
           SAN="-g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all"
-          SRC="src/md5.c src/jsonutil.c src/ioc.c src/entropy.c src/pecksum.c src/imphash_ords.c src/pfparse.c src/artparse.c src/capa.c src/lnkparse.c src/rights.c src/destlist.c src/shellitem.c src/jsonmini.c src/sqlite.c src/mft.c src/usn.c"
+          SRC="src/md5.c src/jsonutil.c src/ioc.c src/entropy.c src/pecksum.c src/imphash_ords.c src/pfparse.c src/artparse.c src/capa.c src/lnkparse.c src/rights.c src/destlist.c src/shellitem.c src/jsonmini.c src/sqlite.c src/mft.c src/usn.c src/patchdec.c src/logonparse.c"
           cc -I inc -std=c11 $SAN $SRC tests/test_util.c -o test_util_san -lm
           ./test_util_san
           cc -I inc -std=c11 $SAN src/ioc.c src/pfparse.c src/artparse.c src/lnkparse.c src/rights.c src/capa.c src/cfb.c src/destlist.c src/regf.c src/shellitem.c src/jsonmini.c src/usn.c tests/fuzz_parsers.c -o fuzz_parsers
@@ -183,6 +183,13 @@ jobs:
           for f in System.evtx System2.evtx; do
             curl -sSfL -o "evtxref/$f" "https://raw.githubusercontent.com/log2timeline/plaso/ee5a0ab4f7af07f61b0554ba8edc0700514efc5a/test_data/evtx/$f"
           done
+          # Security logs of recorded attacks (EVTX-ATTACK-SAMPLES, data only,
+          # pinned commit) for `logons`: an RDP logon through a tunnel, a
+          # pass-the-hash logon, WMIC run with another account's credentials.
+          EAS=https://raw.githubusercontent.com/sbousseaden/EVTX-ATTACK-SAMPLES/4ceed2f4706daf601c212a8f91c113dd85349a2c
+          curl -sSfL -o evtxref/DE_RDP_Tunneling_4624.evtx "$EAS/Command%20and%20Control/DE_RDP_Tunneling_4624.evtx"
+          curl -sSfL -o evtxref/LM_4624_mimikatz_sekurlsa_pth_source_machine.evtx "$EAS/Lateral%20Movement/LM_4624_mimikatz_sekurlsa_pth_source_machine.evtx"
+          curl -sSfL -o evtxref/LM_WMIC_4648_rpcss.evtx "$EAS/Lateral%20Movement/LM_WMIC_4648_rpcss.evtx"
           python3 tests/wine/evtxfiles.py ./winspect.exe evtxref
           curl -sSfL -o MFT "https://raw.githubusercontent.com/log2timeline/plaso/ee5a0ab4f7af07f61b0554ba8edc0700514efc5a/test_data/MFT"
           python3 tests/wine/mftfile.py ./winspect.exe MFT
