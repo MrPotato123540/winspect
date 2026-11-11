@@ -1286,5 +1286,45 @@ try:
         print('checked hash  (folder, -r, --match list in mixed formats; digests equal hashlib)')
 except Exception as e:
     print('FAIL hash check:', e); fails += 1
+
+# image / timeline --root with the newer offline sources: a copy of the
+# synthetic installation whose user hive also holds an Office trust record
+# for a mail attachment, plus a machine-wide and a per-user crash report.
+img3 = os.path.join(pfx, 'drive_c', 'img3')
+_sh.rmtree(img3, ignore_errors=True)
+_sh.copytree(img, img3)
+ntu3 = K('ROOT', [], [K('Software', [], [K('Microsoft', [], [
+    K('Windows', [], [K('CurrentVersion', [], [K('Run', [rw.Value('Updater', rw.REG_SZ, rw.sz(r'C:\Users\bob\AppData\Local\Temp\upd.exe'))])])]),
+    K('Office', [], [K('16.0', [], [K('Excel', [], [K('Security', [], [K('Trusted Documents', [], [K('TrustRecords', [
+        rw.Value(r'C:/Users/bob/AppData/Local/Microsoft/Windows/INetCache/Content.Outlook/AB12/po.xlsm', rw.REG_BINARY, trec(OT, 0x7FFFFFFF)),
+        rw.Value(r'C:/Users/bob/Documents/own.xlsm', rw.REG_BINARY, trec(OT, 0x7FFFFFFF))])])])])])])])])])
+with open(os.path.join(img3, 'Users', 'bob', 'NTUSER.DAT'), 'wb') as f:
+    f.write(rw.build(ntu3))
+crash_lines = ['Version=1', 'EventType=APPCRASH', 'EventTime=133500000000000000', 'Sig[0].Name=Application Name', 'Sig[0].Value=%s',
+               r'AppPath=%s', '']
+wer_file(os.path.join(img3, 'ProgramData', 'Microsoft', 'Windows', 'WER', 'ReportArchive', 'AppCrash_a', 'Report.wer'),
+         [l.replace('%s', v) if '%s' in l else l for l, v in zip(crash_lines, ['', '', '', '', 'stage.exe', r'C:\ProgramData\stage.exe', ''])])
+wer_file(os.path.join(img3, 'Users', 'bob', 'AppData', 'Local', 'Microsoft', 'Windows', 'WER', 'ReportQueue', 'AppCrash_b', 'Report.wer'),
+         [l.replace('%s', v) if '%s' in l else l for l, v in zip(crash_lines, ['', '', '', '', 'pay.exe', r'C:\Users\bob\Downloads\pay.exe', ''])])
+wer_file(os.path.join(img3, 'Users', 'bob', 'AppData', 'Local', 'Microsoft', 'Windows', 'WER', 'ReportQueue', 'AppCrash_c', 'Report.wer'),
+         [l.replace('%s', v) if '%s' in l else l for l, v in zip(crash_lines, ['', '', '', '', 'calc.exe', r'C:\Windows\System32\calc.exe', ''])])
+try:
+    rc, out, err = wine([exe, 'image', r'C:\img3', '--json'], timeout=300)
+    im3 = json.loads(out)
+    f3 = [(x['source'], x['user'], x['detail']) for x in im3['findings'] if x['source'] in ('office', 'wer')]
+    rc2, out2, err2 = wine([exe, 'timeline', '--root', r'C:\img3', '--sources', 'office,wer', '--json'], timeout=300)
+    t3 = json.loads(out2)
+    if sorted((s_, u_) for s_, u_, _ in f3) != [('office', 'bob'), ('wer', ''), ('wer', 'bob')]:
+        print(f'FAIL image (office / wer): {f3}'); fails += 1
+    elif not any('po.xlsm' in d for _, _, d in f3) or not any('stage.exe' in d for _, _, d in f3) or not any('pay.exe' in d for _, _, d in f3):
+        print(f'FAIL image (office / wer) details: {f3}'); fails += 1
+    elif any('own.xlsm' in d or 'calc.exe' in d for _, _, d in f3):
+        print(f'FAIL image: benign Office document / crash reported as a finding: {f3}'); fails += 1
+    elif len(t3) != 5 or sum(1 for r in t3 if r['suspicious']) != 3 or {r.get('user', '') for r in t3 if r['source'] == 'office'} != {'bob'}:
+        print(f'FAIL timeline --root (office / wer): {t3}'); fails += 1
+    else:
+        print('checked image / timeline --root  (office trust record and crash reports, machine-wide and per user)')
+except Exception as e:
+    print('FAIL image office/wer check:', e, out[:300]); fails += 1
 print(f'\n{fails} failure(s)')
 sys.exit(1 if fails else 0)

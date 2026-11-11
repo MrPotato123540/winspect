@@ -467,6 +467,9 @@ static size_t image_sources(const img_paths *ip, source *out, size_t cap)
             ADD("browser", cmd_browser, x_browser, NULL, p->name, "--home", homes[u]);
             ADD("activities", cmd_activities, x_activities, NULL, p->name, "--home", homes[u]);
             ADD("webcache", cmd_webcache, x_webcache, NULL, p->name, "--home", homes[u]);
+            static char uwer[IMG_MAX_USERS][MAX_PATH * 2 + 48];
+            snprintf(uwer[u], sizeof uwer[u], "%s\\AppData\\Local\\Microsoft\\Windows\\WER", homes[u]);
+            if (GetFileAttributesA(uwer[u]) != INVALID_FILE_ATTRIBUTES) ADD("wer", cmd_wer, x_wer, NULL, p->name, uwer[u]);
         }
         if (p->usrclass[0] && ip->software[0])
             ADD("comhijack", cmd_comhijack, x_comhijack, NULL, p->name, "--usrclass", p->usrclass, "--software", ip->software, "--all");

@@ -45,6 +45,9 @@
 #include "mru.h"
 #include "rdp.h"
 #include "comhijack.h"
+#include "logons.h"
+#include "wer.h"
+#include "office.h"
 #include "events.h"
 #include "browser.h"
 #include "pca.h"
@@ -115,7 +118,7 @@ static void describe(const jm_node *r, char *out, size_t n)
     static const char *const keys[] = {
         "location", "name", "task", "check", "executable", "program", "list", "path", "command",
         "binary_path", "service_dll", "com_dll", "target", "value", "subject", "summary", "clsid",
-        "user_server", "file", NULL
+        "user_server", "file", "item", "account", "source", NULL
     };
     out[0] = 0;
     int used = 0;
@@ -256,6 +259,16 @@ int cmd_image(int argc, char **argv)
         int k = 0;
         for (int i = 0; i < nev && k < 8; i++) { j->args[k++] = "--evtx"; j->args[k++] = ip.evtx[i]; }
     }
+    if (nev) {
+        job *j = &jobs[nj++];
+        memset(j, 0, sizeof *j);
+        j->name = "logons"; j->fn = cmd_logons; j->rule = RULE_FLAGGED;
+        int k = 0;
+        for (int i = 0; i < nev && k < 8; i++) { j->args[k++] = "--evtx"; j->args[k++] = ip.evtx[i]; }
+    }
+    char werdir[MAX_PATH * 2];
+    snprintf(werdir, sizeof werdir, "%s\\ProgramData\\Microsoft\\Windows\\WER", R);
+    if (GetFileAttributesA(werdir) != INVALID_FILE_ATTRIBUTES) JOB("wer", cmd_wer, NULL, RULE_FLAGGED, NULL, werdir);
     for (int i = 0; i < nj; i++) {
         jm_node *doc = run_json(jobs[i].fn, jobs[i].args);
         if (doc) collect(&fl, jobs[i].name, NULL, doc, jobs[i].list, jobs[i].rule, jobs[i].fixed);
@@ -268,6 +281,7 @@ int cmd_image(int argc, char **argv)
         JOB("autoruns", cmd_autoruns, NULL, RULE_FLAGGED, NULL, "--ntuser", p->ntuser);
         JOB("userassist", cmd_userassist, NULL, RULE_FLAGGED, NULL, "--hive", p->ntuser);
         JOB("mru", cmd_mru, NULL, RULE_FLAGGED, NULL, "--hive", p->ntuser);
+        JOB("office", cmd_office, NULL, RULE_FLAGGED, NULL, "--hive", p->ntuser);
         if (p->usrclass[0] && has_sw)
             JOB("comhijack", cmd_comhijack, NULL, RULE_FLAGGED, NULL, "--usrclass", p->usrclass, "--software", sw);
         if (p->pshist[0]) JOB("pshistory", cmd_pshistory, NULL, RULE_FLAGGED, NULL, p->pshist);
@@ -278,6 +292,9 @@ int cmd_image(int argc, char **argv)
         JOB("browser", cmd_browser, NULL, RULE_FLAGGED, NULL, "--home", home);
         JOB("activities", cmd_activities, NULL, RULE_FLAGGED, NULL, "--home", home);
         JOB("webcache", cmd_webcache, NULL, RULE_FLAGGED, NULL, "--home", home);
+        char uwer[MAX_PATH * 2 + 48];
+        snprintf(uwer, sizeof uwer, "%s\\AppData\\Local\\Microsoft\\Windows\\WER", home);
+        if (GetFileAttributesA(uwer) != INVALID_FILE_ATTRIBUTES) JOB("wer", cmd_wer, NULL, RULE_FLAGGED, NULL, uwer);
         for (int i = 0; i < nj; i++) {
             jm_node *doc = run_json(jobs[i].fn, jobs[i].args);
             if (doc) collect(&fl, jobs[i].name, p->name, doc, jobs[i].list, jobs[i].rule, jobs[i].fixed);
