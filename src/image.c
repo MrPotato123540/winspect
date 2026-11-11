@@ -46,6 +46,7 @@
 #include "rdp.h"
 #include "comhijack.h"
 #include "logons.h"
+#include "detections.h"
 #include "wer.h"
 #include "office.h"
 #include "events.h"
@@ -118,7 +119,7 @@ static void describe(const jm_node *r, char *out, size_t n)
     static const char *const keys[] = {
         "location", "name", "task", "check", "executable", "program", "list", "path", "command",
         "binary_path", "service_dll", "com_dll", "target", "value", "subject", "summary", "clsid",
-        "user_server", "file", "item", "account", "source", NULL
+        "user_server", "threat", "file", "item", "account", "source", NULL
     };
     out[0] = 0;
     int used = 0;
@@ -269,6 +270,9 @@ int cmd_image(int argc, char **argv)
     char werdir[MAX_PATH * 2];
     snprintf(werdir, sizeof werdir, "%s\\ProgramData\\Microsoft\\Windows\\WER", R);
     if (GetFileAttributesA(werdir) != INVALID_FILE_ATTRIBUTES) JOB("wer", cmd_wer, NULL, RULE_FLAGGED, NULL, werdir);
+    char dhdir[MAX_PATH * 2];
+    snprintf(dhdir, sizeof dhdir, "%s\\ProgramData\\Microsoft\\Windows Defender\\Scans\\History\\Service\\DetectionHistory", R);
+    if (GetFileAttributesA(dhdir) != INVALID_FILE_ATTRIBUTES) JOB("detections", cmd_detections, NULL, RULE_FLAGGED, NULL, dhdir);
     for (int i = 0; i < nj; i++) {
         jm_node *doc = run_json(jobs[i].fn, jobs[i].args);
         if (doc) collect(&fl, jobs[i].name, NULL, doc, jobs[i].list, jobs[i].rule, jobs[i].fixed);

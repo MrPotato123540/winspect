@@ -90,6 +90,8 @@ add_executable(winspect
     src/office.c
     src/magicparse.c
     src/magic.c
+    src/defhist.c
+    src/detections.c
     src/activities.c
     src/mft.c
     src/mftcmd.c

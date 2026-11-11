@@ -29,6 +29,7 @@
 #include "destlist.h"
 #include "shellitem.h"
 #include "rights.h"
+#include "defhist.h"
 #include "hashlist.h"
 #include "magicparse.h"
 #include "officeparse.h"
@@ -1823,6 +1824,59 @@ int main(void)
         char t2[] = "nothing here\n";
         check_int("hashlist empty", (int)hashlist_parse(t2, &hl) == 0 && hashlist_find(&hl, "aa") == NULL, 1);
         hashlist_free(&hl);
+    }
+
+    // --- defhist: Defender Detection History values ------------------------------
+    {
+        static unsigned char b[8192];
+        size_t o = 0;
+#define VAL(type, ptr, len) do { uint32_t l_ = (uint32_t)(len), t_ = (type); memcpy(b + o, &l_, 4); memcpy(b + o + 4, &t_, 4); \
+            memcpy(b + o + 8, (ptr), l_); o += 8 + l_; while (o % 8) b[o++] = 0; } while (0)
+#define STR(s) do { unsigned char w_[400]; size_t n_ = strlen(s); for (size_t i_ = 0; i_ <= n_; i_++) { w_[2 * i_] = (unsigned char)(s)[i_]; w_[2 * i_ + 1] = 0; } \
+            VAL(0x15, w_, 2 * n_ + 2); } while (0)
+        uint64_t id = 224688, t1 = 133500000050000000ULL, t2 = 133500000000000000ULL, zero = 0;
+        static const unsigned char guid[16] = { 0x97, 0x06, 0x38, 0xFC, 0x8D, 0xA6, 0x94, 0x4C, 0xB6, 0x7F, 0x9B, 0x64, 0x49, 0x03, 0x94, 0x63 };
+        VAL(0x08, &id, 8);
+        VAL(0x1E, guid, 16);
+        STR("Magic.Version:1.2");
+        STR("PUA:Win32/Test");
+        for (int i = 0; i < 10; i++) {                       // more resources than the record keeps
+            STR("Magic.Version:1.2");
+            STR(i == 3 ? "file" : "regkey");
+            STR(i == 3 ? "C:\\x\\y.exe" : "HKLM\\Software\\X");
+        }
+        size_t tail = o;
+        VAL(0x0A, &t1, 8);
+        STR("PC\\bob");
+        STR("Unknown");
+        VAL(0x0A, &t2, 8);
+        VAL(0x0A, &zero, 8);
+        STR("");
+        static dh_record dr;
+        check_int("defhist parse", dh_parse(b, o, &dr), 0);
+        check_str("defhist guid", dr.guid, "FC380697-A68D-4C94-B67F-9B6449039463");
+        check_str("defhist threat", dr.threat, "PUA:Win32/Test");
+        check_int("defhist id", dr.threat_id == 224688, 1);
+        check_int("defhist resources capped", dr.nres, DH_MAX_RES);
+        check_str("defhist primary is the file", dh_primary(&dr)->location, "C:\\x\\y.exe");
+        check_int("defhist times", dr.status_time == t1 && dr.detect_time == t2 && dr.remediation_time == 0, 1);
+        check_str("defhist user", dr.user, "PC\\bob");
+        check_str("defhist unknown process", dr.process, "");
+        check_int("defhist truncated mid-value keeps the head", dh_parse(b, tail + 12, &dr) == 0 && dr.status_time == 0 && dr.threat[0] == 'P', 1);
+        check_int("defhist no threat", dh_parse(b, 40, &dr), -1);
+        uint32_t huge = 0xFFFFFFF0u;
+        memcpy(b + 16, &huge, 4);                            // the GUID value claims 4 GiB
+        check_int("defhist absurd size", dh_parse(b, o, &dr), -1);
+        check_int("defhist empty", dh_parse(b, 0, &dr), -1);
+        char u[64];
+        dh_web_url("C:\\a.zip|https://x.example/a.zip|pid:1", u, sizeof u);
+        check_str("defhist url", u, "https://x.example/a.zip");
+        dh_web_url("C:\\a.zip", u, sizeof u);
+        check_str("defhist no url", u, "");
+        dh_web_url("a|bbbbbbbbbbbbbbbb", u, 8);
+        check_str("defhist url clipped", u, "bbbbbbb");
+#undef VAL
+#undef STR
     }
 
     fprintf(stderr, "\n%s (%d failure%s)\n",

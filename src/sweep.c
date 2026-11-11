@@ -25,6 +25,7 @@
 #include "defender.h"
 #include "prefetch.h"
 #include "wmi.h"
+#include "detections.h"
 #include "wer.h"
 #include "office.h"
 #include "logons.h"
@@ -71,6 +72,7 @@ static const check checks[] = {
     { "pshistory", "suspicious PowerShell history lines (all users)", cmd_pshistory, { "--all-users", "--flagged", NULL } },
     { "recyclebin","deleted programs and scripts",           cmd_recyclebin, { "--flagged", NULL } },
     { "browser",   "risky downloads / bare-IP visits (all users)", cmd_browser, { "--all-users", "--flagged", NULL } },
+    { "detections","what Defender has caught (Detection History)", cmd_detections, { NULL } },
     { "wer",       "crashed programs that ran from user-writable dirs", cmd_wer, { "--flagged", NULL } },
     { "office",    "macros enabled for downloads / attachments, weak macro settings", cmd_office, { "--flagged", NULL } },
     { "logons",    "logons worth a look (public source, tunnel, type 8/9, NTLMv1)", cmd_logons, { "--flagged", NULL } },

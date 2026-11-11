@@ -40,6 +40,7 @@
 #include "logons.h"
 #include "wer.h"
 #include "office.h"
+#include "detections.h"
 #include "webcache.h"
 #include "imgpaths.h"
 
@@ -339,6 +340,17 @@ static void x_wer(tl *t, const jm_node *r)
     add(t, S(r, "time"), w, S(r, "fault_module"), B(r, "suspicious"));
 }
 
+static void x_detections(tl *t, const jm_node *r)
+{
+    char w[1500];
+    snprintf(w, sizeof w, "Defender detected %s: %s", S(r, "threat"), S(r, "file"));
+    add(t, S(r, "detected"), w, S(r, "url")[0] ? S(r, "url") : S(r, "process"), 1);
+    if (S(r, "remediated")[0]) {
+        snprintf(w, sizeof w, "Defender remediated %s: %s", S(r, "threat"), S(r, "file"));
+        add(t, S(r, "remediated"), w, S(r, "remediated_by"), 0);
+    }
+}
+
 // Only the trust decisions carry the time of a user action; settings have
 // none and a location's time is just its key's last write.
 static void x_office(tl *t, const jm_node *r)
@@ -400,6 +412,7 @@ static const source sources[] = {
     { "logons",     cmd_logons,     { NULL },               NULL, x_logons, NULL },
     { "wer",        cmd_wer,        { NULL },               NULL, x_wer, NULL },
     { "office",     cmd_office,     { NULL },               NULL, x_office, NULL },
+    { "detections", cmd_detections, { NULL },               NULL, x_detections, NULL },
 };
 
 // The same sources for an offline installation under root (timeline --root):
@@ -446,6 +459,9 @@ static size_t image_sources(const img_paths *ip, source *out, size_t cap)
         static char werdir[MAX_PATH * 2];
         snprintf(werdir, sizeof werdir, "%s\\ProgramData\\Microsoft\\Windows\\WER", ip->root);
         if (GetFileAttributesA(werdir) != INVALID_FILE_ATTRIBUTES) ADD("wer", cmd_wer, x_wer, NULL, NULL, werdir);
+        static char dhdir[MAX_PATH * 2];
+        snprintf(dhdir, sizeof dhdir, "%s\\ProgramData\\Microsoft\\Windows Defender\\Scans\\History\\Service\\DetectionHistory", ip->root);
+        if (GetFileAttributesA(dhdir) != INVALID_FILE_ATTRIBUTES) ADD("detections", cmd_detections, x_detections, NULL, NULL, dhdir);
     }
     for (int u = 0; u < ip->nusers; u++) {
         const img_user *p = &ip->users[u];

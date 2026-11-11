@@ -107,6 +107,7 @@
 #include "wer.h"
 #include "office.h"
 #include "magic.h"
+#include "detections.h"
 
 // cmd_modules lives in modules.c: a live process's loaded modules
 #include "modules.h"
@@ -313,6 +314,7 @@ static const struct {
     { "firewall", cmd_firewall, "firewall rules (flags risky inbound allow)", "security" },
     { "taskcache",cmd_taskcache,"scheduled tasks hidden from schtasks",      "security" },
     { "wmi",      cmd_wmi,      "WMI permanent event subscriptions",        "security" },
+    { "detections",cmd_detections,"what Defender has caught (Detection History)", "security" },
     { "defender", cmd_defender, "Defender exclusions + disabling policies",  "security" },
 };
 
