@@ -1081,5 +1081,52 @@ try:
         print('checked mft --image  (fragmented $MFT followed through its attribute list; incomplete read warned)')
 except Exception as e:
     print('FAIL mft --image check:', e); fails += 1
+
+# wer: two crash reports written the way Windows writes them (UTF-16LE with
+# BOM, CRLF). The one under ProgramData is a program in a Temp folder ->
+# flagged; the one in a user's profile is Word hanging with an add-in DLL from
+# AppData -> listed, not flagged, the add-in shown only with --modules.
+def wer_file(path, lines):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'wb') as f:
+        f.write(b'\xff\xfe' + '\r\n'.join(lines).encode('utf-16-le'))
+wer_file(os.path.join(pfx, 'drive_c', 'ProgramData', 'Microsoft', 'Windows', 'WER', 'ReportArchive',
+                      'AppCrash_upd.exe_1a2b3c', 'Report.wer'),
+         ['Version=1', 'EventType=APPCRASH', 'EventTime=133500000000000000', 'ReportIdentifier=11111111-2222',
+          'Sig[0].Name=Application Name', 'Sig[0].Value=upd.exe', 'Sig[3].Name=Fault Module Name', 'Sig[3].Value=StackHash_9f1c',
+          'Sig[6].Name=Exception Code', 'Sig[6].Value=c0000005',
+          r'LoadedModule[0]=C:\Users\bob\AppData\Local\Temp\upd.exe', r'LoadedModule[1]=C:\Windows\SYSTEM32\ntdll.dll',
+          r'AppPath=C:\Users\bob\AppData\Local\Temp\upd.exe', 'NsAppName=upd.exe', ''])
+wer_file(os.path.join(pfx, 'drive_c', 'users', 'Public', 'AppData', 'Local', 'Microsoft', 'Windows', 'WER', 'ReportQueue',
+                      'AppHang_WINWORD.EXE_77', 'Report.wer'),
+         ['Version=1', 'EventType=AppHangB1', 'EventTime=133500000600000000',
+          'Sig[0].Name=Application Name', 'Sig[0].Value=WINWORD.EXE',
+          r'LoadedModule[0]=C:\Program Files\Microsoft Office\Office16\WINWORD.EXE',
+          r'LoadedModule[1]=C:\Users\bob\AppData\Roaming\addin\x.dll', ''])
+try:
+    rc, out, err = wine([exe, 'wer', '--json'])
+    wr = json.loads(out)
+    by = {r['program'].lower(): r for r in wr}
+    crash, hang = by.get('upd.exe'), by.get('winword.exe')
+    rc2, txt, err = wine([exe, 'wer', '--modules'])
+    rc3, out3, err = wine([exe, 'wer', '--flagged', '--csv'])
+    rc4, out4, err = wine([exe, 'wer', r'C:\ProgramData\Microsoft\Windows\WER', '--find', 'stackhash', '--json'])
+    if not crash or not hang:
+        print(f'FAIL wer: reports not found: {wr}'); fails += 1
+    elif not (crash['suspicious'] and crash['time'] == '2024-01-17 21:20:00' and crash['fault_module'] == 'StackHash_9f1c'
+              and crash['exception_code'] == 'c0000005' and crash['user'] == '(system)'):
+        print(f'FAIL wer: crash report fields: {crash}'); fails += 1
+    elif hang['suspicious'] or hang['user'] != 'Public' or hang['writable_modules'] != 1 or not hang['path'].endswith('WINWORD.EXE'):
+        print(f'FAIL wer: hang report must be listed unflagged with its add-in counted: {hang}'); fails += 1
+    elif wr[0]['program'].lower() != 'winword.exe':
+        print('FAIL wer: newest report must come first'); fails += 1
+    elif 'addin\\x.dll' not in txt or len(out3.strip().splitlines()) != 2 or 'upd.exe' not in out3:
+        print(f'FAIL wer --modules / --flagged --csv: {txt[-300:]} {out3}'); fails += 1
+    elif [r['program'] for r in json.loads(out4)] != ['upd.exe']:
+        print(f'FAIL wer <folder> --find: {out4}'); fails += 1
+    else:
+        print('checked wer  (UTF-16 reports: Temp program flagged, Word hang with add-in not; folder / --find / --modules)')
+except Exception as e:
+    print('FAIL wer check:', e); fails += 1
 print(f'\n{fails} failure(s)')
 sys.exit(1 if fails else 0)

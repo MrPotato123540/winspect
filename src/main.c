@@ -104,6 +104,7 @@
 #include "tasks.h"
 #include "logons.h"
 #include "dnscache.h"
+#include "wer.h"
 
 // cmd_modules lives in modules.c: a live process's loaded modules
 #include "modules.h"
@@ -298,6 +299,7 @@ static const struct {
     { "objects",  cmd_objects,  "named kernel objects (BaseNamedObjects)",  "system" },
     { "usb",      cmd_usb,      "USB storage history (Enum\\USBSTOR)",       "system" },
     { "pca",      cmd_pca,      "PCA launch records (Windows 11 22H2+)",      "system" },
+    { "wer",      cmd_wer,      "crash reports (WER) as execution evidence",   "system" },
     { "setupapi", cmd_setupapi, "device/driver installs (setupapi logs)",     "system" },
     { "prefetch", cmd_prefetch, "execution evidence from Prefetch (*.pf)",   "system" },
     { "shimcache",cmd_shimcache,"AppCompatCache entries (programs seen)",    "system" },

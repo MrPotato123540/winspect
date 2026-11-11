@@ -83,6 +83,8 @@ add_executable(winspect
     src/logonparse.c
     src/logons.c
     src/dnscache.c
+    src/werparse.c
+    src/wer.c
     src/activities.c
     src/mft.c
     src/mftcmd.c

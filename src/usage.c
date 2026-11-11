@@ -574,6 +574,21 @@ static const struct { const char *name, *text; } usage_table[] = {
         "raw instead of being guessed at. Flags programs in user-writable folders.\n"
         "A folder argument reads a copy (e.g. from a disk image). Read-only. Usage:\n"
         "  winspect pca [<folder>] [--flagged] [--json | --csv]\n" },
+    { "wer",
+        "winspect wer - Windows Error Reporting crash / hang reports (Report.wer)\n"
+        "as execution evidence: a program that crashed certainly ran, and its\n"
+        "report keeps the full path, the time, the faulting module and the\n"
+        "exception code long after the file itself is gone. Malware and exploits\n"
+        "crash more often than they should (and a crash inside a browser or Office\n"
+        "with an odd fault module is where an exploit attempt shows). Read from\n"
+        "ProgramData\\Microsoft\\Windows\\WER (ReportArchive, ReportQueue) and each\n"
+        "profile's AppData\\Local\\Microsoft\\Windows\\WER. Columns: time (UTC), event\n"
+        "type, program, fault module, exception code, path; --modules adds the\n"
+        "first module loaded from a user-writable folder (shown, not flagged:\n"
+        "overlays and per-user add-ins do this legitimately). Flagged: the crashed\n"
+        "program itself ran from a user-writable folder. A folder argument reads\n"
+        "reports below it instead (a copy from an image). Read-only. Usage:\n"
+        "  winspect wer [<folder>] [--find <text>] [--modules] [--flagged] [--json | --csv]\n" },
     { "setupapi",
         "winspect setupapi - device and driver installs from the SetupAPI text logs\n"
         "(%SystemRoot%\\INF\\setupapi.dev.log, setupapi.setup.log and their rotated\n"

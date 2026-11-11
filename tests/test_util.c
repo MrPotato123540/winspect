@@ -29,6 +29,7 @@
 #include "destlist.h"
 #include "shellitem.h"
 #include "rights.h"
+#include "werparse.h"
 #include "logonparse.h"
 #include "patchdec.h"
 
@@ -1604,6 +1605,49 @@ int main(void)
         check_str("type name unknown", logon_type_name(42), "");
 #undef EV
 #undef D
+    }
+
+    // --- wer: Report.wer as execution evidence ----------------------------------
+    {
+        char t1[] = "\xEF\xBB\xBFVersion=1\r\nEventType=APPCRASH\r\nEventTime=133500000000000000\r\nReportIdentifier=aaaa-bbbb\r\n"
+                    "Sig[0].Name=Application Name\r\nSig[0].Value=upd.exe\r\nSig[1].Name=Application Version\r\nSig[1].Value=1.0.0.0\r\n"
+                    "Sig[3].Name=Fault Module Name\r\nSig[3].Value=StackHash_1a2b\r\nSig[6].Name=Exception Code\r\nSig[6].Value=c0000005\r\n"
+                    "UI[2]=C:\\Users\\bob\\AppData\\Local\\Temp\\upd.exe\r\n"
+                    "LoadedModule[0]=C:\\Users\\bob\\AppData\\Local\\Temp\\upd.exe\r\nLoadedModule[1]=C:\\Windows\\SYSTEM32\\ntdll.dll\r\n"
+                    "AppName=Updater\r\nAppPath=C:\\Users\\bob\\AppData\\Local\\Temp\\upd.exe\r\nNsAppName=upd.exe\r\n";
+        wer_report w;
+        check_int("wer parse", wer_parse(t1, &w), 0);
+        check_str("wer type", w.event_type, "APPCRASH");
+        check_int("wer time", w.event_time == 133500000000000000ULL, 1);
+        check_str("wer app", w.app_name, "upd.exe");
+        check_str("wer path", w.app_path, "C:\\Users\\bob\\AppData\\Local\\Temp\\upd.exe");
+        check_str("wer module", w.fault_module, "StackHash_1a2b");
+        check_str("wer code", w.exc_code, "c0000005");
+        check_str("wer id", w.report_id, "aaaa-bbbb");
+        check_int("wer modules", w.modules == 2 && w.modules_writable == 1, 1);
+        check_str("wer reason", wer_reason(&w), "crashed program ran from a user-writable dir");
+
+        // Older layout: no AppPath / NsAppName; the path is LoadedModule[0].
+        char t2[] = "EventType=AppHangB1\nEventTime=0\nSig[0].Name=Application Name\nSig[0].Value=winword.exe\n"
+                    "LoadedModule[0]=C:\\Program Files\\Microsoft Office\\Office16\\WINWORD.EXE\n"
+                    "LoadedModule[1]=C:\\Users\\bob\\AppData\\Roaming\\addin\\x.dll\n";
+        check_int("wer old parse", wer_parse(t2, &w), 0);
+        check_str("wer old path", w.app_path, "C:\\Program Files\\Microsoft Office\\Office16\\WINWORD.EXE");
+        check_int("wer old no flag (program installed normally)", wer_reason(&w) == NULL, 1);
+        check_str("wer writable module kept as detail", w.first_writable_module, "C:\\Users\\bob\\AppData\\Roaming\\addin\\x.dll");
+        check_int("wer no time", w.event_time == 0, 1);
+
+        // Name falls back to the path's file name; Sig value without a Name is ignored.
+        char t3[] = "EventType=BEX64\nSig[2].Value=orphan\nSig[99].Name=Fault Module Name\nSig[99].Value=ignored-index\nAppPath=D:\\tools\\x.exe\n";
+        check_int("wer fallback parse", wer_parse(t3, &w), 0);
+        check_str("wer name from path", w.app_name, "x.exe");
+        check_str("wer sig index out of range ignored", w.fault_module, "");
+        char t4[] = "[General]\nfoo=bar\n";
+        check_int("wer not a report", wer_parse(t4, &w), -1);
+        char t5[] = "";
+        check_int("wer empty", wer_parse(t5, &w), -1);
+        char t6[] = "Sig[x].Name=a\nSig[-1].Name=b\nSig[99999999999999999999].Name=c\nLoadedModule[1\nEventType";
+        check_int("wer malformed indexes", wer_parse(t6, &w), -1);
     }
 
     fprintf(stderr, "\n%s (%d failure%s)\n",
