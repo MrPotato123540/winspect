@@ -29,6 +29,12 @@
 #include "destlist.h"
 #include "shellitem.h"
 #include "rights.h"
+#include "hashlist.h"
+#include "magicparse.h"
+#include "officeparse.h"
+#include "werparse.h"
+#include "logonparse.h"
+#include "patchdec.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -966,6 +972,11 @@ int main(void)
                 check_int("boot record", (int)nbt.record_size, 1024);
                 boot[13] = 0xF4;                                        // 2^12 sectors per cluster (64K-cluster volumes use this form)
                 check_int("boot big cluster", ntfs_parse_boot(boot, sizeof boot, &nbt) == 0 && nbt.cluster_size == 512u * 4096u, 1);
+                boot[13] = 0x81;                                        // would be a shift by 127
+                check_int("boot absurd cluster shift", ntfs_parse_boot(boot, sizeof boot, &nbt), -1);
+                boot[13] = 8; boot[64] = 0x80;                          // record size 2^128
+                check_int("boot absurd record shift", ntfs_parse_boot(boot, sizeof boot, &nbt), -1);
+                boot[64] = 0xF6;
                 memcpy(boot + 3, "FAT32   ", 8);
                 check_int("boot not ntfs", ntfs_parse_boot(boot, sizeof boot, &nbt), -1);
                 // A record whose non-resident $DATA has three runs: +0x100000 x 0x40,
@@ -1412,6 +1423,406 @@ int main(void)
     if (i != n) {
         fprintf(stderr, "FAIL: expected %zu output lines, read %zu\n", n, i);
         failures++;
+    }
+
+    // --- patchdec: grouping changed bytes and recognising hook shapes -----------
+    {
+        unsigned char a[64], b[64];
+        memset(a, 0x90, sizeof a);
+        memcpy(b, a, sizeof b);
+        patch_run pr[4];
+        uint32_t td = 99;
+        check_int("patch none", (int)patch_runs(a, b, sizeof a, pr, 4, &td), 0);
+        check_int("patch none diff", (int)td, 0);
+        b[10] = 0xE9; b[11] = 1; b[13] = 2;                 // one equal byte inside (b[12])
+        b[40] = 0xCC;                                       // far away: a second patch
+        check_int("patch two runs", (int)patch_runs(a, b, sizeof a, pr, 4, &td), 2);
+        check_int("patch run0 off", (int)pr[0].off, 10);
+        check_int("patch run0 len", (int)pr[0].len, 4);
+        check_int("patch run0 diff", (int)pr[0].diff, 3);
+        check_int("patch run1 off", (int)pr[1].off, 40);
+        check_int("patch total diff", (int)td, 4);
+        b[15 + PATCH_GAP] = 0x11;                           // gap of PATCH_GAP+1 equal bytes after b[13]: new run
+        check_int("patch gap splits", (int)patch_runs(a, b, sizeof a, pr, 4, &td), 3);
+        b[14 + PATCH_GAP] = 0x11;                           // gap of exactly PATCH_GAP: merged
+        check_int("patch gap merges", (int)patch_runs(a, b, sizeof a, pr, 4, &td) == 2 && pr[0].len == 10 + PATCH_GAP - 4, 1);
+        check_int("patch count beyond max", (int)patch_runs(a, b, sizeof a, pr, 1, NULL), 2);
+
+        uint64_t t = 0;
+        const unsigned char jmp[] = { 0xE9, 0x37, 0x00, 0x00, 0x00 };
+        check_int("dec jmp", patch_decode(jmp, sizeof jmp, 0x140001480ULL, 1, &t) == PATCH_JMP_REL && t == 0x1400014BCULL, 1);
+        const unsigned char jback[] = { 0xE9, 0xFB, 0xFF, 0xFF, 0xFF };   // rel32 = -5: jumps to itself
+        check_int("dec jmp negative", patch_decode(jback, sizeof jback, 0x1000, 1, &t) == PATCH_JMP_REL && t == 0x1000, 1);
+        const unsigned char call[] = { 0xE8, 0x10, 0x00, 0x00, 0x00 };
+        check_int("dec call", patch_decode(call, sizeof call, 0x2000, 1, &t) == PATCH_CALL_REL && t == 0x2015, 1);
+        const unsigned char shortj[] = { 0xEB, 0xFE };
+        check_int("dec short jmp", patch_decode(shortj, sizeof shortj, 0x3000, 1, &t) == PATCH_JMP_REL && t == 0x3000, 1);
+        const unsigned char jm[] = { 0xFF, 0x25, 0x00, 0x01, 0x00, 0x00 };
+        check_int("dec jmp mem x64", patch_decode(jm, sizeof jm, 0x4000, 1, &t) == PATCH_JMP_MEM && t == 0x4106, 1);
+        check_int("dec jmp mem x86", patch_decode(jm, sizeof jm, 0x4000, 0, &t) == PATCH_JMP_MEM && t == 0x100, 1);
+        const unsigned char mj[] = { 0x48, 0xB8, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0xFF, 0xE0 };
+        check_int("dec mov rax jmp", patch_decode(mj, sizeof mj, 0, 1, &t) == PATCH_MOV_JMP && t == 0x1122334455667788ULL, 1);
+        const unsigned char mr11[] = { 0x49, 0xBB, 1, 0, 0, 0, 0, 0, 0, 0, 0x41, 0xFF, 0xE3 };
+        check_int("dec mov r11 jmp", patch_decode(mr11, sizeof mr11, 0, 1, &t) == PATCH_MOV_JMP && t == 1, 1);
+        const unsigned char pr32[] = { 0x68, 0x78, 0x56, 0x34, 0x12, 0xC3 };
+        check_int("dec push ret", patch_decode(pr32, sizeof pr32, 0, 0, &t) == PATCH_PUSH_RET && t == 0x12345678, 1);
+        check_int("dec truncated jmp", patch_decode(jmp, 4, 0, 1, &t) == PATCH_OTHER && t == 0, 1);
+        const unsigned char nop[] = { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 };
+        check_int("dec other", patch_decode(nop, sizeof nop, 0, 1, &t), PATCH_OTHER);
+        check_int("dec empty", patch_decode(nop, 0, 0, 1, &t), PATCH_OTHER);
+        check_str("dec name", patch_kind_name(PATCH_JMP_MEM), "jmp [mem]");
+    }
+
+    // --- $ATTRIBUTE_LIST: where a fragmented $MFT's later extents are named -----
+    {
+        unsigned char al[32 * 4];
+        memset(al, 0, sizeof al);
+        // type, entry length, name length, start VCN, record
+        static const struct { uint32_t t; uint64_t vcn, rec; } rows[4] = {
+            { 0x10, 0, 0 }, { 0x80, 900, 31 }, { 0x80, 0, 0 }, { 0x80, 300, 17 } };
+        for (int i = 0; i < 4; i++) {
+            unsigned char *q = al + 32 * i;
+            q[0] = (unsigned char)rows[i].t; q[4] = 32; q[7] = 26;
+            for (int k = 0; k < 8; k++) q[8 + k] = (unsigned char)(rows[i].vcn >> (8 * k));
+            for (int k = 0; k < 6; k++) q[16 + k] = (unsigned char)(rows[i].rec >> (8 * k));
+            q[22] = 1;                                   // sequence number in the high 16 bits
+        }
+        mft_ext ex[4];
+        check_int("alist count", mft_alist_data(al, sizeof al, 0, ex, 4), 2);
+        check_int("alist sorted by vcn", ex[0].start_vcn == 300 && ex[0].recno == 17 && ex[1].start_vcn == 900 && ex[1].recno == 31, 1);
+        check_int("alist beyond max", mft_alist_data(al, sizeof al, 0, ex, 1), 2);
+        check_int("alist truncated entry", mft_alist_data(al, 32 + 20, 0, ex, 4), 0);
+        al[32 + 6] = 4;                                  // a NAMED $DATA stream is not the file's content
+        check_int("alist named stream skipped", mft_alist_data(al, sizeof al, 0, ex, 4), 1);
+        al[4] = 8;                                       // entry length below the header: stop, do not loop
+        check_int("alist bad length", mft_alist_data(al, sizeof al, 0, ex, 4), 0);
+
+        // Resident attribute lookup + a continued (start VCN != 0) run list.
+        unsigned char r[256];
+        memset(r, 0, sizeof r);
+        memcpy(r, "FILE", 4);
+        r[20] = 56;
+        unsigned char *at = r + 56;                      // resident 0x20, 5 content bytes at +24
+        at[0] = 0x20; at[4] = 32; at[16] = 5; at[20] = 24; memcpy(at + 24, "hello", 5);
+        at = r + 88;                                     // non-resident 0x80, start VCN 6, one run: 4 clusters at LCN 40
+        at[0] = 0x80; at[4] = 72; at[8] = 1; at[16] = 6; at[32] = 64; at[64] = 0x11; at[65] = 4; at[66] = 40;
+        memset(r + 160, 0xFF, 4);
+        const unsigned char *cp; size_t cl;
+        check_int("attr resident", mft_attr_resident(r, sizeof r, 0x20, &cp, &cl) == 0 && cl == 5 && memcmp(cp, "hello", 5) == 0, 1);
+        check_int("attr resident: non-resident", mft_attr_resident(r, sizeof r, 0x80, &cp, &cl), 1);
+        check_int("attr resident: absent", mft_attr_resident(r, sizeof r, 0x30, &cp, &cl), -1);
+        mft_run rr[4]; uint64_t real, vcn;
+        check_int("attr runs continued", mft_attr_runs(r, sizeof r, 0x80, rr, 4, &real, &vcn) == 1 && vcn == 6 && rr[0].lcn == 40 && rr[0].clusters == 4, 1);
+        r[56 + 16] = 200;                                // resident size past the attribute
+        check_int("attr resident oversize", mft_attr_resident(r, sizeof r, 0x20, &cp, &cl), -1);
+    }
+
+    // --- logons: one record type from the logon / logoff events ----------------
+    {
+#define EV(id, data) "<Event xmlns='http://schemas.microsoft.com/win/2004/08/events/event'><System><EventID>" #id \
+        "</EventID><TimeCreated SystemTime='2024-05-01T12:34:56.1234567Z'/><Channel>Security</Channel></System><EventData>" data "</EventData></Event>"
+#define D(n, v) "<Data Name='" n "'>" v "</Data>"
+        logon_rec r;
+        const char *x = EV(4624, D("TargetUserName", "alice") D("TargetDomainName", "CORP") D("TargetLogonId", "0x1a2b")
+                           D("LogonType", "10") D("LogonProcessName", "User32 ") D("AuthenticationPackageName", "Negotiate")
+                           D("WorkstationName", "WS7") D("LmPackageName", "-") D("ProcessName", "C:\\Windows\\System32\\svchost.exe")
+                           D("IpAddress", "::ffff:8.8.4.4"));
+        check_int("logon 4624", logon_parse(x, "Security", &r) == 1 && r.kind == LK_LOGON && r.type == 10, 1);
+        check_str("logon user", r.user, "CORP\\alice");
+        check_str("logon v4-mapped source", r.source, "8.8.4.4");
+        check_str("logon proc trimmed", r.logon_process, "User32");
+        check_str("logon dash blanked", r.lm, "");
+        check_str("logon time", r.time, "2024-05-01 12:34:56");
+        check_str("logon id", r.logon_id, "0x1a2b");
+        check_str("logon reason rdp public", logon_reason(&r), "remote desktop logon from a public address");
+        check_int("logon not noise", logon_is_noise(&r), 0);
+        check_str("logon type name", logon_type_name(r.type), "remote desktop");
+        check_int("logon other channel", logon_parse(x, "Application", &r), 0);
+
+        x = EV(4624, D("TargetUserName", "alice") D("TargetDomainName", "CORP") D("LogonType", "10") D("IpAddress", "127.0.0.1"));
+        logon_parse(x, "Security", &r);
+        check_int("logon rdp loopback flagged", logon_reason(&r) != NULL && strstr(logon_reason(&r), "loopback") != NULL, 1);
+        x = EV(4624, D("TargetUserName", "alice") D("TargetDomainName", "CORP") D("LogonType", "10") D("IpAddress", "10.1.2.3"));
+        logon_parse(x, "Security", &r);
+        check_int("logon rdp private not flagged", logon_reason(&r) == NULL, 1);
+        x = EV(4624, D("TargetUserName", "alice") D("TargetDomainName", "CORP") D("LogonType", "3") D("IpAddress", "203.0.113.9"));
+        logon_parse(x, "Security", &r);
+        check_str("logon network public", logon_reason(&r), "network logon from a public address");
+        x = EV(4624, D("TargetUserName", "web") D("TargetDomainName", "CORP") D("LogonType", "8") D("IpAddress", "10.0.0.9"));
+        logon_parse(x, "Security", &r);
+        check_int("logon type 8 flagged", logon_reason(&r) != NULL && strstr(logon_reason(&r), "cleartext") != NULL, 1);
+        x = EV(4624, D("TargetUserName", "user01") D("TargetDomainName", "EXAMPLE") D("LogonType", "9") D("LogonProcessName", "seclogo") D("IpAddress", "::1"));
+        logon_parse(x, "Security", &r);
+        check_int("logon type 9 seclogo flagged", logon_reason(&r) != NULL && strstr(logon_reason(&r), "pass-the-hash") != NULL, 1);
+        x = EV(4624, D("TargetUserName", "user01") D("TargetDomainName", "EXAMPLE") D("LogonType", "9") D("LogonProcessName", "Advapi  ") D("IpAddress", "-"));
+        logon_parse(x, "Security", &r);
+        check_int("logon type 9 other process not flagged", logon_reason(&r) == NULL, 1);
+        x = EV(4624, D("TargetUserName", "bob") D("TargetDomainName", "CORP") D("LogonType", "3") D("LmPackageName", "NTLM V1") D("IpAddress", "10.0.0.4"));
+        logon_parse(x, "Security", &r);
+        check_str("logon ntlmv1", logon_reason(&r), "NTLMv1 authentication (weak, relayable)");
+        x = EV(4624, D("TargetUserName", "ANONYMOUS LOGON") D("TargetDomainName", "NT AUTHORITY") D("LogonType", "3") D("LmPackageName", "NTLM V1") D("IpAddress", "10.0.0.4"));
+        logon_parse(x, "Security", &r);
+        check_int("logon anonymous ntlmv1 not flagged", logon_reason(&r) == NULL, 1);
+        check_int("logon anonymous is noise", logon_is_noise(&r), 1);
+
+        static const struct { const char *dom, *name; unsigned type; int noise; } nz[] = {
+            { "NT AUTHORITY", "SYSTEM", 5, 1 }, { "CORP", "svc_sql", 5, 1 }, { "CORP", "PC02$", 3, 1 },
+            { "Window Manager", "DWM-2", 2, 1 }, { "Font Driver Host", "UMFD-0", 2, 1 }, { "CORP", "DWM-admin", 2, 0 },
+            { "CORP", "alice", 2, 0 }, { "", "", 3, 1 }, { "CORP", "system", 2, 1 } };
+        for (size_t i = 0; i < sizeof nz / sizeof nz[0]; i++) {
+            memset(&r, 0, sizeof r);
+            r.kind = LK_LOGON;
+            r.type = nz[i].type;
+            snprintf(r.user, sizeof r.user, "%s%s%s", nz[i].dom, nz[i].dom[0] ? "\\" : "", nz[i].name);
+            char label[40];
+            snprintf(label, sizeof label, "logon noise %zu", i);
+            check_int(label, logon_is_noise(&r), nz[i].noise);
+        }
+
+        x = EV(4634, D("TargetUserName", "alice") D("TargetDomainName", "CORP") D("TargetLogonId", "0x1a2b") D("LogonType", "10"));
+        check_int("logoff 4634", logon_parse(x, "Security", &r) == 1 && r.kind == LK_LOGOFF && strcmp(r.logon_id, "0x1a2b") == 0, 1);
+        x = EV(4648, D("SubjectUserName", "user01") D("SubjectDomainName", "EXAMPLE") D("SubjectLogonId", "0x99")
+                     D("TargetUserName", "administrator") D("TargetDomainName", "example") D("TargetServerName", "DC1.example.corp")
+                     D("ProcessName", "C:\\Windows\\System32\\wbem\\WMIC.exe") D("IpAddress", "-"));
+        check_int("explicit 4648", logon_parse(x, "Security", &r) == 1 && r.kind == LK_EXPLICIT, 1);
+        check_str("explicit account", r.user, "example\\administrator");
+        check_str("explicit by", r.by, "EXAMPLE\\user01");
+        check_str("explicit server", r.server, "DC1.example.corp");
+        x = EV(4672, D("SubjectUserName", "alice") D("SubjectDomainName", "CORP") D("SubjectLogonId", "0x1a2b") D("PrivilegeList", "SeDebugPrivilege"));
+        check_int("privileged 4672", logon_parse(x, "Security", &r) == 1 && r.kind == LK_PRIVILEGED && strcmp(r.logon_id, "0x1a2b") == 0, 1);
+        x = EV(4778, D("AccountName", "alice") D("AccountDomain", "CORP") D("LogonID", "0x5") D("SessionName", "RDP-Tcp#3")
+                     D("ClientName", "LAPTOP") D("ClientAddress", "198.51.100.7"));
+        check_int("reconnect 4778", logon_parse(x, "Security", &r) == 1 && r.kind == LK_RECONNECT && strcmp(r.session, "RDP-Tcp#3") == 0, 1);
+        check_str("reconnect public", logon_reason(&r), "remote desktop session from a public address");
+        check_int("unrelated id", logon_parse(EV(4688, D("NewProcessName", "x")), "Security", &r), 0);
+
+        const char *lsm = "<Event><System><EventID>21</EventID><TimeCreated SystemTime='2024-05-02T01:02:03.000Z'/>"
+                          "<Channel>Microsoft-Windows-TerminalServices-LocalSessionManager/Operational</Channel></System>"
+                          "<UserData><EventXML xmlns='Event_NS'><User>CORP\\alice</User><SessionID>2</SessionID><Address>LOCAL</Address></EventXML></UserData></Event>";
+        check_int("lsm 21", logon_parse(lsm, "Microsoft-Windows-TerminalServices-LocalSessionManager/Operational", &r) == 1 && r.kind == LK_SESSION_LOGON, 1);
+        check_str("lsm user", r.user, "CORP\\alice");
+        check_str("lsm console address dropped", r.source, "");
+        check_str("lsm session", r.session, "2");
+        check_int("lsm id 21 in Security is something else", logon_parse(lsm, "Security", &r), 0);
+        check_str("kind name", logon_kind_name(LK_EXPLICIT), "explicit");
+        check_str("type name unknown", logon_type_name(42), "");
+#undef EV
+#undef D
+    }
+
+    // --- wer: Report.wer as execution evidence ----------------------------------
+    {
+        char t1[] = "\xEF\xBB\xBFVersion=1\r\nEventType=APPCRASH\r\nEventTime=133500000000000000\r\nReportIdentifier=aaaa-bbbb\r\n"
+                    "Sig[0].Name=Application Name\r\nSig[0].Value=upd.exe\r\nSig[1].Name=Application Version\r\nSig[1].Value=1.0.0.0\r\n"
+                    "Sig[3].Name=Fault Module Name\r\nSig[3].Value=StackHash_1a2b\r\nSig[6].Name=Exception Code\r\nSig[6].Value=c0000005\r\n"
+                    "UI[2]=C:\\Users\\bob\\AppData\\Local\\Temp\\upd.exe\r\n"
+                    "LoadedModule[0]=C:\\Users\\bob\\AppData\\Local\\Temp\\upd.exe\r\nLoadedModule[1]=C:\\Windows\\SYSTEM32\\ntdll.dll\r\n"
+                    "AppName=Updater\r\nAppPath=C:\\Users\\bob\\AppData\\Local\\Temp\\upd.exe\r\nNsAppName=upd.exe\r\n";
+        wer_report w;
+        check_int("wer parse", wer_parse(t1, &w), 0);
+        check_str("wer type", w.event_type, "APPCRASH");
+        check_int("wer time", w.event_time == 133500000000000000ULL, 1);
+        check_str("wer app", w.app_name, "upd.exe");
+        check_str("wer path", w.app_path, "C:\\Users\\bob\\AppData\\Local\\Temp\\upd.exe");
+        check_str("wer module", w.fault_module, "StackHash_1a2b");
+        check_str("wer code", w.exc_code, "c0000005");
+        check_str("wer id", w.report_id, "aaaa-bbbb");
+        check_int("wer modules", w.modules == 2 && w.modules_writable == 1, 1);
+        check_str("wer reason", wer_reason(&w), "crashed program ran from a user-writable dir");
+
+        // Older layout: no AppPath / NsAppName; the path is LoadedModule[0].
+        char t2[] = "EventType=AppHangB1\nEventTime=0\nSig[0].Name=Application Name\nSig[0].Value=winword.exe\n"
+                    "LoadedModule[0]=C:\\Program Files\\Microsoft Office\\Office16\\WINWORD.EXE\n"
+                    "LoadedModule[1]=C:\\Users\\bob\\AppData\\Roaming\\addin\\x.dll\n";
+        check_int("wer old parse", wer_parse(t2, &w), 0);
+        check_str("wer old path", w.app_path, "C:\\Program Files\\Microsoft Office\\Office16\\WINWORD.EXE");
+        check_int("wer old no flag (program installed normally)", wer_reason(&w) == NULL, 1);
+        check_str("wer writable module kept as detail", w.first_writable_module, "C:\\Users\\bob\\AppData\\Roaming\\addin\\x.dll");
+        check_int("wer no time", w.event_time == 0, 1);
+
+        // Name falls back to the path's file name; Sig value without a Name is ignored.
+        char t3[] = "EventType=BEX64\nSig[2].Value=orphan\nSig[99].Name=Fault Module Name\nSig[99].Value=ignored-index\nAppPath=D:\\tools\\x.exe\n";
+        check_int("wer fallback parse", wer_parse(t3, &w), 0);
+        check_str("wer name from path", w.app_name, "x.exe");
+        check_str("wer sig index out of range ignored", w.fault_module, "");
+        char t4[] = "[General]\nfoo=bar\n";
+        check_int("wer not a report", wer_parse(t4, &w), -1);
+        char t5[] = "";
+        check_int("wer empty", wer_parse(t5, &w), -1);
+        char t6[] = "Sig[x].Name=a\nSig[-1].Name=b\nSig[99999999999999999999].Name=c\nLoadedModule[1\nEventType";
+        check_int("wer malformed indexes", wer_parse(t6, &w), -1);
+    }
+
+    // --- office: Trusted Documents records, macro settings, trusted locations ---
+    {
+        unsigned char tr[24];
+        memset(tr, 0, sizeof tr);
+        uint64_t when = 133500000000000000ULL;
+        for (int i = 0; i < 8; i++) tr[i] = (unsigned char)(when >> (8 * i));
+        tr[20] = 0xFF; tr[21] = 0xFF; tr[22] = 0xFF; tr[23] = 0x7F;
+        uint64_t ft; int en;
+        check_int("trustrec parse", trustrec_parse(tr, sizeof tr, &ft, &en) == 0 && ft == when && en == 1, 1);
+        tr[20] = 1; tr[21] = 0; tr[22] = 0; tr[23] = 0;
+        check_int("trustrec editing only", trustrec_parse(tr, sizeof tr, &ft, &en) == 0 && en == 0, 1);
+        check_int("trustrec short", trustrec_parse(tr, 23, &ft, &en), -1);
+        char p[260];
+        trustrec_path("%USERPROFILE%/Downloads/invoice.docm", p, sizeof p);
+        check_str("trustrec path slashes", p, "%USERPROFILE%\\Downloads\\invoice.docm");
+        trustrec_path("https://example.org/a/b.xlsm", p, sizeof p);
+        check_str("trustrec url kept", p, "https://example.org/a/b.xlsm");
+        check_str("trustrec downloaded", trustrec_reason("%USERPROFILE%\\Downloads\\invoice.docm", 1), "macros enabled for a downloaded document");
+        check_int("trustrec downloaded, editing only", trustrec_reason("%USERPROFILE%\\Downloads\\invoice.docm", 0) == NULL, 1);
+        check_str("trustrec attachment", trustrec_reason("C:\\Users\\bob\\AppData\\Local\\Microsoft\\Windows\\INetCache\\Content.Outlook\\AB12\\po.xlsm", 1),
+                  "macros enabled for a mail attachment");
+        check_str("trustrec url", trustrec_reason("https://example.org/a/b.xlsm", 1), "macros enabled for a document opened from a URL");
+        check_int("trustrec temp", trustrec_reason("C:\\Users\\bob\\AppData\\Local\\Temp\\7zO1\\x.xls", 1) != NULL, 1);
+        check_int("trustrec documents not flagged", trustrec_reason("%USERPROFILE%\\Documents\\budget.xlsm", 1) == NULL, 1);
+        check_int("trustrec share not flagged", trustrec_reason("\\\\fileserver\\finance\\budget.xlsm", 1) == NULL, 1);
+        check_int("setting vbawarnings 1", office_setting_reason("VBAWarnings", 1) != NULL, 1);
+        check_int("setting vbawarnings 2", office_setting_reason("VBAWarnings", 2) == NULL, 1);
+        check_int("setting accessvbom", office_setting_reason("accessvbom", 1) != NULL, 1);
+        check_int("setting block=0", office_setting_reason("BlockContentExecutionFromInternet", 0) != NULL, 1);
+        check_int("setting block=1", office_setting_reason("BlockContentExecutionFromInternet", 1) == NULL, 1);
+        check_int("setting other name", office_setting_reason("VBAWarningsX", 1) == NULL, 1);
+        check_int("loc downloads", trustloc_reason("C:\\Users\\bob\\Downloads\\") != NULL, 1);
+        check_int("loc unc", trustloc_reason("\\\\10.0.0.5\\share") != NULL, 1);
+        check_int("loc url", trustloc_reason("http://intranet/templates") != NULL, 1);
+        check_int("loc drive", trustloc_reason("D:\\") != NULL, 1);
+        check_int("loc stock templates", trustloc_reason("%APPDATA%\\Microsoft\\Templates") == NULL, 1);
+        check_int("loc program files", trustloc_reason("C:\\Program Files\\Microsoft Office\\Root\\Templates\\") == NULL, 1);
+        check_int("loc empty", trustloc_reason("") == NULL, 1);
+    }
+
+    check_int("loc temp exact", trustloc_reason("C:\\Windows\\Temp") != NULL && trustloc_reason("c:\\temp\\x") != NULL, 1);
+    check_int("loc public", trustloc_reason("C:\\Users\\Public\\Documents") != NULL && trustloc_reason("C:\\Users\\PublicRelations") == NULL, 1);
+
+    // --- magic: file type by content, name vs content ---------------------------
+    {
+        const char *g;
+        unsigned char pe[0x200];
+        memset(pe, 0, sizeof pe);
+        pe[0] = 'M'; pe[1] = 'Z'; pe[0x3C] = 0x80;
+        memcpy(pe + 0x80, "PE\0\0", 4);
+        pe[0x84] = 0x64; pe[0x85] = 0x86;                       // machine x64
+        pe[0x80 + 24 + 68] = 3;                                 // console subsystem
+        check_str("magic pe exe", magic_sniff(pe, sizeof pe, &g), "PE executable (x64)");
+        check_str("magic pe group", g, "program");
+        pe[0x80 + 22] = 0x00; pe[0x80 + 23] = 0x20;             // IMAGE_FILE_DLL
+        check_str("magic pe dll", magic_sniff(pe, sizeof pe, &g), "PE DLL (x64)");
+        pe[0x80 + 24 + 68] = 1;
+        check_str("magic pe driver", magic_sniff(pe, sizeof pe, &g), "PE driver (x64)");
+        pe[0x3C] = 0xF0; pe[0x3D] = 0xFF;                       // e_lfanew past the buffer
+        check_str("magic mz only", magic_sniff(pe, sizeof pe, &g), "DOS executable (MZ)");
+        check_str("magic mz tiny (two letters are just text)", magic_sniff((const unsigned char *)"MZ", 2, &g), "text");
+
+        unsigned char z[64];
+        memset(z, 0, sizeof z);
+        memcpy(z, "PK\x03\x04", 4);
+        z[26] = 19; memcpy(z + 30, "[Content_Types].xml", 19);
+        check_str("magic ooxml", magic_sniff(z, sizeof z, &g), "Office Open XML document (docx / xlsx / pptx)");
+        check_str("magic ooxml group", g, "document");
+        z[26] = 9; memcpy(z + 30, "META-INF/", 9);
+        check_str("magic jar", magic_sniff(z, sizeof z, &g), "Java archive (JAR)");
+        z[26] = 200;                                            // name length past the buffer
+        check_str("magic zip clipped name", magic_sniff(z, 40, &g), "Java archive (JAR)");
+        z[26] = 3; memcpy(z + 30, "a.t", 3);
+        check_str("magic zip", magic_sniff(z, sizeof z, &g), "ZIP archive");
+        check_str("magic zip short", magic_sniff(z, 10, &g), "ZIP archive");
+
+        static unsigned char iso[0x8010];
+        memcpy(iso + 0x8001, "CD001", 5);
+        check_str("magic iso", magic_sniff(iso, sizeof iso, &g), "ISO 9660 disc image");
+        check_str("magic iso cut", magic_sniff(iso, 0x8003, &g), "data");
+
+        static const struct { const char *bytes; size_t n; const char *type, *group; } sig[] = {
+            { "%PDF-1.7\n", 9, "PDF document", "document" },
+            { "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1....", 12, "OLE2 compound file (legacy Office document / MSI)", "document" },
+            { "{\\rtf1\\ansi", 11, "Rich Text Format document", "document" },
+            { "\x4C\x00\x00\x00\x01\x14\x02\x00....", 12, "Windows shortcut (LNK)", "shortcut" },
+            { "\x89PNG\r\n\x1A\n....", 12, "PNG image", "image" },
+            { "\xFF\xD8\xFF\xE0..JFIF", 10, "JPEG image", "image" },
+            { "GIF89a....", 10, "GIF image", "image" },
+            { "Rar!\x1A\x07\x01\x00", 8, "RAR archive", "archive" },
+            { "7z\xBC\xAF\x27\x1C..", 8, "7-Zip archive", "archive" },
+            { "MSCF\0\0\0\0", 8, "Microsoft Cabinet (CAB)", "archive" },
+            { "ElfFile\0....", 12, "Windows event log (EVTX)", "system" },
+            { "regf....", 8, "registry hive", "system" },
+            { "SQLite format 3\0", 16, "SQLite database", "system" },
+            { "\x7F" "ELF\x02\x01\x01", 7, "ELF executable", "program" },
+            { "<HTML><head><HTA:APPLICATION id=x>", 34, "HTML application (HTA)", "script" },
+            { "\r\n  @ECHO OFF\r\ndel x", 20, "batch script", "script" },
+            { "#!/bin/sh\necho", 14, "script (shebang)", "script" },
+            { "<?xml version='1.0'?><a/>", 25, "XML text", "text" },
+            { "<!DOCTYPE html><html>", 21, "HTML text", "text" },
+            { "hello, world\r\n", 14, "text", "text" },
+            { "\xFF\xFEh\0i\0", 6, "text (UTF-16)", "text" },
+            { "ab\0cd", 5, "data", "data" },
+            { "", 0, "empty", "data" },
+            { "BM", 2, "text", "text" },                       // two letters are not a bitmap
+        };
+        for (size_t i = 0; i < sizeof sig / sizeof sig[0]; i++) {
+            char label[48];
+            snprintf(label, sizeof label, "magic sig %zu", i);
+            const char *t = magic_sniff((const unsigned char *)sig[i].bytes, sig[i].n, &g);
+            check_int(label, strcmp(t, sig[i].type) == 0 && strcmp(g, sig[i].group) == 0, 1);
+        }
+        check_int("magic null group ok", magic_sniff((const unsigned char *)"%PDF-", 5, NULL) != NULL, 1);
+
+        check_int("name pe as jpg", magic_name_reason("holiday.jpg", "program") != NULL, 1);
+        check_int("name jpg as jpg", magic_name_reason("holiday.jpg", "image") == NULL, 1);
+        check_int("name pe as exe", magic_name_reason("setup.exe", "program") == NULL, 1);
+        check_int("name pe as mui (odd but normal)", magic_name_reason("shell32.dll.mui", "program") == NULL, 1);
+        check_int("name pe as tmp", magic_name_reason("is-AB12.tmp", "program") == NULL, 1);
+        check_int("name double ext", magic_name_reason("invoice.pdf.exe", "program") != NULL &&
+                  strstr(magic_name_reason("invoice.pdf.exe", "program"), "double extension") != NULL, 1);
+        check_int("name double ext script", magic_name_reason("photo.JPG.Vbs", "text") != NULL, 1);
+        check_int("name version dots", magic_name_reason("setup.1.2.exe", "program") == NULL, 1);
+        check_int("name dotted product", magic_name_reason("node.js.exe", "program") == NULL, 1);
+        check_int("name archive then exe", magic_name_reason("tool.zip.exe", "program") != NULL, 1);
+        check_int("name dll config", magic_name_reason("app.exe.config", "text") == NULL, 1);
+        check_int("name rtlo", magic_name_reason("ann\xE2\x80\xAE" "fdp.exe", "program") != NULL &&
+                  strstr(magic_name_reason("ann\xE2\x80\xAE" "fdp.exe", "program"), "right-to-left") != NULL, 1);
+        check_int("name spaces", magic_name_reason("invoice.pdf            .exe", "program") != NULL &&
+                  strstr(magic_name_reason("invoice.pdf            .exe", "program"), "spaces") != NULL, 1);
+        check_int("name few spaces + doc ext", magic_name_reason("my file.pdf .exe", "program") != NULL, 1);
+        check_int("name no ext", magic_name_reason("README", "text") == NULL && magic_name_reason(".gitignore", "text") == NULL, 1);
+        check_int("name leading dot double", magic_name_reason(".pdf.exe", "program") != NULL, 1);
+        check_int("name null group", magic_name_reason("a.jpg", NULL) == NULL, 1);
+    }
+
+    // --- hashlist: known-hash lists in the formats people actually have ---------
+    {
+        char t[] = "\xEF\xBB\xBF# IOC list\r\n"
+                   "sha256,name\r\n"
+                   "D41D8CD98F00B204E9800998ECF8427E\r\n"
+                   "da39a3ee5e6b4b0d3255bfef95601890afd80709  empty.bin\r\n"
+                   "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855,Empty File,high\r\n"
+                   "0123456789abcdef0123456789abcdef *star.exe\r\n"
+                   "\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"quoted label\"\r\n"
+                   "abc123\r\n"
+                   "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\r\n"
+                   "d41d8cd98f00b204e9800998ecf8427e0\r\n"
+                   "  bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\tlast";
+        hashlist hl;
+        check_int("hashlist count", (int)hashlist_parse(t, &hl), 6);
+        check_int("hashlist md5 any case", hashlist_find(&hl, "d41d8cd98f00b204e9800998ecf8427e") != NULL, 1);
+        const hl_entry *he = hashlist_find(&hl, "DA39A3EE5E6B4B0D3255BFEF95601890AFD80709");
+        check_int("hashlist sha1 label", he != NULL && strcmp(he->label, "empty.bin") == 0, 1);
+        he = hashlist_find(&hl, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+        check_int("hashlist csv label stops at comma", he != NULL && strcmp(he->label, "Empty File") == 0, 1);
+        he = hashlist_find(&hl, "0123456789abcdef0123456789abcdef");
+        check_int("hashlist md5sum binary marker", he != NULL && strcmp(he->label, "star.exe") == 0, 1);
+        he = hashlist_find(&hl, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        check_int("hashlist quoted", he != NULL && strcmp(he->label, "quoted label") == 0, 1);
+        he = hashlist_find(&hl, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+        check_int("hashlist last line no newline", he != NULL && strcmp(he->label, "last") == 0, 1);
+        check_int("hashlist 33 digits rejected", hashlist_find(&hl, "d41d8cd98f00b204e9800998ecf8427e0") == NULL, 1);
+        check_int("hashlist miss", hashlist_find(&hl, "ffffffffffffffffffffffffffffffff") == NULL, 1);
+        check_int("hashlist overlong key", hashlist_find(&hl, "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff") == NULL, 1);
+        hashlist_free(&hl);
+        char t2[] = "nothing here\n";
+        check_int("hashlist empty", (int)hashlist_parse(t2, &hl) == 0 && hashlist_find(&hl, "aa") == NULL, 1);
+        hashlist_free(&hl);
     }
 
     fprintf(stderr, "\n%s (%d failure%s)\n",

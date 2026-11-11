@@ -20,12 +20,14 @@ add_executable(winspect
     src/net.c
     src/triage.c
     src/detect.c
+    src/patchdec.c
     src/strings.c
     src/services.c
     src/drivers.c
     src/autoruns.c
     src/pipes.c
     src/hash.c
+    src/hashlist.c
     src/hosts.c
     src/certstore.c
     src/objects.c
@@ -78,6 +80,16 @@ add_executable(winspect
     src/pca.c
     src/textfile.c
     src/setupapi.c
+    src/evsrc.c
+    src/logonparse.c
+    src/logons.c
+    src/dnscache.c
+    src/werparse.c
+    src/wer.c
+    src/officeparse.c
+    src/office.c
+    src/magicparse.c
+    src/magic.c
     src/activities.c
     src/mft.c
     src/mftcmd.c
@@ -106,7 +118,7 @@ target_include_directories(winspect PRIVATE inc)
 
 # inspect.c calls NtQueryInformationProcess, which lives in ntdll.
 # MSVC resolves it through ntdll.lib / the Windows SDK; MinGW needs -lntdll.
-target_link_libraries(winspect PRIVATE ntdll advapi32 psapi wintrust crypt32 dbghelp iphlpapi authz bcrypt wtsapi32 netapi32 shlwapi ole32 oleaut32 wbemuuid wevtapi shell32 bits)
+target_link_libraries(winspect PRIVATE ntdll advapi32 psapi wintrust crypt32 dbghelp iphlpapi authz bcrypt wtsapi32 netapi32 shlwapi ole32 oleaut32 wbemuuid wevtapi shell32 bits dnsapi ws2_32)
  
 # C11 makes anonymous unions standard, which winnt.h structs rely on
 target_compile_features(winspect PRIVATE c_std_11)

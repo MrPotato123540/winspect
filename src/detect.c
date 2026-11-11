@@ -24,6 +24,8 @@
 // reading the file from disk. No driver, no writes to the target.
 
 #include "detect.h"
+#include "patchdec.h"
+#include "jsonutil.h"
 
 #include <windows.h>
 #include <psapi.h>      // EnumProcessModulesEx, GetModuleInformation
@@ -194,6 +196,97 @@ static void apply_relocs(unsigned char *sec, DWORD va, DWORD len,
     }
 }
 
+// Base name of the module that contains addr, or "" when no loaded module does
+// (private / unbacked memory). Returns 1 when a module was found.
+static int module_of(HANDLE proc, uintptr_t addr, char *name, size_t n)
+{
+    name[0] = '\0';
+    HMODULE mods[DET_MAX_MODS];
+    DWORD needed = 0;
+    if (!EnumProcessModulesEx(proc, mods, sizeof mods, &needed, LIST_MODULES_ALL)) {
+        return 0;
+    }
+    unsigned cnt = needed / sizeof(HMODULE);
+    if (cnt > DET_MAX_MODS) {
+        cnt = DET_MAX_MODS;
+    }
+    for (unsigned i = 0; i < cnt; i++) {
+        MODULEINFO mi;
+        if (!GetModuleInformation(proc, mods[i], &mi, sizeof mi)) {
+            continue;
+        }
+        uintptr_t b = (uintptr_t)mi.lpBaseOfDll;
+        if (addr >= b && addr < b + mi.SizeOfImage) {
+            if (GetModuleBaseNameA(proc, mods[i], name, (DWORD)n) == 0) {
+                snprintf(name, n, "(module at %p)", mi.lpBaseOfDll);
+            }
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// Turns a decoded instruction into the address execution actually reaches:
+// "jmp [slot]" needs the pointer stored in the slot. 0 when it cannot be read.
+static DWORD64 resolve_dest(HANDLE proc, int kind, DWORD64 target, int is64)
+{
+    if (kind == PATCH_OTHER) {
+        return 0;
+    }
+    if (kind != PATCH_JMP_MEM) {
+        return target;
+    }
+    if (is64) {
+        uint64_t v = 0;
+        return rpm(proc, (const void *)(uintptr_t)target, &v, 8) ? v : 0;
+    }
+    uint32_t v = 0;
+    return rpm(proc, (const void *)(uintptr_t)target, &v, 4) ? v : 0;
+}
+
+// Describes one patch: keeps the first bytes of both versions, and if the new
+// bytes are a jump/call, names the module it lands in. Hooking libraries jump
+// to a small trampoline in private memory first, so one more hop is followed
+// to name the DLL that really receives control.
+static void describe_patch(HANDLE proc, struct tamper_patch *p, const char *secname,
+                           const unsigned char *disk, const unsigned char *mem,
+                           DWORD sec_va, DWORD sec_len, const patch_run *r,
+                           uintptr_t membase, int is64)
+{
+    memset(p, 0, sizeof *p);
+    memcpy(p->section, secname, 8);
+    p->section[8] = '\0';
+    p->rva = sec_va + r->off;
+    p->len = r->len;
+    p->diff = r->diff;
+    DWORD avail = sec_len - r->off;
+    p->shown = avail < TAMPER_PATCH_BYTES ? avail : TAMPER_PATCH_BYTES;
+    memcpy(p->disk, disk + r->off, p->shown);
+    memcpy(p->mem, mem + r->off, p->shown);
+
+    uint64_t t = 0;
+    p->kind = (int)patch_decode(mem + r->off, p->shown, (uint64_t)membase + p->rva, is64, &t);
+    DWORD64 dest = resolve_dest(proc, p->kind, t, is64);
+    if (dest == 0) {
+        return;
+    }
+    p->target = dest;
+    if (module_of(proc, (uintptr_t)dest, p->target_module, sizeof p->target_module)) {
+        return;
+    }
+    unsigned char tramp[TAMPER_PATCH_BYTES];
+    if (!rpm(proc, (const void *)(uintptr_t)dest, tramp, sizeof tramp)) {
+        return;
+    }
+    uint64_t t2 = 0;
+    int k2 = (int)patch_decode(tramp, sizeof tramp, dest, is64, &t2);
+    DWORD64 d2 = resolve_dest(proc, k2, t2, is64);
+    if (d2 != 0) {
+        p->final_target = d2;
+        module_of(proc, (uintptr_t)d2, p->final_module, sizeof p->final_module);
+    }
+}
+
 int detect_image_tamper(HANDLE proc, struct tamper_result *out)
 {
     memset(out, 0, sizeof *out);
@@ -347,24 +440,24 @@ int detect_image_tamper(HANDLE proc, struct tamper_result *out)
         // Undo relocations on the disk copy so a rebased image compares equal.
         apply_relocs(disk, va, len, file, fsize, reloc_rva, reloc_size, is64, delta, secs, nsec);
 
-        unsigned diff = 0;
-        DWORD firstd = 0;
-        for (DWORD b = 0; b < len; b++) {
-            if (disk[b] != mem[b]) {
-                if (diff == 0) {
-                    firstd = va + b;
-                }
-                diff++;
-            }
-        }
+        patch_run runs[TAMPER_MAX_PATCHES];
+        uint32_t diff = 0;
+        unsigned nruns = patch_runs(disk, mem, len, runs, TAMPER_MAX_PATCHES, &diff);
         if (diff > 0) {
             if (out->modified_sections == 0) {
                 memcpy(out->first_section, secs[i].Name, 8);
                 out->first_section[8] = '\0';
                 out->diff_bytes = diff;
-                out->first_diff_rva = firstd;
+                out->first_diff_rva = va + runs[0].off;
             }
             out->modified_sections++;
+            out->total_diff_bytes += diff;
+            out->patch_count += nruns;
+            unsigned keep = nruns < TAMPER_MAX_PATCHES ? nruns : TAMPER_MAX_PATCHES;
+            for (unsigned r = 0; r < keep && out->npatches < TAMPER_MAX_PATCHES; r++) {
+                describe_patch(proc, &out->patches[out->npatches++], (const char *)secs[i].Name,
+                               disk, mem, va, len, &runs[r], membase, is64);
+            }
         }
         free(disk);
         free(mem);
@@ -372,6 +465,107 @@ int detect_image_tamper(HANDLE proc, struct tamper_result *out)
 
     free(file);
     return out->modified_sections;
+}
+
+static void hex_bytes(const unsigned char *b, unsigned n, char *out, size_t cap)
+{
+    size_t o = 0;
+    out[0] = '\0';
+    for (unsigned i = 0; i < n && o + 4 < cap; i++) {
+        o += (size_t)snprintf(out + o, cap - o, "%s%02X", i ? " " : "", b[i]);
+    }
+}
+
+// Where a patch leads, in words: the module that finally receives control.
+static const char *patch_dest_name(const struct tamper_patch *p)
+{
+    if (p->target == 0) return "";
+    if (p->target_module[0]) return p->target_module;
+    if (p->final_target != 0 && p->final_module[0]) return p->final_module;
+    return "private memory";
+}
+
+void detect_tamper_summary(const struct tamper_result *t, char *out, size_t n)
+{
+    // Count the control transfers and see whether they agree on a destination.
+    unsigned jumps = 0, same = 0, priv = 0;
+    const char *first = NULL;
+    for (unsigned i = 0; i < t->npatches; i++) {
+        const struct tamper_patch *p = &t->patches[i];
+        if (p->target == 0) continue;
+        jumps++;
+        const char *d = patch_dest_name(p);
+        if (strcmp(d, "private memory") == 0) priv++;
+        if (first == NULL) first = d;
+        if (strcmp(first, d) == 0) same++;
+    }
+    int w = snprintf(out, n, "%u patch(es), %u byte(s) changed in %d section(s)",
+                     t->patch_count, t->total_diff_bytes, t->modified_sections);
+    if (w < 0 || (size_t)w >= n) return;
+    if (jumps == 0) return;
+    if (same == jumps) {
+        snprintf(out + w, n - (size_t)w, "; %u of the %u listed are jumps/calls into %s",
+                 jumps, t->npatches, first);
+    } else {
+        snprintf(out + w, n - (size_t)w, "; %u of the %u listed are jumps/calls (%u into private memory)",
+                 jumps, t->npatches, priv);
+    }
+}
+
+void detect_print_patches(const struct tamper_result *t, const char *indent)
+{
+    for (unsigned i = 0; i < t->npatches; i++) {
+        const struct tamper_patch *p = &t->patches[i];
+        char d[TAMPER_PATCH_BYTES * 3 + 4], m[TAMPER_PATCH_BYTES * 3 + 4];
+        // At least 8 bytes: a patch can look shorter than its instruction when
+        // trailing bytes happen to equal the original (E9 xx xx 00 00).
+        unsigned show = p->len < 8 ? 8 : p->len;
+        if (show > p->shown) show = p->shown;
+        hex_bytes(p->disk, show, d, sizeof d);
+        hex_bytes(p->mem, show, m, sizeof m);
+        printf("%s%-8s RVA 0x%08lX  %lu byte(s)%s\n", indent, p->section, (unsigned long)p->rva,
+               (unsigned long)p->len, p->len > p->shown ? " (first 16 shown)" : "");
+        printf("%s    disk: %s\n%s    mem : %s\n", indent, d, indent, m);
+        if (p->target != 0) {
+            printf("%s    -> %s to 0x%llX (%s)", indent, patch_kind_name((enum patch_kind)p->kind),
+                   (unsigned long long)p->target,
+                   p->target_module[0] ? p->target_module : "private memory");
+            if (p->final_target != 0) {
+                printf(", which jumps on to 0x%llX (%s)", (unsigned long long)p->final_target,
+                       p->final_module[0] ? p->final_module : "private memory");
+            }
+            putchar('\n');
+        }
+    }
+    if (t->patch_count > t->npatches) {
+        printf("%s... %u more patch(es) not listed\n", indent, t->patch_count - t->npatches);
+    }
+}
+
+void detect_json_patches(const struct tamper_result *t)
+{
+    putchar('[');
+    for (unsigned i = 0; i < t->npatches; i++) {
+        const struct tamper_patch *p = &t->patches[i];
+        char d[TAMPER_PATCH_BYTES * 3 + 4], m[TAMPER_PATCH_BYTES * 3 + 4];
+        // At least 8 bytes: a patch can look shorter than its instruction when
+        // trailing bytes happen to equal the original (E9 xx xx 00 00).
+        unsigned show = p->len < 8 ? 8 : p->len;
+        if (show > p->shown) show = p->shown;
+        hex_bytes(p->disk, show, d, sizeof d);
+        hex_bytes(p->mem, show, m, sizeof m);
+        printf("%s{\"section\":", i ? "," : "");
+        json_str(p->section);
+        printf(",\"rva\":\"0x%08lX\",\"length\":%lu,\"changed\":%lu,\"disk\":\"%s\",\"memory\":\"%s\",\"kind\":\"%s\"",
+               (unsigned long)p->rva, (unsigned long)p->len, (unsigned long)p->diff, d, m,
+               patch_kind_name((enum patch_kind)p->kind));
+        printf(",\"target\":\"0x%llX\",\"target_module\":", (unsigned long long)p->target);
+        json_str(p->target_module);
+        printf(",\"final_target\":\"0x%llX\",\"final_module\":", (unsigned long long)p->final_target);
+        json_str(p->final_module);
+        putchar('}');
+    }
+    putchar(']');
 }
 
 int detect_iat_hooks(HANDLE proc, struct iathook_result *out)

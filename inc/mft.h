@@ -88,4 +88,24 @@ int ntfs_parse_boot(const unsigned char *b, size_t n, ntfs_boot *nb);
 typedef struct { int64_t lcn; uint64_t clusters; } mft_run;
 int mft_data_runs(const unsigned char *rec, size_t n, mft_run *runs, int max, uint64_t *real_size);
 
+// The same for any unnamed non-resident attribute type; *start_vcn (may be
+// NULL) receives the first VCN this piece covers (non-zero in an extension
+// record that continues an attribute).
+int mft_attr_runs(const unsigned char *rec, size_t n, uint32_t type, mft_run *runs, int max,
+                  uint64_t *real_size, uint64_t *start_vcn);
+
+// Content of an unnamed RESIDENT attribute: 0 and a pointer into rec, 1 when
+// the attribute exists but is non-resident (use mft_attr_runs), -1 if absent.
+int mft_attr_resident(const unsigned char *rec, size_t n, uint32_t type, const unsigned char **content, size_t *clen);
+
+// $ATTRIBUTE_LIST (0x20): when a file's attributes no longer fit in its
+// record they continue in extension records and this list says where. A
+// heavily fragmented $MFT is exactly that case: record 0 holds only the first
+// part of the run list. Entry: type @0, entry length @4, name length @6,
+// starting VCN @8, file reference of the record holding it @16.
+// Collects the unnamed $DATA pieces stored in records OTHER than self, sorted
+// by starting VCN. Returns how many exist (can exceed max).
+typedef struct { uint64_t start_vcn, recno; } mft_ext;
+int mft_alist_data(const unsigned char *list, size_t n, uint64_t self, mft_ext *out, int max);
+
 #endif

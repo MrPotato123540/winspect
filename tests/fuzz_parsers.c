@@ -21,6 +21,12 @@
 #include "regf.h"
 #include "shellitem.h"
 #include "ioc.h"
+#include "logonparse.h"
+#include "werparse.h"
+#include "hashlist.h"
+#include "magicparse.h"
+#include "officeparse.h"
+#include "patchdec.h"
 #include "rights.h"
 #include "capa.h"
 #include "cfb.h"
@@ -253,6 +259,15 @@ int main(int argc, char **argv)
         "<Command>C:\\a.exe</Command><Arguments>&quot;x&amp;</Arguments></Exec><ComHandler><ClassId>{A}"
         "</ClassId></ComHandler></Actions><Triggers><BootTrigger/><LogonTrigger></LogonTrigger></Triggers></Task>",
         "\"%ProgramFiles(x86)%\\A B\\srv.exe\" -Embedding",
+        "<Event><System><EventID>4624</EventID><TimeCreated SystemTime='2024-05-01T12:34:56.1Z'/><Channel>Security</Channel></System>"
+        "<EventData><Data Name='TargetUserName'>alice</Data><Data Name='TargetDomainName'>CORP</Data><Data Name='TargetLogonId'>0x1a2b</Data>"
+        "<Data Name='LogonType'>10</Data><Data Name='IpAddress'>::ffff:8.8.4.4</Data><Data Name='LmPackageName'>NTLM V1</Data>"
+        "<Data Name='LogonProcessName'>seclogo </Data></EventData><UserData><EventXML><User>A\\b</User><Address>LOCAL</Address></EventXML></UserData></Event>",
+        "EventType=APPCRASH\r\nEventTime=133500000000000000\r\nSig[0].Name=Application Name\r\nSig[0].Value=upd.exe\r\n"
+        "Sig[3].Name=Fault Module Name\r\nSig[3].Value=x.dll\r\nUI[2]=C:\\Temp\\upd.exe\r\nLoadedModule[0]=C:\\Users\\b\\AppData\\upd.exe\r\nAppPath=C:\\x\r\n",
+        "# list\nD41D8CD98F00B204E9800998ECF8427E\nda39a3ee5e6b4b0d3255bfef95601890afd80709  empty.bin\n"
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855,Empty File,high\n",
+        "invoice.pdf            .exe", "ann\xE2\x80\xAE" "fdp.exe", "%USERPROFILE%/Downloads/a.b.docm",
     };
     for (long it = 0; it < iters; it++) {
         size_t n;
@@ -362,6 +377,34 @@ int main(int argc, char **argv)
             char norm[300];
             drv_path_normalize(text, "C:\\Windows", norm, sizeof norm);
             rights_decode(text, rnd(), out, sizeof out);
+            {
+                // The newer text parsers. Those that cut lines in place get a copy.
+                static const char *const chans[] = { "Security", "Microsoft-Windows-TerminalServices-LocalSessionManager/Operational", "x" };
+                logon_rec lr;
+                if (logon_parse(text, chans[rnd() % 3], &lr)) { logon_reason(&lr); logon_is_noise(&lr); logon_type_name(lr.type); }
+                char copy[8192];
+                memcpy(copy, text, n + 1);
+                wer_report wr;
+                if (wer_parse(copy, &wr) == 0) wer_reason(&wr);
+                memcpy(copy, text, n + 1);
+                hashlist hl;
+                if (hashlist_parse(copy, &hl) >= 0) { hashlist_find(&hl, text); hashlist_free(&hl); }
+                const char *grp;
+                magic_name_reason(text, magic_sniff(buf, n, &grp) ? grp : NULL);
+                magic_name_reason(text, "program");
+                char tp[64];
+                trustrec_path(text, tp, sizeof tp);
+                trustrec_reason(text, 1);
+                trustloc_reason(text);
+                office_setting_reason(text, rnd() % 3);
+                uint64_t ft; int en;
+                trustrec_parse(buf, n, &ft, &en);
+                patch_run pr[8];
+                uint32_t td;
+                patch_runs((const unsigned char *)t, buf, n < strlen(t) ? n : strlen(t), pr, 8, &td);
+                uint64_t tgt;
+                patch_decode(buf, n, rnd(), (int)(rnd() & 1), &tgt);
+            }
             break;
         }
         }

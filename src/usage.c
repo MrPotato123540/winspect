@@ -30,9 +30,29 @@ static const struct { const char *name, *text; } usage_table[] = {
         "paths). The static-triage counterpart of the Sysinternals `strings` tool.\n"
         "Usage: winspect strings <path> [-n <minlen>] [--ioc] [--json | --csv]\n" },
     { "hash",
-        "winspect hash - compute a file's MD5, SHA1 and SHA256 digests, the identifiers\n"
-        "used to look a sample up in threat-intel. Read-only. Usage:\n"
-        "  winspect hash <path> [--json]\n" },
+        "winspect hash - a file's MD5, SHA1 and SHA256 digests, the identifiers used\n"
+        "to look a sample up in threat intel. The file is streamed, so its size does\n"
+        "not matter. Given a folder, every file in it is hashed (-r descends; the\n"
+        "idea of md5deep / hashdeep). --match <list> looks every hash up in a text\n"
+        "file of known hashes - an IOC list, or the md5sum / sha256sum output of\n"
+        "another machine (one hash per line, optionally followed by a label; MD5,\n"
+        "SHA-1 and SHA-256 may be mixed) - and reports only the files that are on\n"
+        "it, with the list's label. Read-only. Usage:\n"
+        "  winspect hash <file | folder> [-r] [--match <hash list>] [--json | --csv]\n" },
+    { "magic",
+        "winspect magic - what a file really is, from its content instead of its\n"
+        "name (the idea of the Unix `file` command): PE programs / DLLs / drivers\n"
+        "with their architecture, ELF, archives and disk images (zip, rar, 7z, cab,\n"
+        "iso, vhd, wim), documents (PDF, OLE2 and Open XML Office, RTF, OneNote,\n"
+        "CHM), shortcuts, pictures, media, scripts (batch, HTA), Windows artifacts\n"
+        "(evtx, hive, SQLite, Prefetch, ESE, dumps) and plain text; anything else\n"
+        "is \"data\". For a folder every file is listed (-r descends). Flagged, with\n"
+        "the reason: a program behind a picture / document / media extension, a\n"
+        "double extension (invoice.pdf.exe), a right-to-left override character in\n"
+        "the name, a long run of spaces hiding the extension. --flagged keeps only\n"
+        "those - a quick way to sweep a Downloads folder or a mounted image.\n"
+        "Reads at most the first 36 KiB of each file. Read-only. Usage:\n"
+        "  winspect magic <file | folder> [-r] [--flagged] [--json | --csv]\n" },
     { "lnk",
         "winspect lnk - parse Windows shortcut (.lnk) files: target path, arguments,\n"
         "working directory, the target's timestamps, the volume it was on (type,\n"
@@ -66,7 +86,8 @@ static const struct { const char *name, *text; } usage_table[] = {
         "mounted disk image, a copied system drive or a collection that keeps the\n"
         "original folder layout. Give the root (the folder holding Windows\\ and\n"
         "Users\\); winspect finds the registry hives, Amcache, Prefetch, scheduled\n"
-        "tasks, event logs, the Recycle Bin and every user's NTUSER.DAT,\n"
+        "tasks, event logs (also read for the logon history), crash reports, the\n"
+        "Recycle Bin and every user's NTUSER.DAT (autoruns, Office macro trust ...),\n"
         "UsrClass.dat and PowerShell history, runs each offline-capable command on\n"
         "them and prints one findings-only report: machine facts, local accounts,\n"
         "then every flagged entry with its source, user and reason (one JSON object\n"
@@ -78,7 +99,8 @@ static const struct { const char *name, *text; } usage_table[] = {
         "folders browsed (jumplist, lnk, shellbags), deletions (recyclebin), USB\n"
         "devices, RDP connections, Run-box entries, PowerShell history, logons and\n"
         "password changes (users), BITS jobs, scheduled task registrations,\n"
-        "per-user COM registrations, high-signal events, Windows install / last\n"
+        "per-user COM registrations, high-signal events, logon sessions (logons),\n"
+        "crash reports (wer), Office documents the user trusted (office), Windows install / last\n"
         "shutdown / profile loads (sysinfo). Each source command is\n"
         "run with --json and its timestamps become rows (UTC, newest first); a row\n"
         "keeps the source's \"suspicious\" mark. Per-user sources read the CURRENT\n"
@@ -98,6 +120,25 @@ static const struct { const char *name, *text; } usage_table[] = {
         "hashes are never read; group membership is not shown offline). Read-only.\n"
         "Usage:\n"
         "  winspect users [--sam <SAM>] [--flagged] [--json | --csv]\n" },
+    { "office",
+        "winspect office - Microsoft Office macro trust, per user:\n"
+        "  documents  every document the user clicked \"Enable Editing\" or \"Enable\n"
+        "             Content\" for (Trusted Documents \\ TrustRecords): path, when,\n"
+        "             which application, and whether active content (macros) was\n"
+        "             enabled. The usual first step of a phishing compromise leaves\n"
+        "             exactly this record. Flagged when macros were enabled for a\n"
+        "             mail attachment, a browser-cache / downloaded / temp-folder\n"
+        "             file or a document opened from a URL.\n"
+        "  settings   macro security values that weaken the defaults (VBAWarnings=1,\n"
+        "             AccessVBOM=1, BlockContentExecutionFromInternet=0), user and\n"
+        "             policy keys.\n"
+        "  locations  trusted locations (files there skip every macro check);\n"
+        "             flagged in download / temp / Public folders, on the network,\n"
+        "             or when a whole drive is trusted.\n"
+        "All Office versions and applications found under the key are read. Live:\n"
+        "the current user; --hive reads another user's NTUSER.DAT. --flagged keeps\n"
+        "only flagged rows. Read-only. Usage:\n"
+        "  winspect office [--hive <NTUSER.DAT>] [--flagged] [--json | --csv]\n" },
     { "comhijack",
         "winspect comhijack - per-user COM class registrations (HKCU\\Software\\Classes\n"
         "\\CLSID, also the WOW6432Node view) compared with the machine ones (HKLM).\n"
@@ -165,8 +206,15 @@ static const struct { const char *name, *text; } usage_table[] = {
         "XP image a third of all files did). --find filters by path text,\n"
         "--deleted keeps records that are no longer in use. --live <drive> reads\n"
         "the running system's $MFT through a read-only volume handle (boot sector\n"
-        "-> the $MFT's own record -> its data runs; administrator). Read-only. Usage:\n"
-        "  winspect mft <$MFT file> | --live <drive> [--find <text>] [--deleted] [--timestomp] [--json | --csv]\n" },
+        "-> the $MFT's own record -> its data runs; administrator). --image <file>\n"
+        "does the same on a raw image of one NTFS partition (dd / FTK \"raw\"), so no\n"
+        "mounting is needed. A fragmented $MFT is followed through record 0's\n"
+        "attribute list; if its extents still cannot all be found, a WARNING on\n"
+        "stderr says the listing is incomplete. A file created and deleted within\n"
+        "seconds may never reach the on-disk $MFT at all (NTFS writes records\n"
+        "lazily): cross-check with `usn`. Read-only. Usage:\n"
+        "  winspect mft <$MFT file> | --live <drive> | --image <volume image>\n"
+        "               [--find <text>] [--deleted] [--timestomp] [--json | --csv]\n" },
     { "activities",
         "winspect activities - Windows 10 Timeline (ActivitiesCache.db under\n"
         "%LOCALAPPDATA%\\ConnectedDevicesPlatform\\<account>\\): which application was\n"
@@ -391,6 +439,27 @@ static const struct { const char *name, *text; } usage_table[] = {
         "with winspect's own parser, through the same filters.\n"
         "Read-only (EvtQuery). Usage:\n"
         "  winspect events [--evtx <file> ...] [--max <n per channel>] [--since <hours>] [--summary] [--json | --csv]\n" },
+    { "logons",
+        "winspect logons - who logged on, how, from where and for how long: the\n"
+        "Windows counterpart of `last`. Reads the Security log (4624 logon, 4634 /\n"
+        "4647 logoff, 4648 explicit credentials, 4672 administrator-equivalent\n"
+        "session, 4778 / 4779 reconnect / disconnect) and the Terminal Services\n"
+        "LocalSessionManager log (21 / 23 / 24 / 25), pairs each logon with its\n"
+        "logoff by logon ID to give a duration, and marks sessions that received\n"
+        "special privileges as \"admin\". Service logons and the built-in / machine\n"
+        "accounts are most of the log and are hidden unless --all is given.\n"
+        "Flagged, each with a fact that is in the event itself: remote desktop or\n"
+        "network logon from a public address, remote desktop from loopback (a\n"
+        "tunnelled connection), cleartext network logon (type 8),\n"
+        "new-credentials logon by seclogo (type 9: runas /netonly - and what\n"
+        "pass-the-hash tools produce), NTLMv1. Passwords are never in these events.\n"
+        "--summary groups by account, logon type and source (count, first, last).\n"
+        "--evtx <file> (repeatable) reads copied logs with winspect's own parser.\n"
+        "--since <hours>, --user <text>, --type <n> and --flagged narrow the list;\n"
+        "--max <n> bounds the events read per live channel (default 5000).\n"
+        "The Security log needs elevation. Read-only. Usage:\n"
+        "  winspect logons [--evtx <file> ...] [--since <hours>] [--user <text>] [--type <n>]\n"
+        "                  [--all] [--flagged] [--summary] [--max <n>] [--json | --csv]\n" },
     { "hidden",
         "winspect hidden - cross-view checks for things hidden from the usual tools:\n"
         "  processes: Toolhelp snapshot vs NtQuerySystemInformation vs opening every\n"
@@ -406,7 +475,7 @@ static const struct { const char *name, *text; } usage_table[] = {
         "winspect sweep - one-shot machine triage: runs the system-wide checks in\n"
         "\"findings only\" mode (posture --warn, hunt, hidden, net, autoruns/services/tasks/\n"
         "taskcache/firewall/prefetch/pca --flagged, defender, wmi, users/comhijack/bits/recyclebin --flagged,\n"
-        "pshistory / browser --all-users --flagged, events) and prints them as one\n"
+        "pshistory / browser --all-users --flagged, wer / office / logons --flagged, events) and prints them as one\n"
         "report. With --json the result is a single object, one key per check; a\n"
         "check that could not run (e.g. needs elevation) is null instead of breaking\n"
         "the document. Read-only - it only calls the read-only commands. Usage:\n"
@@ -429,6 +498,19 @@ static const struct { const char *name, *text; } usage_table[] = {
         "With a pid, only that process's endpoints are shown; without one, all. Each\n"
         "row names the owning process. --tcp/--udp pick a family; --listening shows\n"
         "listening/bound sockets, --established only live TCP connections.\n" },
+    { "dns",
+        "winspect dns - the DNS resolver cache: the names this machine looked up\n"
+        "recently and what they resolved to (what `ipconfig /displaydns` prints),\n"
+        "one row per record: name, type (A, AAAA, CNAME, PTR, SRV, MX, TXT ...),\n"
+        "data and remaining TTL. Names are still listed minutes to hours after the\n"
+        "process that asked for them has exited, which makes the cache a quick\n"
+        "answer to \"did this host talk to that domain?\". Entries that come from\n"
+        "the hosts file are in the cache too (see `winspect hosts`). Nothing is\n"
+        "flagged: a name is not suspicious by its look. --find keeps rows whose\n"
+        "name or data contains the text. The cache is answered from memory\n"
+        "(DNS_QUERY_NO_WIRE_ONLY): no query leaves the machine. Needs the DNS Client\n"
+        "service; an empty or unavailable cache is said so. Read-only. Usage:\n"
+        "  winspect dns [--find <text>] [--json | --csv]\n" },
     { "arp",
         "winspect arp - the IPv4 neighbour (ARP) cache: which IP maps to which MAC on\n"
         "the local segment. Read-only. Usage: winspect arp [--json | --csv]\n" },
@@ -533,6 +615,21 @@ static const struct { const char *name, *text; } usage_table[] = {
         "raw instead of being guessed at. Flags programs in user-writable folders.\n"
         "A folder argument reads a copy (e.g. from a disk image). Read-only. Usage:\n"
         "  winspect pca [<folder>] [--flagged] [--json | --csv]\n" },
+    { "wer",
+        "winspect wer - Windows Error Reporting crash / hang reports (Report.wer)\n"
+        "as execution evidence: a program that crashed certainly ran, and its\n"
+        "report keeps the full path, the time, the faulting module and the\n"
+        "exception code long after the file itself is gone. Malware and exploits\n"
+        "crash more often than they should (and a crash inside a browser or Office\n"
+        "with an odd fault module is where an exploit attempt shows). Read from\n"
+        "ProgramData\\Microsoft\\Windows\\WER (ReportArchive, ReportQueue) and each\n"
+        "profile's AppData\\Local\\Microsoft\\Windows\\WER. Columns: time (UTC), event\n"
+        "type, program, fault module, exception code, path; --modules adds the\n"
+        "first module loaded from a user-writable folder (shown, not flagged:\n"
+        "overlays and per-user add-ins do this legitimately). Flagged: the crashed\n"
+        "program itself ran from a user-writable folder. A folder argument reads\n"
+        "reports below it instead (a copy from an image). Read-only. Usage:\n"
+        "  winspect wer [<folder>] [--find <text>] [--modules] [--flagged] [--json | --csv]\n" },
     { "setupapi",
         "winspect setupapi - device and driver installs from the SetupAPI text logs\n"
         "(%SystemRoot%\\INF\\setupapi.dev.log, setupapi.setup.log and their rotated\n"

@@ -102,6 +102,11 @@
 #include "srum.h"
 #include "webcache.h"
 #include "tasks.h"
+#include "logons.h"
+#include "dnscache.h"
+#include "wer.h"
+#include "office.h"
+#include "magic.h"
 
 // cmd_modules lives in modules.c: a live process's loaded modules
 #include "modules.h"
@@ -236,13 +241,15 @@ static const struct {
     { "pe",      cmd_pe,      "parse and dump PE file headers",             "file" },
     { "sign",    cmd_sign,    "Authenticode signature + trust (or --scan)", "file" },
     { "strings", cmd_strings, "printable strings + indicators from a file", "file" },
-    { "hash",    cmd_hash,    "MD5/SHA1/SHA256 of a file",                  "file" },
+    { "hash",    cmd_hash,    "MD5/SHA1/SHA256 of a file / folder (+ --match)", "file" },
+    { "magic",   cmd_magic,   "real file type by content; disguised programs", "file" },
     { "lnk",      cmd_lnk,      "shortcut files (default: Recent folder)",  "file" },
     { "streams",  cmd_streams,  "alternate data streams + Mark-of-the-Web", "file" },
     { "jumplist", cmd_jumplist, "Jump Lists: recent items per application",  "file" },
     { "image",    cmd_image,    "offline triage of a mounted Windows image", "security" },
     { "timeline", cmd_timeline, "merged, time-ordered evidence (UTC)",        "security" },
     { "users",    cmd_users,    "local accounts: admin, last logon, flags",  "security" },
+    { "office",   cmd_office,   "Office macro trust: enabled documents, settings", "security" },
     { "comhijack",cmd_comhijack,"per-user COM classes overriding HKLM ones",  "security" },
     { "bits",     cmd_bits,     "BITS jobs: files, owner, notify command",   "security" },
     { "recyclebin", cmd_recyclebin, "Recycle Bin: deleted files, owner, time", "file" },
@@ -275,11 +282,13 @@ static const struct {
     { "hunt",     cmd_hunt,     "lineage/masquerade checks on all processes", "security" },
     { "posture",  cmd_posture,  "host hardening checks (UAC, LSA, SMBv1...)", "security" },
     { "events",   cmd_events,   "high-signal event log timeline",          "security" },
+    { "logons",   cmd_logons,   "logon history: who, how, from where, how long", "security" },
     { "hidden",   cmd_hidden,   "cross-view: hidden processes / services",  "security" },
     { "sweep",    cmd_sweep,    "all system-wide checks, findings only",   "security" },
     { "ssn",     cmd_ssn,     "read an ntdll stub's service number",        "security" },
 
     { "net",     cmd_net,     "per-process TCP/UDP endpoints",              "system" },
+    { "dns",     cmd_dns,     "DNS resolver cache: names recently looked up", "system" },
     { "arp",     cmd_arp,     "IPv4 neighbour (ARP) cache",                 "system" },
     { "routes",  cmd_routes,  "IPv4 routing table",                         "system" },
     { "sessions",cmd_sessions,"terminal/logon sessions and users",          "system" },
@@ -294,6 +303,7 @@ static const struct {
     { "objects",  cmd_objects,  "named kernel objects (BaseNamedObjects)",  "system" },
     { "usb",      cmd_usb,      "USB storage history (Enum\\USBSTOR)",       "system" },
     { "pca",      cmd_pca,      "PCA launch records (Windows 11 22H2+)",      "system" },
+    { "wer",      cmd_wer,      "crash reports (WER) as execution evidence",   "system" },
     { "setupapi", cmd_setupapi, "device/driver installs (setupapi logs)",     "system" },
     { "prefetch", cmd_prefetch, "execution evidence from Prefetch (*.pf)",   "system" },
     { "shimcache",cmd_shimcache,"AppCompatCache entries (programs seen)",    "system" },

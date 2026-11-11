@@ -174,19 +174,55 @@ int ntfs_parse_boot(const unsigned char *b, size_t n, ntfs_boot *nb)
     if (n < 512 || memcmp(b + 3, "NTFS    ", 8) != 0) return -1;
     nb->bytes_per_sector = rd16(b + 11);
     uint8_t spc = b[13];
+    // Above 0x80 the byte is a negative power of two (0xF4 = 2^12 sectors).
+    // A corrupt boot sector must not turn that into an undefined shift.
+    if (spc > 0x80 && 256 - spc > 20) return -1;
     uint32_t sectors = spc <= 0x80 ? spc : (1u << (256 - spc));
     nb->cluster_size = nb->bytes_per_sector * sectors;
     nb->mft_lcn = rd64(b + 48);
     int8_t cpr = (int8_t)b[64];
+    if (cpr < -16) return -1;                 // record size 2^-cpr; 64 KiB is the cap below
     nb->record_size = cpr > 0 ? (uint32_t)cpr * nb->cluster_size : (1u << (-cpr));
     if (nb->bytes_per_sector < 256 || nb->bytes_per_sector > 4096 || nb->cluster_size == 0 ||
             nb->cluster_size > (2u << 20) || nb->record_size < 512 || nb->record_size > 65536) return -1;
     return 0;
 }
 
-int mft_data_runs(const unsigned char *rec, size_t n, mft_run *runs, int max, uint64_t *real_size)
+// Decodes the run list of one non-resident attribute (a = attribute start,
+// len = its length). Each attribute's list starts from LCN 0 again.
+static int decode_runs(const unsigned char *a, uint32_t len, mft_run *runs, int max)
+{
+    size_t p = rd16(a + 32);
+    int64_t lcn = 0;
+    int count = 0;
+    while (p < len && count < max) {
+        uint8_t h = a[p];
+        if (h == 0) break;
+        unsigned ls = h & 0x0F, os = h >> 4;
+        if (ls == 0 || ls > 8 || os > 8 || p + 1 + ls + os > len) return -1;
+        uint64_t clusters = 0;
+        for (unsigned k = 0; k < ls; k++) clusters |= (uint64_t)a[p + 1 + k] << (8 * k);
+        if (os) {
+            uint64_t raw = 0;
+            for (unsigned k = 0; k < os; k++) raw |= (uint64_t)a[p + 1 + ls + k] << (8 * k);
+            if (os < 8 && (raw >> (8 * os - 1)) & 1) raw |= ~0ULL << (8 * os);   // sign extend
+            lcn = (int64_t)((uint64_t)lcn + raw);
+            runs[count].lcn = lcn;
+        } else {
+            runs[count].lcn = -1;                       // sparse
+        }
+        runs[count].clusters = clusters;
+        count++;
+        p += 1 + ls + os;
+    }
+    return count;
+}
+
+int mft_attr_runs(const unsigned char *rec, size_t n, uint32_t want, mft_run *runs, int max,
+                  uint64_t *real_size, uint64_t *start_vcn)
 {
     *real_size = 0;
+    if (start_vcn) *start_vcn = 0;
     if (n < 48 || memcmp(rec, "FILE", 4) != 0) return -1;
     size_t off = rd16(rec + 20);
     int guard = 0;
@@ -196,36 +232,77 @@ int mft_data_runs(const unsigned char *rec, size_t n, mft_run *runs, int max, ui
         uint32_t len = rd32(rec + off + 4);
         if (len < 16 || off + len > n) break;
         const unsigned char *a = rec + off;
-        if (type == 0x80 && a[8] == 1 && a[9] == 0 && len >= 64) {     // unnamed, non-resident $DATA
+        if (type == want && a[8] == 1 && a[9] == 0 && len >= 64) {     // unnamed, non-resident
             *real_size = rd64(a + 48);
-            size_t p = rd16(a + 32);
-            int64_t lcn = 0;
-            int count = 0;
-            while (p < len && count < max) {
-                uint8_t h = a[p];
-                if (h == 0) break;
-                unsigned ls = h & 0x0F, os = h >> 4;
-                if (ls == 0 || ls > 8 || os > 8 || p + 1 + ls + os > len) return -1;
-                uint64_t clusters = 0;
-                for (unsigned k = 0; k < ls; k++) clusters |= (uint64_t)a[p + 1 + k] << (8 * k);
-                int64_t delta = 0;
-                if (os) {
-                    uint64_t raw = 0;
-                    for (unsigned k = 0; k < os; k++) raw |= (uint64_t)a[p + 1 + ls + k] << (8 * k);
-                    if (os < 8 && (raw >> (8 * os - 1)) & 1) raw |= ~0ULL << (8 * os);   // sign extend
-                    delta = (int64_t)raw;
-                    lcn += delta;
-                    runs[count].lcn = lcn;
-                } else {
-                    runs[count].lcn = -1;                       // sparse
-                }
-                runs[count].clusters = clusters;
-                count++;
-                p += 1 + ls + os;
-            }
-            return count;
+            if (start_vcn) *start_vcn = rd64(a + 16);
+            return decode_runs(a, len, runs, max);
         }
         off += len;
     }
     return -1;
+}
+
+int mft_data_runs(const unsigned char *rec, size_t n, mft_run *runs, int max, uint64_t *real_size)
+{
+    return mft_attr_runs(rec, n, 0x80, runs, max, real_size, NULL);
+}
+
+int mft_attr_resident(const unsigned char *rec, size_t n, uint32_t want, const unsigned char **content, size_t *clen)
+{
+    *content = NULL;
+    *clen = 0;
+    if (n < 48 || memcmp(rec, "FILE", 4) != 0) return -1;
+    size_t off = rd16(rec + 20);
+    int guard = 0;
+    while (off + 16 <= n && guard++ < 256) {
+        uint32_t type = rd32(rec + off);
+        if (type == 0xFFFFFFFF) break;
+        uint32_t len = rd32(rec + off + 4);
+        if (len < 16 || off + len > n) break;
+        const unsigned char *a = rec + off;
+        if (type == want && a[9] == 0) {
+            if (a[8] != 0) return 1;                                    // non-resident
+            if (len < 24) return -1;
+            uint32_t cs = rd32(a + 16);
+            uint16_t co = rd16(a + 20);
+            if (co > len || cs > len - co) return -1;
+            *content = a + co;
+            *clen = cs;
+            return 0;
+        }
+        off += len;
+    }
+    return -1;
+}
+
+int mft_alist_data(const unsigned char *list, size_t n, uint64_t self, mft_ext *out, int max)
+{
+    int count = 0;
+    size_t p = 0;
+    while (p + 26 <= n) {
+        uint32_t type = rd32(list + p);
+        uint16_t rl = rd16(list + p + 4);
+        if (rl < 26 || p + rl > n) break;
+        uint8_t name_len = list[p + 6];
+        uint64_t vcn = rd64(list + p + 8);
+        uint64_t rec = rd64(list + p + 16) & 0xFFFFFFFFFFFFULL;
+        if (type == 0x80 && name_len == 0 && rec != self) {
+            if (count < max) {
+                out[count].start_vcn = vcn;
+                out[count].recno = rec;
+            }
+            count++;
+        }
+        p += rl;
+    }
+    // By starting VCN, so the pieces can be appended in file order (the list
+    // is sorted by type/name/VCN on a healthy volume; do not rely on it).
+    int kept = count < max ? count : max;
+    for (int i = 1; i < kept; i++) {
+        mft_ext t = out[i];
+        int j = i - 1;
+        while (j >= 0 && out[j].start_vcn > t.start_vcn) { out[j + 1] = out[j]; j--; }
+        out[j + 1] = t;
+    }
+    return count;
 }

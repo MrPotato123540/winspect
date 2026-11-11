@@ -72,3 +72,107 @@ def usn(records, sparse=4096):
         out += r
         u += ln
     return bytes(out)
+
+
+def _fixups(rec, usn_val=0x0042):
+    struct.pack_into('<H', rec, 48, usn_val)
+    for k in (1, 2):
+        end = k * 512 - 2
+        rec[48 + 2 * k:48 + 2 * k + 2] = rec[end:end + 2]
+        struct.pack_into('<H', rec, end, usn_val)
+
+
+def _record(attrs, flags=1, seq=1, base=0):
+    """One 1024-byte FILE record holding the given attribute bytes."""
+    rec = bytearray(1024)
+    rec[0:4] = b'FILE'
+    struct.pack_into('<HH', rec, 4, 48, 3)
+    struct.pack_into('<H', rec, 16, seq)
+    struct.pack_into('<H', rec, 20, 56)
+    struct.pack_into('<H', rec, 22, flags)
+    attrs = attrs + b'\xff\xff\xff\xff\0\0\0\0'
+    struct.pack_into('<II', rec, 24, 56 + len(attrs), 1024)
+    struct.pack_into('<Q', rec, 32, base)
+    rec[56:56 + len(attrs)] = attrs
+    _fixups(rec)
+    return bytes(rec)
+
+
+def _runlist(frags):
+    """frags: list of (lcn, clusters) -> NTFS run list (relative, signed offsets)."""
+    out = bytearray()
+    prev = 0
+    for lcn, n in frags:
+        d = lcn - prev
+        prev = lcn
+        nl = max(1, (n.bit_length() + 7) // 8)
+        ol = 1
+        while not -(1 << (8 * ol - 1)) <= d < (1 << (8 * ol - 1)):
+            ol += 1
+        out += bytes([(ol << 4) | nl]) + n.to_bytes(nl, 'little') + d.to_bytes(ol, 'little', signed=True)
+    return bytes(out) + b'\0'
+
+
+def _nonres(atype, start_vcn, frags, real):
+    runs = _runlist(frags)
+    total = (64 + len(runs) + 7) & ~7
+    a = bytearray(total)
+    clusters = sum(n for _, n in frags)
+    struct.pack_into('<IIBBHHH', a, 0, atype, total, 1, 0, 0, 0, 0)
+    struct.pack_into('<QQHH', a, 16, start_vcn, start_vcn + clusters - 1, 64, 0)
+    struct.pack_into('<QQQ', a, 40, real, real, real)
+    a[64:64 + len(runs)] = runs
+    return bytes(a)
+
+
+def _alist(entries):
+    """entries: list of (type, start_vcn, recno) -> $ATTRIBUTE_LIST content."""
+    out = bytearray()
+    for atype, vcn, recno in entries:
+        e = bytearray(32)
+        struct.pack_into('<IHBBQQH', e, 0, atype, 32, 0, 26, vcn, recno | (1 << 48), 0)
+        out += e
+    return bytes(out)
+
+
+def volume(mft_bytes, frags, split=None, ext_rec=16, cluster=4096, attr_list=True):
+    """A raw NTFS volume image holding only what `mft --image` reads: a boot
+    sector and the $MFT, stored in the given fragments [(lcn, clusters)].
+    split = number of leading fragments described by record 0 itself; the
+    rest go to extension record ext_rec, reached through record 0's
+    $ATTRIBUTE_LIST (how a fragmented $MFT really looks). attr_list=False
+    leaves the list out, i.e. a volume whose later extents cannot be found."""
+    m = bytearray(mft_bytes)
+    assert sum(n for _, n in frags) * cluster == len(m)
+    split = len(frags) if split is None else split
+    first, rest = frags[:split], frags[split:]
+    si = _attr(0x10, struct.pack('<QQQQI', *([130000000000000000] * 4), 6) + b'\0' * 44)
+    name = '$MFT'.encode('utf-16-le')
+    fn = _attr(0x30, struct.pack('<QQQQQQQII', 5 | (5 << 48), *([130000000000000000] * 4), len(m), len(m), 6, 0)
+               + bytes([4, 3]) + name)
+    data0 = _nonres(0x80, 0, first, len(m))
+    attrs = si
+    if rest and attr_list:
+        vcn = sum(n for _, n in first)
+        attrs += _attr(0x20, _alist([(0x10, 0, 0), (0x30, 0, 0), (0x80, 0, 0), (0x80, vcn, ext_rec)]))
+    attrs += fn + data0
+    m[0:1024] = _record(attrs)
+    if rest:
+        vcn = sum(n for _, n in first)
+        m[ext_rec * 1024:(ext_rec + 1) * 1024] = _record(_nonres(0x80, vcn, rest, 0), base=0 | (1 << 48))
+    size = (max(l + n for l, n in frags) + 4) * cluster
+    img = bytearray(size)
+    boot = bytearray(512)
+    boot[3:11] = b'NTFS    '
+    struct.pack_into('<H', boot, 11, 512)
+    boot[13] = cluster // 512
+    struct.pack_into('<Q', boot, 40, size // 512)
+    struct.pack_into('<Q', boot, 48, frags[0][0])
+    boot[64] = 0xF6                                   # 2^10 = 1024-byte records
+    boot[510:512] = b'\x55\xaa'
+    img[0:512] = boot
+    off = 0
+    for lcn, n in frags:
+        img[lcn * cluster:(lcn + n) * cluster] = m[off:off + n * cluster]
+        off += n * cluster
+    return bytes(img)

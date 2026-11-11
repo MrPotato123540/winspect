@@ -47,11 +47,12 @@ takes. The tables below are a map, not the full reference.
 | --- | --- |
 | `sweep` | Runs every system-wide check in findings-only mode and prints one report (one JSON object with `--json`). |
 | `timeline` | Merges the timestamps from the evidence commands below into one UTC list, newest first. `--since <hours>`, `--sources a,b`, `--flagged`. `--root <folder>` builds it from a mounted image instead, with every per-user row naming its profile. |
-| `image <root>` | Triage of a Windows installation that is not running: point it at a mounted image or a copied system drive and it finds the hives, Amcache, Prefetch, tasks, event logs, the Recycle Bin and every user profile, runs the offline modes of the commands below, and prints machine facts, local accounts and every finding grouped by source, user and reason. |
+| `image <root>` | Triage of a Windows installation that is not running: point it at a mounted image or a copied system drive and it finds the hives, Amcache, Prefetch, tasks, event logs, crash reports, the Recycle Bin and every user profile, runs the offline modes of the commands below, and prints machine facts, local accounts and every finding grouped by source, user and reason. |
 | `posture` | Hardening settings: UAC, LSA protection, WDigest, NTLM level, LM hashes, Credential Guard, SMBv1 and SMB signing, LLMNR, RDP/NLA, firewall profiles, AlwaysInstallElevated, PowerShell logging. Each check is OK, WARN or INFO with a one-line explanation. |
 | `hunt` | Process lineage checks in the spirit of the SANS "Hunt Evil" poster: wrong parent, duplicate singletons, core names outside System32, wrong account, boot processes started late. |
 | `hidden` | Cross-view: processes visible to one API but not another, services in the registry that the SCM does not list. |
 | `sysinfo` | Computer name, Windows build and install date, last shutdown, time zone, interfaces, profiles, networks joined. |
+| `logons` | Logon history, the Windows counterpart of `last`: who logged on, how (interactive, network, RDP...), from where and for how long. Joins logons with their logoff and with the "special privileges" event (admin sessions), adds explicit-credential use and the Terminal Services session log. Service and system-account logons are hidden unless `--all`. Flags RDP / network logons from public addresses, RDP from loopback (a tunnel), cleartext and new-credentials logons, NTLMv1. `--summary`, `--evtx <file>`. |
 | `users` | Local accounts with RID, admin membership, last logon and password age. Flags `$`-suffixed accounts, an enabled Guest and accounts without a password requirement. |
 
 ### Persistence
@@ -65,6 +66,7 @@ takes. The tables below are a map, not the full reference.
 | `wmi` | WMI permanent event subscriptions. |
 | `bits` | BITS jobs, their files and notify command lines. |
 | `comhijack` | Per-user COM classes that override a machine-wide registration with a different DLL. |
+| `office` | Office macro trust per user: every document "Enable Content" / "Enable Editing" was clicked for (Trusted Documents), macro settings that weaken the defaults, trusted locations. Flags macros enabled for mail attachments, downloads, temp-folder files and URLs. `--hive <NTUSER.DAT>`. |
 | `defender` | Defender exclusions and policy switches that turn protection off. |
 | `firewall` | Firewall rules; flags inbound allow rules for programs in user-writable folders. |
 | `certstore` | Certificates in a system store (Root by default); flags locally generated roots, roots that are not self-signed, and entries whose stored SHA-1 does not match the certificate. |
@@ -76,6 +78,7 @@ takes. The tables below are a map, not the full reference.
 | --- | --- |
 | `prefetch` | Programs that ran: full path, run count, last eight run times. Handles Windows 10/11 compressed files. |
 | `pca` | Windows 11 22H2+ Program Compatibility Assistant logs (`appcompat\pca`): programs launched, with the last launch time. Still there when Prefetch is off. |
+| `wer` | Windows Error Reporting crash and hang reports: a crashed program certainly ran, and its report keeps the path, time, fault module and exception code after the file is gone. Flags crashed programs that ran from user-writable folders. |
 | `setupapi` | Device and driver installs from `INF\setupapi*.log`: start/end time, device id or INF path, exit status, signer. A USB stick's first install is its first-connected time. Flags driver packages installed from user-writable folders. `--utc-offset` for copied logs. |
 | `srum` | System Resource Usage Monitor (`SRUDB.dat`, an ESE database read with a built-in reader): bytes sent and received per application, user and hour; CPU / disk use; connection spans. `--summary` totals per application, largest upload first. |
 | `amcache` | File inventory from Amcache.hve with SHA-1, publisher and version. Look up a hash with `--sha1`. |
@@ -100,7 +103,7 @@ takes. The tables below are a map, not the full reference.
 | --- | --- |
 | `list` | Process tree, optionally with threads, paths and integrity levels. |
 | `triage <pid>` | One suspicion score for a process from the checks below. |
-| `verify <pid>` | ntdll and IAT hooks, image tampering (memory vs disk), hidden modules, private executable memory, threads that start outside any module. |
+| `verify <pid>` | ntdll and IAT hooks, image tampering (memory vs disk), hidden modules, private executable memory, threads that start outside any module. A tampered image is explained patch by patch: original and current bytes, the decoded jump and the module that finally receives control (one trampoline is followed), so a hooking product can be told from a replaced image. |
 | `inspect <pid>` | PEB fields and mitigation policies. |
 | `modules <pid>` | Loaded modules; `--unsigned` lists DLLs without a trusted signature. |
 | `threads <pid>` | Registers, start address, state; `-s` adds a symbolised call stack. |
@@ -117,25 +120,26 @@ takes. The tables below are a map, not the full reference.
 | `pe <file>` | PE headers, sections and entropy, imports and exports, imphash, Rich header, .NET header, security features, version info, and a list of anomalies. |
 | `sign <file>` / `sign --scan <dir>` | Authenticode and catalog signatures with the chain and timestamp. |
 | `strings <file>` | ASCII and UTF-16 strings with URLs, IPs, paths and encoded PowerShell tagged. |
-| `hash <file>` | MD5, SHA-1 and SHA-256. |
+| `hash <file \| folder>` | MD5, SHA-1 and SHA-256, streamed (no size limit). `-r` for folders; `--match <list>` reports only files whose hash is on a list of known hashes (plain, `md5sum`-style or CSV, digests mixed). |
+| `magic <file \| folder>` | The real file type from content, as `file` does on Unix (PE with architecture, archives, disk images, documents, scripts, Windows artifacts). Flags programs behind picture / document extensions, double extensions (`invoice.pdf.exe`), right-to-left override names. `-r`, `--flagged`. |
 | `streams <path>` | Alternate data streams and Mark-of-the-Web (zone and download URL). |
-| `mft <$MFT>` / `mft --live C:` | Files from a copied `$MFT`: full paths (deleted files too, broken chains under `$Orphan`), sizes, `$STANDARD_INFORMATION` and `$FILE_NAME` times, Object ID creation time and MAC. `--timestomp` lists files whose `$SI` creation time precedes `$FN`'s, as candidates rather than findings. `--live C:` reads the running volume's `$MFT` directly (read-only, administrator). |
+| `mft <$MFT>` / `mft --live C:` | Files from a copied `$MFT`: full paths (deleted files too, broken chains under `$Orphan`), sizes, `$STANDARD_INFORMATION` and `$FILE_NAME` times, Object ID creation time and MAC. `--timestomp` lists files whose `$SI` creation time precedes `$FN`'s, as candidates rather than findings. `--live C:` reads the running volume's `$MFT` directly (read-only, administrator); `--image <file>` does the same on a raw image of an NTFS partition. A fragmented `$MFT` is followed through its attribute list, and a read that cannot map all of it says so. |
 | `usn <$J>` | The NTFS change journal (`$UsnJrnl:$J` copy): every create, delete, rename and data change with time and reasons; `--mft` adds each file's folder; `--live C:` reads the running system's journal through the documented FSCTLs. Flags deleted programs and files renamed into program names (`.pdf` to `.exe`). |
 | `hive <file> [key]` | Browse an offline registry hive. |
-| `pipes`, `objects`, `hosts`, `arp`, `routes`, `sessions`, `shares` | Named pipes (known tool defaults flagged), Object Manager names, hosts file, neighbour cache, routing table, logon sessions, SMB shares. |
+| `pipes`, `objects`, `hosts`, `dns`, `arp`, `routes`, `sessions`, `shares` | Named pipes (known tool defaults flagged), Object Manager names, hosts file, DNS resolver cache (names recently looked up, read from the cache only), neighbour cache, routing table, logon sessions, SMB shares. |
 
 ### Offline options
 
 | Option | Commands |
 | --- | --- |
 | `--hive <SYSTEM>` | `services`, `shimcache`, `bam`, `usb` |
-| `--hive <NTUSER.DAT>` | `userassist`, `mru`, `rdp` |
+| `--hive <NTUSER.DAT>` | `userassist`, `mru`, `rdp`, `office` |
 | `--software`, `--system`, `--ntuser` (whichever apply) | `autoruns`, `posture`, `sysinfo`, `programs`, `defender`, `certstore` |
 | `--ntuser`, `--usrclass` | `shellbags` |
 | `--usrclass` with `--software` | `comhijack` |
 | `--sam <SAM>` | `users` (account names and the fixed `F` record only) |
-| `--evtx <file>` (repeatable) | `events`, including `--summary` |
-| a copied file or folder | `prefetch` (file or `--dir`), `pca`, `amcache`, `lnk`, `jumplist`, `recyclebin`, `pshistory`, `tasks --dir`, `browser`, `activities` and `webcache` (database file or `--home <user folder>`) |
+| `--evtx <file>` (repeatable) | `events` and `logons`, including `--summary` |
+| a copied file or folder | `prefetch` (file or `--dir`), `pca`, `wer`, `amcache`, `lnk`, `jumplist`, `recyclebin`, `pshistory`, `tasks --dir`, `browser`, `activities` and `webcache` (database file or `--home <user folder>`) |
 
 ## Building
 
@@ -169,7 +173,8 @@ and are tested on Linux:
 ```sh
 SRC="src/md5.c src/jsonutil.c src/ioc.c src/entropy.c src/pecksum.c src/imphash_ords.c \
      src/pfparse.c src/artparse.c src/capa.c src/lnkparse.c src/rights.c src/destlist.c \
-     src/shellitem.c src/jsonmini.c src/sqlite.c src/mft.c src/usn.c"   # evtx.c: tests/evtx_check.py
+     src/shellitem.c src/jsonmini.c src/sqlite.c src/mft.c src/usn.c src/patchdec.c \
+     src/logonparse.c src/werparse.c src/officeparse.c src/magicparse.c src/hashlist.c"   # evtx.c: tests/evtx_check.py
 cc -I inc -std=c11 $SRC tests/test_util.c -o test_util -lm && ./test_util
 ```
 
@@ -182,6 +187,8 @@ third-party code is run):
 - Jump List DestList: real Windows 7 to 10 files from the JumpList project.
 - Registry hives, SAM, AppCompatCache, Amcache, ShellBags: regipy's test hives and published values.
 - Recycle Bin, `.evtx` event logs, `$MFT`, the USN journal, SRUM and WebCache: plaso's test files and the values its tests assert.
+- Logon history: the Security events inside plaso's `System2.evtx` (logon / logoff pairing checked against an independent filter) and recorded attacks from EVTX-ATTACK-SAMPLES (RDP through a tunnel, pass-the-hash, WMIC with other credentials).
+- File digests: Python's `hashlib`.
 - Certificates read offline: checked against `openssl x509` and `hashlib`.
 - The JSON reader: random documents compared with Python's `json` module.
 - The SQLite reader: random databases (page sizes, UTF-16, overflow pages, uncheckpointed WAL) compared row by row with Python's `sqlite3` module.
@@ -190,7 +197,9 @@ Functional tests run the real executable under wine (`tests/wine/`).
 `fixtures.py` plants known-bad artifacts in a throw-away prefix and checks
 that each is reported with the expected reason, and that benign look-alikes
 are not. For offline modes it builds hives with a small test-only writer
-(`tests/wine/regfwrite.py`). `wsmoke.py` runs every command and option
+(`tests/wine/regfwrite.py`), a fragmented NTFS volume image with
+`tests/wine/ntfswrite.py`, and starts a helper that patches its own code
+(`tests/selfpatch.c`) to check the patch report of `verify`. `wsmoke.py` runs every command and option
 combination and checks exit codes and output shape; `hives.py` runs the
 offline modes against real hives; `fuzz.py` feeds corrupted PE and `.lnk`
 files.

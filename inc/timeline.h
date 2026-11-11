@@ -6,7 +6,8 @@
 // folders browsed (jumplist, lnk, shellbags), deletions (recyclebin), USB
 // devices, RDP connections, Run-box entries, PowerShell history, logons and
 // password changes (users), BITS jobs, scheduled task registrations,
-// per-user COM registrations, high-signal events, Windows install / last
+// per-user COM registrations, high-signal events, logon sessions (logons),
+// crash reports (wer), Office documents the user trusted (office), Windows install / last
 // shutdown / profile loads (sysinfo). Each source command is
 // run with --json and its timestamps become rows (UTC, newest first); a row
 // keeps the source's "suspicious" mark. Per-user sources read the CURRENT

@@ -535,6 +535,9 @@ int cmd_triage(int argc, char **argv)
         printf(",\"hooked_stubs\":%d,\"private_exec_regions\":%d", hooks, privx);
         printf(",\"image_modified_sections\":%d,\"iat_hooked_entries\":%d",
                tamper.modified_sections, iat.hooked_entries);
+        printf(",\"image_diff_bytes\":%u,\"image_patch_count\":%u,\"image_patches\":",
+               tamper.total_diff_bytes, tamper.patch_count);
+        detect_json_patches(&tamper);
         printf(",\"unbacked_threads\":%d,\"section_perm_mismatches\":%d",
                thr.unbacked, sperm.mismatches);
         fputs(",\"integrity\":", stdout); json_str(integrity);
@@ -560,6 +563,15 @@ int cmd_triage(int argc, char **argv)
         printf("  ntdll hooks  %d\n", hooks);
         printf("  private +x   %d region(s)\n", privx);
         printf("  image tamper %d section(s) differ from disk\n", tamper.modified_sections);
+        if (tamper.modified_sections > 0) {
+            // The evidence behind the signal, so it can be judged rather than
+            // trusted: a few short jumps into a named DLL is a hooking product,
+            // a section that differs wholesale is a replaced image.
+            char sum[256];
+            detect_tamper_summary(&tamper, sum, sizeof sum);
+            printf("               %s\n", sum);
+            detect_print_patches(&tamper, "               ");
+        }
         printf("  IAT hooks    %d entry(ies) into unbacked memory\n", iat.hooked_entries);
         printf("  bad threads  %d thread(s) start outside any module\n", thr.unbacked);
         printf("  section perm %d section(s) more permissive in memory\n", sperm.mismatches);

@@ -1008,5 +1008,323 @@ try:
         print(f'FAIL autoruns: sethc.exe reported {n} times, expected 1'); fails += 1
 except Exception as e:
     print('FAIL autoruns dedupe check:', e); fails += 1
+
+# verify / triage patch report: a helper overwrites the start of one of its
+# own functions, first with a direct jump, then with a jump through a private
+# trampoline page (what hooking libraries do). The report must name the
+# section, show the original and the new bytes, decode the jump and say which
+# module finally receives control - the evidence needed to tell a hooking
+# product from a replaced image.
+if cc:
+    subprocess.run([cc, '-O1', os.path.join(here, '..', 'selfpatch.c'), '-o', os.path.join(fake, 'selfpatch.exe')], check=True)
+    for mode in ('direct', 'tramp'):
+        sp = subprocess.Popen([WINE, r'C:\fake\selfpatch.exe', mode], env=env, stdout=subprocess.PIPE,
+                              stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, text=True)
+        sp.stdout.readline()
+        try:
+            rc, out, err = wine([exe, 'list', '--json'])
+            pid = [p['pid'] for p in json.loads(out) if p.get('name', '').lower() == 'selfpatch.exe'][-1]
+            rc, out, err = wine([exe, 'verify', str(pid), '--json'])
+            t = json.loads(out)['checks']['image_tamper']
+            ps = t.get('patches', [])
+            ok = (t['modified_sections'] == 1 and t['patch_count'] == 1 and len(ps) == 1 and ps[0]['section'] == '.text'
+                  and ps[0]['disk'] != ps[0]['memory'] and int(ps[0]['target'], 16) != 0)
+            if mode == 'direct':
+                ok = ok and ps[0]['kind'] == 'jmp' and ps[0]['target_module'].lower() == 'selfpatch.exe' and ps[0]['memory'].startswith('E9')
+            else:
+                ok = ok and ps[0]['target_module'] == '' and ps[0]['final_module'].lower() == 'selfpatch.exe'
+            rc, out2, err = wine([exe, 'triage', str(pid), '--json'])
+            tj = json.loads(out2)['signals']
+            ok = ok and tj['image_patch_count'] == 1 and len(tj['image_patches']) == 1
+            rc, txt, err = wine([exe, 'triage', str(pid)])
+            ok = ok and 'disk:' in txt and 'mem :' in txt and 'selfpatch.exe' in txt.split('image tamper')[1]
+            if not ok:
+                print(f'FAIL verify patches ({mode}): {json.dumps(t)[:400]}'); fails += 1
+            else:
+                print(f'checked verify/triage patch report ({mode}: bytes, jump decoded, destination module named)')
+        except Exception as e:
+            print(f'FAIL verify patches ({mode}):', e); fails += 1
+        sp.kill()
+        wine(['taskkill', '/f', '/im', 'selfpatch.exe'])
+
+# mft --image: a raw NTFS volume image whose $MFT lies in three fragments,
+# the last two described only by an extension record reached through record
+# 0's $ATTRIBUTE_LIST (a fragmented $MFT on a real disk looks like this; the
+# same code reads --live volumes). invoice.exe's record is in the LAST
+# fragment, so it is found only when the list is followed. Without the list
+# the read must say on stderr that it is incomplete instead of looking as if
+# the file did not exist.
+frags = [(4, 6), (40, 4), (20, 6)]
+with open(os.path.join(ntd, 'vol.img'), 'wb') as f:
+    f.write(nw.volume(nw.mft(ents, 64), frags, split=1))
+with open(os.path.join(ntd, 'vol_nolist.img'), 'wb') as f:
+    f.write(nw.volume(nw.mft(ents, 64), frags, split=1, attr_list=False))
+with open(os.path.join(ntd, 'vol_whole.img'), 'wb') as f:
+    f.write(nw.volume(nw.mft(ents, 64), frags))
+try:
+    rc, out, err = wine([exe, 'mft', '--image', r'C:\ntfs\vol.img', '--find', 'invoice', '--json'])
+    a = [r['path'] for r in json.loads(out)]
+    rc2, out2, err2 = wine([exe, 'mft', '--image', r'C:\ntfs\vol_nolist.img', '--find', 'invoice', '--json'])
+    b = json.loads(out2)
+    rc3, out3, err3 = wine([exe, 'mft', '--image', r'C:\ntfs\vol_whole.img', '--find', 'invoice', '--json'])
+    c = [r['path'] for r in json.loads(out3)]
+    rc4, out4, err4 = wine([exe, 'mft', '--image', r'C:\ntfs\MFT'])
+    if a != ['\\Users\\bob\\Downloads\\invoice.exe'] or 'WARNING' in err:
+        print(f'FAIL mft --image (attribute list): {a} {err[:200]}'); fails += 1
+    elif b != [] or 'WARNING' not in err2 or 'missing' not in err2:
+        print(f'FAIL mft --image (no list): expected an incomplete-read warning: {b} {err2[:200]}'); fails += 1
+    elif c != a or 'WARNING' in err3:
+        print(f'FAIL mft --image (all runs in record 0): {c} {err3[:200]}'); fails += 1
+    elif rc4 != 1 or 'not an image of an NTFS volume' not in err4:
+        print(f'FAIL mft --image on a non-volume: rc={rc4} {err4[:200]}'); fails += 1
+    else:
+        print('checked mft --image  (fragmented $MFT followed through its attribute list; incomplete read warned)')
+except Exception as e:
+    print('FAIL mft --image check:', e); fails += 1
+
+# wer: two crash reports written the way Windows writes them (UTF-16LE with
+# BOM, CRLF). The one under ProgramData is a program in a Temp folder ->
+# flagged; the one in a user's profile is Word hanging with an add-in DLL from
+# AppData -> listed, not flagged, the add-in shown only with --modules.
+def wer_file(path, lines):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'wb') as f:
+        f.write(b'\xff\xfe' + '\r\n'.join(lines).encode('utf-16-le'))
+wer_file(os.path.join(pfx, 'drive_c', 'ProgramData', 'Microsoft', 'Windows', 'WER', 'ReportArchive',
+                      'AppCrash_upd.exe_1a2b3c', 'Report.wer'),
+         ['Version=1', 'EventType=APPCRASH', 'EventTime=133500000000000000', 'ReportIdentifier=11111111-2222',
+          'Sig[0].Name=Application Name', 'Sig[0].Value=upd.exe', 'Sig[3].Name=Fault Module Name', 'Sig[3].Value=StackHash_9f1c',
+          'Sig[6].Name=Exception Code', 'Sig[6].Value=c0000005',
+          r'LoadedModule[0]=C:\Users\bob\AppData\Local\Temp\upd.exe', r'LoadedModule[1]=C:\Windows\SYSTEM32\ntdll.dll',
+          r'AppPath=C:\Users\bob\AppData\Local\Temp\upd.exe', 'NsAppName=upd.exe', ''])
+wer_file(os.path.join(pfx, 'drive_c', 'users', 'Public', 'AppData', 'Local', 'Microsoft', 'Windows', 'WER', 'ReportQueue',
+                      'AppHang_WINWORD.EXE_77', 'Report.wer'),
+         ['Version=1', 'EventType=AppHangB1', 'EventTime=133500000600000000',
+          'Sig[0].Name=Application Name', 'Sig[0].Value=WINWORD.EXE',
+          r'LoadedModule[0]=C:\Program Files\Microsoft Office\Office16\WINWORD.EXE',
+          r'LoadedModule[1]=C:\Users\bob\AppData\Roaming\addin\x.dll', ''])
+try:
+    rc, out, err = wine([exe, 'wer', '--json'])
+    wr = json.loads(out)
+    by = {r['program'].lower(): r for r in wr}
+    crash, hang = by.get('upd.exe'), by.get('winword.exe')
+    rc2, txt, err = wine([exe, 'wer', '--modules'])
+    rc3, out3, err = wine([exe, 'wer', '--flagged', '--csv'])
+    rc4, out4, err = wine([exe, 'wer', r'C:\ProgramData\Microsoft\Windows\WER', '--find', 'stackhash', '--json'])
+    if not crash or not hang:
+        print(f'FAIL wer: reports not found: {wr}'); fails += 1
+    elif not (crash['suspicious'] and crash['time'] == '2024-01-17 21:20:00' and crash['fault_module'] == 'StackHash_9f1c'
+              and crash['exception_code'] == 'c0000005' and crash['user'] == '(system)'):
+        print(f'FAIL wer: crash report fields: {crash}'); fails += 1
+    elif hang['suspicious'] or hang['user'] != 'Public' or hang['writable_modules'] != 1 or not hang['path'].endswith('WINWORD.EXE'):
+        print(f'FAIL wer: hang report must be listed unflagged with its add-in counted: {hang}'); fails += 1
+    elif wr[0]['program'].lower() != 'winword.exe':
+        print('FAIL wer: newest report must come first'); fails += 1
+    elif 'addin\\x.dll' not in txt or len(out3.strip().splitlines()) != 2 or 'upd.exe' not in out3:
+        print(f'FAIL wer --modules / --flagged --csv: {txt[-300:]} {out3}'); fails += 1
+    elif [r['program'] for r in json.loads(out4)] != ['upd.exe']:
+        print(f'FAIL wer <folder> --find: {out4}'); fails += 1
+    else:
+        print('checked wer  (UTF-16 reports: Temp program flagged, Word hang with add-in not; folder / --find / --modules)')
+except Exception as e:
+    print('FAIL wer check:', e); fails += 1
+
+# office: Trusted Documents, macro settings and trusted locations - once in
+# the live HKCU (reg add) and once in an offline NTUSER.DAT built by the test
+# hive writer. A macro-enabled download and a mail attachment are flagged; a
+# macro-enabled workbook in Documents and an edit-only download are not;
+# VBAWarnings=1 is flagged, the default 2 produces no row; a trusted location
+# in Downloads is flagged, the stock Templates one is not.
+def trec(ft, flags):
+    return struct.pack('<QQII', ft, 0, 0, flags)
+OT = 133500000000000000
+OSEC = HKCU + r'Software\Microsoft\Office\16.0\Word\Security'
+reg(OSEC + r'\Trusted Documents\TrustRecords', '/v', '%USERPROFILE%/Downloads/invoice.docm', '/t', 'REG_BINARY', '/d', trec(OT, 0x7FFFFFFF).hex())
+reg(OSEC + r'\Trusted Documents\TrustRecords', '/v', '%USERPROFILE%/Downloads/readme.docx', '/t', 'REG_BINARY', '/d', trec(OT, 1).hex())
+reg(OSEC + r'\Trusted Documents\TrustRecords', '/v', '%USERPROFILE%/Documents/budget.docm', '/t', 'REG_BINARY', '/d', trec(OT, 0x7FFFFFFF).hex())
+reg(OSEC, '/v', 'VBAWarnings', '/t', 'REG_DWORD', '/d', '1')
+reg(HKCU + r'Software\Microsoft\Office\16.0\Excel\Security', '/v', 'VBAWarnings', '/t', 'REG_DWORD', '/d', '2')
+reg(OSEC + r'\Trusted Locations\Location9', '/v', 'Path', '/t', 'REG_SZ', '/d', 'C:\\Users\\bob\\Downloads\\')
+reg(OSEC + r'\Trusted Locations\Location0', '/v', 'Path', '/t', 'REG_SZ', '/d', '%APPDATA%\\Microsoft\\Templates')
+osec = K('Security', [rw.Value('AccessVBOM', rw.REG_DWORD, rw.dword(1))], [
+    K('Trusted Documents', [], [K('TrustRecords', [
+        rw.Value(r'C:/Users/bob/AppData/Local/Microsoft/Windows/INetCache/Content.Outlook/AB12/po.xlsm', rw.REG_BINARY, trec(OT + 600000000, 0x7FFFFFFF)),
+        rw.Value('short', rw.REG_BINARY, b'\x01\x02\x03')])])])
+pol = K('Policies', [], [K('Microsoft', [], [K('Office', [], [K('16.0', [], [K('Excel', [], [
+    K('Security', [rw.Value('BlockContentExecutionFromInternet', rw.REG_DWORD, rw.dword(0))])])])])])])
+with open(os.path.join(off, 'NTUSER_office.DAT'), 'wb') as f:
+    f.write(rw.build(K('ROOT', [], [K('Software', [], [K('Microsoft', [], [K('Office', [], [
+        K('Common', [], [K('Excel', [], [K('Security', [rw.Value('VBAWarnings', rw.REG_DWORD, rw.dword(1))])])]),
+        K('16.0', [], [K('Excel', [], [osec])])])]), pol])])))
+try:
+    rc, out, err = wine([exe, 'office', '--json'])
+    rows = json.loads(out)
+    fl = {(r['kind'], r['item']): r['reason'] for r in rows if r['suspicious']}
+    items = {r['item']: r for r in rows}
+    want = {('document', '%USERPROFILE%\\Downloads\\invoice.docm'): 'macros enabled for a downloaded document',
+            ('setting', 'VBAWarnings'): 'all macros run without notification (VBAWarnings=1)',
+            ('location', 'C:\\Users\\bob\\Downloads\\'): 'trusted location in a download folder'}
+    rc2, out2, err2 = wine([exe, 'office', '--hive', r'C:\offline\NTUSER_office.DAT', '--json'])
+    hrows = json.loads(out2)
+    hfl = sorted((r['kind'], r['application'], r['scope'], r['reason']) for r in hrows if r['suspicious'])
+    hwant = sorted([('document', 'Excel', 'user', 'macros enabled for a mail attachment'),
+                    ('setting', 'Excel', 'user', 'programmatic access to the VBA project is allowed (AccessVBOM=1)'),
+                    ('setting', 'Excel', 'policy', 'macros in files from the internet are not blocked (policy set to 0)')])
+    rc3, out3, err3 = wine([exe, 'office', '--flagged', '--csv'])
+    if fl != want:
+        print(f'FAIL office (live): flags {fl}'); fails += 1
+    elif items['%USERPROFILE%\\Downloads\\invoice.docm']['time'] != '2024-01-17 21:20:00' or \
+            'editing enabled' not in items['%USERPROFILE%\\Downloads\\readme.docx']['detail'] or \
+            '%USERPROFILE%\\Documents\\budget.docm' not in items or '%APPDATA%\\Microsoft\\Templates' not in items:
+        print(f'FAIL office (live): rows {rows}'); fails += 1
+    elif sum(1 for r in rows if r['kind'] == 'setting') != 1:
+        print('FAIL office: the default VBAWarnings=2 must not produce a row'); fails += 1
+    elif hfl != hwant or len(hrows) != 3:
+        print(f'FAIL office --hive: {hrows}'); fails += 1
+    elif len(out3.strip().splitlines()) != 4:
+        print(f'FAIL office --flagged --csv: {out3}'); fails += 1
+    else:
+        print('checked office  (live + offline hive: trusted documents, settings, locations; benign controls unflagged)')
+except Exception as e:
+    print('FAIL office check:', e); fails += 1
+
+# timeline picks up the new sources: the crash report and the macro-enabled
+# download become flagged rows; settings / locations (no user-action time)
+# and the edit-only document's row stays unflagged.
+try:
+    rc, out, err = wine([exe, 'timeline', '--sources', 'wer,office', '--json'], timeout=300)
+    tr2 = json.loads(out)
+    crash = [r for r in tr2 if r['source'] == 'wer' and 'upd.exe' in r['event']]
+    docs = [r for r in tr2 if r['source'] == 'office']
+    if not (len(crash) == 1 and crash[0]['suspicious'] and crash[0]['time'] == '2024-01-17 21:20:00' and 'APPCRASH' in crash[0]['event']):
+        print(f'FAIL timeline (wer): {crash}'); fails += 1
+    elif len(docs) != 3 or sum(1 for r in docs if r['suspicious']) != 1 or not all('Office document trusted' in r['event'] for r in docs):
+        print(f'FAIL timeline (office): {docs}'); fails += 1
+    else:
+        print('checked timeline --sources wer,office  (crash and macro-enabled download as flagged rows)')
+except Exception as e:
+    print('FAIL timeline new sources check:', e, out[:300]); fails += 1
+
+# magic: a "Downloads" folder with a program renamed to .jpg, a double
+# extension, a right-to-left override name and, as controls, a real JPEG, a
+# PDF, a .docx-shaped zip and a normally named program (in a sub-folder, so
+# -r is needed to see it).
+mg = os.path.join(pfx, 'drive_c', 'magic'); os.makedirs(os.path.join(mg, 'sub'), exist_ok=True)
+with open(exe, 'rb') as f:
+    pe_bytes = f.read(8192)
+def put(name, data):
+    with open(os.path.join(mg, name), 'wb') as f:
+        f.write(data)
+put('holiday.jpg', pe_bytes)
+put('real.jpg', b'\xff\xd8\xff\xe0\x00\x10JFIF\x00' + b'\x00' * 64)
+put('invoice.pdf.exe', pe_bytes)
+put('report.pdf', b'%PDF-1.7\n%\xe2\xe3\xcf\xd3\n')
+put('letter.docx', b'PK\x03\x04' + b'\x00' * 22 + struct.pack('<HH', 19, 0) + b'[Content_Types].xml' + b'<x/>')
+put('ann\u202efdp.exe', pe_bytes)
+put(os.path.join('sub', 'tool.exe'), pe_bytes)
+try:
+    rc, out, err = wine([exe, 'magic', r'C:\magic', '--json'])
+    rows = {os.path.basename(r['path'].replace('\\', '/')): r for r in json.loads(out)}
+    rc2, out2, err2 = wine([exe, 'magic', r'C:\magic', '-r', '--flagged', '--csv'])
+    rc3, out3, err3 = wine([exe, 'magic', r'C:\magic\sub\tool.exe', '--json'])
+    fl = {n: r['reason'] for n, r in rows.items() if r['suspicious']}
+    if set(fl) != {'holiday.jpg', 'invoice.pdf.exe', 'ann\u202efdp.exe'}:
+        print(f'FAIL magic: flagged {sorted(fl)}'); fails += 1
+    elif 'picture' not in fl['holiday.jpg'] or 'double extension' not in fl['invoice.pdf.exe'] or 'right-to-left' not in fl['ann\u202efdp.exe']:
+        print(f'FAIL magic: reasons {fl}'); fails += 1
+    elif not rows['holiday.jpg']['type'].startswith('PE executable') or rows['real.jpg']['type'] != 'JPEG image' or \
+            rows['report.pdf']['type'] != 'PDF document' or not rows['letter.docx']['type'].startswith('Office Open XML'):
+        print(f"FAIL magic: types {[(n, r['type']) for n, r in rows.items()]}"); fails += 1
+    elif 'tool.exe' in rows:
+        print('FAIL magic: sub-folder listed without -r'); fails += 1
+    elif len(out2.strip().splitlines()) != 4 or 'tool.exe' in out2:
+        print(f'FAIL magic -r --flagged --csv: {out2}'); fails += 1
+    elif json.loads(out3)[0]['type'][:13] != 'PE executable' or json.loads(out3)[0]['suspicious']:
+        print(f'FAIL magic <file>: {out3}'); fails += 1
+    else:
+        print('checked magic  (disguised program, double extension, RTLO flagged; real picture / PDF / docx / program not)')
+except Exception as e:
+    print('FAIL magic check:', e); fails += 1
+
+# hash: a folder against a list of known hashes, the digests computed here
+# independently with Python's hashlib. The list mixes a SHA-256 with a label,
+# an md5sum-style line and a comment; only the two listed files are reported,
+# the -r file only with -r, and an unrelated hash matches nothing.
+import hashlib
+hd2 = os.path.join(pfx, 'drive_c', 'hashes'); os.makedirs(os.path.join(hd2, 'deep'), exist_ok=True)
+blobs = {'a.bin': b'alpha' * 1000, 'b.bin': b'', 'c.bin': b'gamma', os.path.join('deep', 'd.bin'): b'delta' * 300000}
+for nme, data in blobs.items():
+    with open(os.path.join(hd2, nme), 'wb') as f:
+        f.write(data)
+with open(os.path.join(hd2, 'iocs.txt'), 'w') as f:
+    f.write('# known bad\n')
+    f.write(hashlib.sha256(blobs['a.bin']).hexdigest().upper() + ',Trojan.Alpha,high\n')
+    f.write(hashlib.md5(blobs[os.path.join('deep', 'd.bin')]).hexdigest() + '  d.bin\n')
+    f.write('0' * 64 + ',never\n')
+try:
+    rc, out, err = wine([exe, 'hash', r'C:\hashes', '--json'])
+    got = {os.path.basename(r['file'].replace('\\', '/')): r for r in json.loads(out)}
+    okd = all(got[n]['sha256'] == hashlib.sha256(blobs[n]).hexdigest() and got[n]['md5'] == hashlib.md5(blobs[n]).hexdigest()
+              and got[n]['sha1'] == hashlib.sha1(blobs[n]).hexdigest() and got[n]['size'] == len(blobs[n]) for n in ('a.bin', 'b.bin', 'c.bin'))
+    rc2, out2, err2 = wine([exe, 'hash', r'C:\hashes', '-r', '--match', r'C:\hashes\iocs.txt', '--json'])
+    m = {os.path.basename(r['file'].replace('\\', '/')): r['label'] for r in json.loads(out2)}
+    rc3, out3, err3 = wine([exe, 'hash', r'C:\hashes', '--match', r'C:\hashes\iocs.txt', '--csv'])
+    rc4, out4, err4 = wine([exe, 'hash', r'C:\hashes\deep\d.bin', '--json'])
+    big = json.loads(out4)
+    rc5, out5, err5 = wine([exe, 'hash', r'C:\hashes', '--match', r'C:\windows\win.ini'])
+    if not okd or 'd.bin' in got or 'iocs.txt' not in got:
+        print(f'FAIL hash <folder>: {sorted(got)}'); fails += 1
+    elif m != {'a.bin': 'Trojan.Alpha', 'd.bin': 'd.bin'}:
+        print(f'FAIL hash -r --match: {m}'); fails += 1
+    elif len(out3.strip().splitlines()) != 2 or 'a.bin' not in out3:
+        print(f'FAIL hash --match --csv (no -r): {out3}'); fails += 1
+    elif big['sha256'] != hashlib.sha256(blobs[os.path.join('deep', 'd.bin')]).hexdigest() or big['size'] != 1500000:
+        print(f'FAIL hash (1.5 MB file, streamed in chunks): {big}'); fails += 1
+    elif rc5 != 1 or 'no MD5' not in err5:
+        print(f'FAIL hash --match with a list holding no hashes: rc={rc5} {err5}'); fails += 1
+    else:
+        print('checked hash  (folder, -r, --match list in mixed formats; digests equal hashlib)')
+except Exception as e:
+    print('FAIL hash check:', e); fails += 1
+
+# image / timeline --root with the newer offline sources: a copy of the
+# synthetic installation whose user hive also holds an Office trust record
+# for a mail attachment, plus a machine-wide and a per-user crash report.
+img3 = os.path.join(pfx, 'drive_c', 'img3')
+_sh.rmtree(img3, ignore_errors=True)
+_sh.copytree(img, img3)
+ntu3 = K('ROOT', [], [K('Software', [], [K('Microsoft', [], [
+    K('Windows', [], [K('CurrentVersion', [], [K('Run', [rw.Value('Updater', rw.REG_SZ, rw.sz(r'C:\Users\bob\AppData\Local\Temp\upd.exe'))])])]),
+    K('Office', [], [K('16.0', [], [K('Excel', [], [K('Security', [], [K('Trusted Documents', [], [K('TrustRecords', [
+        rw.Value(r'C:/Users/bob/AppData/Local/Microsoft/Windows/INetCache/Content.Outlook/AB12/po.xlsm', rw.REG_BINARY, trec(OT, 0x7FFFFFFF)),
+        rw.Value(r'C:/Users/bob/Documents/own.xlsm', rw.REG_BINARY, trec(OT, 0x7FFFFFFF))])])])])])])])])])
+with open(os.path.join(img3, 'Users', 'bob', 'NTUSER.DAT'), 'wb') as f:
+    f.write(rw.build(ntu3))
+crash_lines = ['Version=1', 'EventType=APPCRASH', 'EventTime=133500000000000000', 'Sig[0].Name=Application Name', 'Sig[0].Value=%s',
+               r'AppPath=%s', '']
+wer_file(os.path.join(img3, 'ProgramData', 'Microsoft', 'Windows', 'WER', 'ReportArchive', 'AppCrash_a', 'Report.wer'),
+         [l.replace('%s', v) if '%s' in l else l for l, v in zip(crash_lines, ['', '', '', '', 'stage.exe', r'C:\ProgramData\stage.exe', ''])])
+wer_file(os.path.join(img3, 'Users', 'bob', 'AppData', 'Local', 'Microsoft', 'Windows', 'WER', 'ReportQueue', 'AppCrash_b', 'Report.wer'),
+         [l.replace('%s', v) if '%s' in l else l for l, v in zip(crash_lines, ['', '', '', '', 'pay.exe', r'C:\Users\bob\Downloads\pay.exe', ''])])
+wer_file(os.path.join(img3, 'Users', 'bob', 'AppData', 'Local', 'Microsoft', 'Windows', 'WER', 'ReportQueue', 'AppCrash_c', 'Report.wer'),
+         [l.replace('%s', v) if '%s' in l else l for l, v in zip(crash_lines, ['', '', '', '', 'calc.exe', r'C:\Windows\System32\calc.exe', ''])])
+try:
+    rc, out, err = wine([exe, 'image', r'C:\img3', '--json'], timeout=300)
+    im3 = json.loads(out)
+    f3 = [(x['source'], x['user'], x['detail']) for x in im3['findings'] if x['source'] in ('office', 'wer')]
+    rc2, out2, err2 = wine([exe, 'timeline', '--root', r'C:\img3', '--sources', 'office,wer', '--json'], timeout=300)
+    t3 = json.loads(out2)
+    if sorted((s_, u_) for s_, u_, _ in f3) != [('office', 'bob'), ('wer', ''), ('wer', 'bob')]:
+        print(f'FAIL image (office / wer): {f3}'); fails += 1
+    elif not any('po.xlsm' in d for _, _, d in f3) or not any('stage.exe' in d for _, _, d in f3) or not any('pay.exe' in d for _, _, d in f3):
+        print(f'FAIL image (office / wer) details: {f3}'); fails += 1
+    elif any('own.xlsm' in d or 'calc.exe' in d for _, _, d in f3):
+        print(f'FAIL image: benign Office document / crash reported as a finding: {f3}'); fails += 1
+    elif len(t3) != 5 or sum(1 for r in t3 if r['suspicious']) != 3 or {r.get('user', '') for r in t3 if r['source'] == 'office'} != {'bob'}:
+        print(f'FAIL timeline --root (office / wer): {t3}'); fails += 1
+    else:
+        print('checked image / timeline --root  (office trust record and crash reports, machine-wide and per user)')
+except Exception as e:
+    print('FAIL image office/wer check:', e, out[:300]); fails += 1
 print(f'\n{fails} failure(s)')
 sys.exit(1 if fails else 0)

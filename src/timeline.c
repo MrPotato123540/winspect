@@ -37,6 +37,9 @@
 #include "browser.h"
 #include "pca.h"
 #include "activities.h"
+#include "logons.h"
+#include "wer.h"
+#include "office.h"
 #include "webcache.h"
 #include "imgpaths.h"
 
@@ -317,6 +320,35 @@ static void x_webcache(tl *t, const jm_node *r)
     add(t, S(r, "accessed"), w, S(r, "reason"), B(r, "suspicious"));
 }
 
+static void x_logons(tl *t, const jm_node *r)
+{
+    char w[900];
+    const char *ev = S(r, "event"), *tn = S(r, "type_name"), *src = S(r, "source")[0] ? S(r, "source") : S(r, "workstation");
+    if (strcmp(ev, "explicit") == 0)
+        snprintf(w, sizeof w, "credentials of %s used by %s%s%s", S(r, "account"), S(r, "by"), S(r, "server")[0] ? " for " : "", S(r, "server"));
+    else
+        snprintf(w, sizeof w, "%s%s%s%s: %s%s%s%s", ev, tn[0] ? " (" : "", tn, tn[0] ? ")" : "", S(r, "account"),
+                 src[0] ? " from " : "", src, B(r, "admin") ? " [admin]" : "");
+    add(t, S(r, "time"), w, S(r, "reason"), B(r, "suspicious"));
+}
+
+static void x_wer(tl *t, const jm_node *r)
+{
+    char w[1200];
+    snprintf(w, sizeof w, "program crashed (%s): %s", S(r, "event_type"), S(r, "path")[0] ? S(r, "path") : S(r, "program"));
+    add(t, S(r, "time"), w, S(r, "fault_module"), B(r, "suspicious"));
+}
+
+// Only the trust decisions carry the time of a user action; settings have
+// none and a location's time is just its key's last write.
+static void x_office(tl *t, const jm_node *r)
+{
+    if (strcmp(S(r, "kind"), "document") != 0) return;
+    char w[1400];
+    snprintf(w, sizeof w, "Office document trusted (%s): %s", S(r, "detail"), S(r, "item"));
+    add(t, S(r, "time"), w, S(r, "application"), B(r, "suspicious"));
+}
+
 // sysinfo prints one object, not a list. Network first/last-connected times
 // are LOCAL time in the registry, so they are left out of this UTC view.
 static void x_sysinfo(tl *t, const jm_node *doc)
@@ -365,6 +397,9 @@ static const source sources[] = {
     { "browser",    cmd_browser,    { NULL },               NULL, x_browser, NULL },
     { "pca",        cmd_pca,        { NULL },               NULL, x_pca, NULL },
     { "activities", cmd_activities, { NULL },               NULL, x_activities, NULL },
+    { "logons",     cmd_logons,     { NULL },               NULL, x_logons, NULL },
+    { "wer",        cmd_wer,        { NULL },               NULL, x_wer, NULL },
+    { "office",     cmd_office,     { NULL },               NULL, x_office, NULL },
 };
 
 // The same sources for an offline installation under root (timeline --root):
@@ -399,8 +434,22 @@ static size_t image_sources(const img_paths *ip, source *out, size_t cap)
         s_->args[k++] = "--max"; s_->args[k++] = "200";
         for (int i = 0; i < ip->nevtx && k + 2 <= 12; i++) { s_->args[k++] = "--evtx"; s_->args[k++] = ip->evtx[i]; }
     }
+    if (ip->nevtx && n < cap) {
+        source *s_ = &out[n++];
+        memset(s_, 0, sizeof *s_);
+        s_->name = "logons"; s_->fn = cmd_logons; s_->x = x_logons;
+        int k = 0;
+        for (int i = 0; i < ip->nevtx && k + 2 <= 12; i++) { s_->args[k++] = "--evtx"; s_->args[k++] = ip->evtx[i]; }
+    }
+    {
+        // Machine-wide crash reports; the per-user ones are below each profile.
+        static char werdir[MAX_PATH * 2];
+        snprintf(werdir, sizeof werdir, "%s\\ProgramData\\Microsoft\\Windows\\WER", ip->root);
+        if (GetFileAttributesA(werdir) != INVALID_FILE_ATTRIBUTES) ADD("wer", cmd_wer, x_wer, NULL, NULL, werdir);
+    }
     for (int u = 0; u < ip->nusers; u++) {
         const img_user *p = &ip->users[u];
+        ADD("office", cmd_office, x_office, NULL, p->name, "--hive", p->ntuser);
         ADD("userassist", cmd_userassist, x_userassist, NULL, p->name, "--hive", p->ntuser);
         ADD("mru", cmd_mru, x_mru, NULL, p->name, "--hive", p->ntuser);
         ADD("rdp", cmd_rdp, x_rdp, NULL, p->name, "--hive", p->ntuser);
@@ -418,6 +467,9 @@ static size_t image_sources(const img_paths *ip, source *out, size_t cap)
             ADD("browser", cmd_browser, x_browser, NULL, p->name, "--home", homes[u]);
             ADD("activities", cmd_activities, x_activities, NULL, p->name, "--home", homes[u]);
             ADD("webcache", cmd_webcache, x_webcache, NULL, p->name, "--home", homes[u]);
+            static char uwer[IMG_MAX_USERS][MAX_PATH * 2 + 48];
+            snprintf(uwer[u], sizeof uwer[u], "%s\\AppData\\Local\\Microsoft\\Windows\\WER", homes[u]);
+            if (GetFileAttributesA(uwer[u]) != INVALID_FILE_ATTRIBUTES) ADD("wer", cmd_wer, x_wer, NULL, p->name, uwer[u]);
         }
         if (p->usrclass[0] && ip->software[0])
             ADD("comhijack", cmd_comhijack, x_comhijack, NULL, p->name, "--usrclass", p->usrclass, "--software", ip->software, "--all");
@@ -485,7 +537,7 @@ int cmd_timeline(int argc, char **argv)
     }
     // Live: the fixed list. --root: the same sources pointed at the image.
     static img_paths ip;
-    static source dyn[16 + IMG_MAX_USERS * 8];
+    static source dyn[24 + IMG_MAX_USERS * 14];   // machine-wide sources + up to 12 per profile
     const source *list = sources;
     size_t ns = sizeof sources / sizeof sources[0];
     if (root) {
