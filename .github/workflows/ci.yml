@@ -30,7 +30,7 @@ jobs:
           SRC="src/md5.c src/jsonutil.c src/ioc.c src/entropy.c src/pecksum.c src/imphash_ords.c src/pfparse.c src/artparse.c src/capa.c src/lnkparse.c src/rights.c src/destlist.c src/shellitem.c src/jsonmini.c src/sqlite.c src/mft.c src/usn.c src/patchdec.c src/logonparse.c src/werparse.c src/officeparse.c src/magicparse.c src/hashlist.c"
           cc -I inc -std=c11 $SAN $SRC tests/test_util.c -o test_util_san -lm
           ./test_util_san
-          cc -I inc -std=c11 $SAN src/ioc.c src/pfparse.c src/artparse.c src/lnkparse.c src/rights.c src/capa.c src/cfb.c src/destlist.c src/regf.c src/shellitem.c src/jsonmini.c src/usn.c tests/fuzz_parsers.c -o fuzz_parsers
+          cc -I inc -std=c11 $SAN src/ioc.c src/pfparse.c src/artparse.c src/lnkparse.c src/rights.c src/capa.c src/cfb.c src/destlist.c src/regf.c src/shellitem.c src/jsonmini.c src/usn.c src/logonparse.c src/werparse.c src/hashlist.c src/magicparse.c src/officeparse.c src/patchdec.c tests/fuzz_parsers.c -o fuzz_parsers
           ./fuzz_parsers 300000
           # Compound-file reader: random files from tests/wine/cfbwrite.py must
           # read back byte-identical (sizes + MD5 per stream).
@@ -246,9 +246,9 @@ jobs:
           }
           Smoke @()
           foreach ($args in @(@("pe",$f), @("pe",$f,"--json"), @("sign",$f), @("hash",$f), @("strings",$f,"--ioc"))) { Smoke $args }
-          foreach ($c in "list","services","drivers","autoruns","pipes","hosts","net","arp","routes","sessions","shares","certstore","tasks","objects","defender","usb","prefetch","shimcache","bam","firewall","taskcache","wmi","lnk","hunt","posture","events","hidden","sweep","userassist","mru","jumplist","rdp","sysinfo","programs","shellbags","pshistory","recyclebin","bits","comhijack","users","timeline","image","browser","pca","activities") { Smoke @($c); Smoke @($c,"--json") }
+          foreach ($c in "list","services","drivers","autoruns","pipes","hosts","net","arp","routes","sessions","shares","certstore","tasks","objects","defender","usb","prefetch","shimcache","bam","firewall","taskcache","wmi","lnk","hunt","posture","events","hidden","sweep","userassist","mru","jumplist","rdp","sysinfo","programs","shellbags","pshistory","recyclebin","bits","comhijack","users","timeline","image","browser","pca","activities","logons","dns","wer","office") { Smoke @($c); Smoke @($c,"--json") }
           foreach ($c in "inspect","threads","handles","regions","token","secinfo","modules","verify","triage") { Smoke @($c,"$p"); Smoke @($c,"$p","--json") }
-          foreach ($args in @(@("modules","$p","--unsigned"), @("firewall","--inbound","--allow","--active","--csv"), @("autoruns","--csv"), @("objects","--global","--type","Mutant"), @("drivers","--sig"), @("services","--flagged"), @("prefetch","--dir","C:\Windows\Prefetch","--csv"), @("streams","C:\Windows\System32\drivers\etc"), @("lnk","--json"), @("autoruns","--sig"), @("services","--sig","--flagged"), @("events","--summary"), @("prefetch","--flagged"), @("hunt","--all"), @("handles","--find","ntdll","--type","File"), @("hive","C:\Windows\System32\config\SYSTEM"), @("amcache"), @("rdp"), @("rdp","--json"))) { Smoke $args }
+          foreach ($args in @(@("modules","$p","--unsigned"), @("firewall","--inbound","--allow","--active","--csv"), @("autoruns","--csv"), @("objects","--global","--type","Mutant"), @("drivers","--sig"), @("services","--flagged"), @("prefetch","--dir","C:\Windows\Prefetch","--csv"), @("streams","C:\Windows\System32\drivers\etc"), @("lnk","--json"), @("autoruns","--sig"), @("services","--sig","--flagged"), @("events","--summary"), @("prefetch","--flagged"), @("hunt","--all"), @("handles","--find","ntdll","--type","File"), @("hive","C:\Windows\System32\config\SYSTEM"), @("amcache"), @("rdp"), @("rdp","--json"), @("magic","C:\Windows\System32\drivers\etc"), @("magic",$f,"--json"), @("magic","C:\Windows\System32\drivers","--flagged","--csv"), @("hash","C:\Windows\System32\drivers\etc","--csv"), @("logons","--summary"), @("logons","--all","--csv"), @("dns","--csv"), @("wer","--modules"), @("office","--flagged"), @("timeline","--sources","logons,wer,office"))) { Smoke $args }
           Write-Host "all commands ran without crashing"
 
       # --- MinGW toolchain ----------------------------------------------------
@@ -332,6 +332,55 @@ jobs:
           $hl = Receive-Job $job | ConvertFrom-Json
           Stop-Process -Id $hp.Id -Force
           if (-not ($hl | Where-Object { $_.name -like "*wsfind_marker*" })) { throw "handles <pid>: read/write file handle not named" }
+          # verify: a helper overwrites the start of one of its own functions
+          # with a jump (what an inline hook is). The patch report must show
+          # the changed bytes, decode the jump and name the module it lands in.
+          cl /nologo /O1 tests\selfpatch.c /Fe:(Join-Path $env:TEMP "selfpatch.exe") /Fo:(Join-Path $env:TEMP "selfpatch.obj") | Out-Null
+          foreach ($mode in "direct","tramp") {
+            $sp = Start-Process (Join-Path $env:TEMP "selfpatch.exe") -ArgumentList $mode -PassThru -WindowStyle Hidden
+            Start-Sleep 3
+            $vj = & $exe verify $sp.Id --json | ConvertFrom-Json
+            Stop-Process -Id $sp.Id -Force
+            $t = $vj.checks.image_tamper
+            $pt = @($t.patches)
+            $dest = if ($mode -eq "direct") { $pt[0].target_module } else { $pt[0].final_module }
+            if ($t.modified_sections -lt 1 -or $pt.Count -lt 1 -or $pt[0].disk -eq $pt[0].memory -or $dest -ne "selfpatch.exe") {
+              throw "verify patch report ($mode): $($t | ConvertTo-Json -Compress -Depth 5)"
+            }
+          }
+          # logons: on an elevated runner the Security log is readable. If
+          # Get-WinEvent sees logon events, winspect must list logons too, and
+          # the offline reader must agree with the live API on an exported log.
+          $have = @(Get-WinEvent -FilterHashtable @{LogName="Security"; Id=4624} -MaxEvents 5 -ErrorAction SilentlyContinue).Count
+          $lg = @(& $exe logons --all --json | ConvertFrom-Json)
+          if ($have -gt 0 -and @($lg | Where-Object { $_.event -eq "logon" }).Count -eq 0) { throw "logons: Get-WinEvent sees 4624 events, winspect lists none" }
+          $sev = Join-Path $env:RUNNER_TEMP "security.evtx"
+          wevtutil epl Security $sev
+          $lcut = (Get-Date).ToUniversalTime().AddMinutes(-2).ToString("yyyy-MM-dd HH:mm:ss")
+          $ll = @(& $exe logons --all --max 100000 --json | ConvertFrom-Json | Where-Object { $_.id -eq 4624 -and $_.time -lt $lcut })
+          $lo = @(& $exe logons --all --evtx $sev --json | ConvertFrom-Json | Where-Object { $_.id -eq 4624 -and $_.time -lt $lcut })
+          $a = ($ll | ForEach-Object { "$($_.time)|$($_.account)|$($_.logon_type)|$($_.logon_id)" } | Sort-Object) -join "`n"
+          $b = ($lo | ForEach-Object { "$($_.time)|$($_.account)|$($_.logon_type)|$($_.logon_id)" } | Sort-Object) -join "`n"
+          if ($a -ne $b) { throw "logons --evtx differs from live: $($ll.Count) live vs $($lo.Count) offline" }
+          # dns: a name that ipconfig shows in the resolver cache must be in
+          # winspect's list too (same cache, two readers).
+          Resolve-DnsName example.com -ErrorAction SilentlyContinue | Out-Null
+          $ipc = ipconfig /displaydns | Out-String
+          $dn = @(& $exe dns --json | ConvertFrom-Json)
+          if ($ipc -match "example\.com" -and -not ($dn | Where-Object { $_.name -like "*example.com*" })) { throw "dns: example.com is in ipconfig /displaydns but not in winspect dns" }
+          # magic: a program copied to a .jpg name is identified and flagged; a
+          # real text file is not. hash --match finds the same file by SHA-256.
+          $md = Join-Path $env:RUNNER_TEMP "magictest"
+          New-Item -ItemType Directory -Force -Path $md | Out-Null
+          Copy-Item C:\Windows\System32\notepad.exe (Join-Path $md "holiday.jpg")
+          Copy-Item C:\Windows\System32\drivers\etc\hosts (Join-Path $md "hosts.txt")
+          $mg = @(& $exe magic $md --json | ConvertFrom-Json)
+          $bad = $mg | Where-Object { $_.suspicious }
+          if (@($bad).Count -ne 1 -or $bad.path -notlike "*holiday.jpg" -or $bad.type -notlike "PE executable*") { throw "magic: $($mg | ConvertTo-Json -Compress)" }
+          $sha = (Get-FileHash C:\Windows\System32\notepad.exe -Algorithm SHA256).Hash
+          Set-Content -Path (Join-Path $env:RUNNER_TEMP "iocs.txt") -Value "$sha,notepad-copy"
+          $hm = @(& $exe hash $md --match (Join-Path $env:RUNNER_TEMP "iocs.txt") --json | ConvertFrom-Json)
+          if ($hm.Count -ne 1 -or $hm[0].label -ne "notepad-copy" -or $hm[0].sha256 -ne $sha.ToLower()) { throw "hash --match: $($hm | ConvertTo-Json -Compress)" }
           # events --evtx: export the live System log, then the offline reader
           # must give the same System rows (7045 / 104) as the live API for
           # every event written before the export.
