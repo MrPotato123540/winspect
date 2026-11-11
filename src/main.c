@@ -241,7 +241,7 @@ static const struct {
     { "pe",      cmd_pe,      "parse and dump PE file headers",             "file" },
     { "sign",    cmd_sign,    "Authenticode signature + trust (or --scan)", "file" },
     { "strings", cmd_strings, "printable strings + indicators from a file", "file" },
-    { "hash",    cmd_hash,    "MD5/SHA1/SHA256 of a file",                  "file" },
+    { "hash",    cmd_hash,    "MD5/SHA1/SHA256 of a file / folder (+ --match)", "file" },
     { "magic",   cmd_magic,   "real file type by content; disguised programs", "file" },
     { "lnk",      cmd_lnk,      "shortcut files (default: Recent folder)",  "file" },
     { "streams",  cmd_streams,  "alternate data streams + Mark-of-the-Web", "file" },

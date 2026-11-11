@@ -30,9 +30,15 @@ static const struct { const char *name, *text; } usage_table[] = {
         "paths). The static-triage counterpart of the Sysinternals `strings` tool.\n"
         "Usage: winspect strings <path> [-n <minlen>] [--ioc] [--json | --csv]\n" },
     { "hash",
-        "winspect hash - compute a file's MD5, SHA1 and SHA256 digests, the identifiers\n"
-        "used to look a sample up in threat-intel. Read-only. Usage:\n"
-        "  winspect hash <path> [--json]\n" },
+        "winspect hash - a file's MD5, SHA1 and SHA256 digests, the identifiers used\n"
+        "to look a sample up in threat intel. The file is streamed, so its size does\n"
+        "not matter. Given a folder, every file in it is hashed (-r descends; the\n"
+        "idea of md5deep / hashdeep). --match <list> looks every hash up in a text\n"
+        "file of known hashes - an IOC list, or the md5sum / sha256sum output of\n"
+        "another machine (one hash per line, optionally followed by a label; MD5,\n"
+        "SHA-1 and SHA-256 may be mixed) - and reports only the files that are on\n"
+        "it, with the list's label. Read-only. Usage:\n"
+        "  winspect hash <file | folder> [-r] [--match <hash list>] [--json | --csv]\n" },
     { "magic",
         "winspect magic - what a file really is, from its content instead of its\n"
         "name (the idea of the Unix `file` command): PE programs / DLLs / drivers\n"

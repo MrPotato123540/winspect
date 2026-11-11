@@ -1245,5 +1245,46 @@ try:
         print('checked magic  (disguised program, double extension, RTLO flagged; real picture / PDF / docx / program not)')
 except Exception as e:
     print('FAIL magic check:', e); fails += 1
+
+# hash: a folder against a list of known hashes, the digests computed here
+# independently with Python's hashlib. The list mixes a SHA-256 with a label,
+# an md5sum-style line and a comment; only the two listed files are reported,
+# the -r file only with -r, and an unrelated hash matches nothing.
+import hashlib
+hd2 = os.path.join(pfx, 'drive_c', 'hashes'); os.makedirs(os.path.join(hd2, 'deep'), exist_ok=True)
+blobs = {'a.bin': b'alpha' * 1000, 'b.bin': b'', 'c.bin': b'gamma', os.path.join('deep', 'd.bin'): b'delta' * 300000}
+for nme, data in blobs.items():
+    with open(os.path.join(hd2, nme), 'wb') as f:
+        f.write(data)
+with open(os.path.join(hd2, 'iocs.txt'), 'w') as f:
+    f.write('# known bad\n')
+    f.write(hashlib.sha256(blobs['a.bin']).hexdigest().upper() + ',Trojan.Alpha,high\n')
+    f.write(hashlib.md5(blobs[os.path.join('deep', 'd.bin')]).hexdigest() + '  d.bin\n')
+    f.write('0' * 64 + ',never\n')
+try:
+    rc, out, err = wine([exe, 'hash', r'C:\hashes', '--json'])
+    got = {os.path.basename(r['file'].replace('\\', '/')): r for r in json.loads(out)}
+    okd = all(got[n]['sha256'] == hashlib.sha256(blobs[n]).hexdigest() and got[n]['md5'] == hashlib.md5(blobs[n]).hexdigest()
+              and got[n]['sha1'] == hashlib.sha1(blobs[n]).hexdigest() and got[n]['size'] == len(blobs[n]) for n in ('a.bin', 'b.bin', 'c.bin'))
+    rc2, out2, err2 = wine([exe, 'hash', r'C:\hashes', '-r', '--match', r'C:\hashes\iocs.txt', '--json'])
+    m = {os.path.basename(r['file'].replace('\\', '/')): r['label'] for r in json.loads(out2)}
+    rc3, out3, err3 = wine([exe, 'hash', r'C:\hashes', '--match', r'C:\hashes\iocs.txt', '--csv'])
+    rc4, out4, err4 = wine([exe, 'hash', r'C:\hashes\deep\d.bin', '--json'])
+    big = json.loads(out4)
+    rc5, out5, err5 = wine([exe, 'hash', r'C:\hashes', '--match', r'C:\windows\win.ini'])
+    if not okd or 'd.bin' in got or 'iocs.txt' not in got:
+        print(f'FAIL hash <folder>: {sorted(got)}'); fails += 1
+    elif m != {'a.bin': 'Trojan.Alpha', 'd.bin': 'd.bin'}:
+        print(f'FAIL hash -r --match: {m}'); fails += 1
+    elif len(out3.strip().splitlines()) != 2 or 'a.bin' not in out3:
+        print(f'FAIL hash --match --csv (no -r): {out3}'); fails += 1
+    elif big['sha256'] != hashlib.sha256(blobs[os.path.join('deep', 'd.bin')]).hexdigest() or big['size'] != 1500000:
+        print(f'FAIL hash (1.5 MB file, streamed in chunks): {big}'); fails += 1
+    elif rc5 != 1 or 'no MD5' not in err5:
+        print(f'FAIL hash --match with a list holding no hashes: rc={rc5} {err5}'); fails += 1
+    else:
+        print('checked hash  (folder, -r, --match list in mixed formats; digests equal hashlib)')
+except Exception as e:
+    print('FAIL hash check:', e); fails += 1
 print(f'\n{fails} failure(s)')
 sys.exit(1 if fails else 0)

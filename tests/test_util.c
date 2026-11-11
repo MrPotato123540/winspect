@@ -29,6 +29,7 @@
 #include "destlist.h"
 #include "shellitem.h"
 #include "rights.h"
+#include "hashlist.h"
 #include "magicparse.h"
 #include "officeparse.h"
 #include "werparse.h"
@@ -1787,6 +1788,41 @@ int main(void)
         check_int("name no ext", magic_name_reason("README", "text") == NULL && magic_name_reason(".gitignore", "text") == NULL, 1);
         check_int("name leading dot double", magic_name_reason(".pdf.exe", "program") != NULL, 1);
         check_int("name null group", magic_name_reason("a.jpg", NULL) == NULL, 1);
+    }
+
+    // --- hashlist: known-hash lists in the formats people actually have ---------
+    {
+        char t[] = "\xEF\xBB\xBF# IOC list\r\n"
+                   "sha256,name\r\n"
+                   "D41D8CD98F00B204E9800998ECF8427E\r\n"
+                   "da39a3ee5e6b4b0d3255bfef95601890afd80709  empty.bin\r\n"
+                   "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855,Empty File,high\r\n"
+                   "0123456789abcdef0123456789abcdef *star.exe\r\n"
+                   "\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"quoted label\"\r\n"
+                   "abc123\r\n"
+                   "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\r\n"
+                   "d41d8cd98f00b204e9800998ecf8427e0\r\n"
+                   "  bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\tlast";
+        hashlist hl;
+        check_int("hashlist count", (int)hashlist_parse(t, &hl), 6);
+        check_int("hashlist md5 any case", hashlist_find(&hl, "d41d8cd98f00b204e9800998ecf8427e") != NULL, 1);
+        const hl_entry *he = hashlist_find(&hl, "DA39A3EE5E6B4B0D3255BFEF95601890AFD80709");
+        check_int("hashlist sha1 label", he != NULL && strcmp(he->label, "empty.bin") == 0, 1);
+        he = hashlist_find(&hl, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+        check_int("hashlist csv label stops at comma", he != NULL && strcmp(he->label, "Empty File") == 0, 1);
+        he = hashlist_find(&hl, "0123456789abcdef0123456789abcdef");
+        check_int("hashlist md5sum binary marker", he != NULL && strcmp(he->label, "star.exe") == 0, 1);
+        he = hashlist_find(&hl, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        check_int("hashlist quoted", he != NULL && strcmp(he->label, "quoted label") == 0, 1);
+        he = hashlist_find(&hl, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+        check_int("hashlist last line no newline", he != NULL && strcmp(he->label, "last") == 0, 1);
+        check_int("hashlist 33 digits rejected", hashlist_find(&hl, "d41d8cd98f00b204e9800998ecf8427e0") == NULL, 1);
+        check_int("hashlist miss", hashlist_find(&hl, "ffffffffffffffffffffffffffffffff") == NULL, 1);
+        check_int("hashlist overlong key", hashlist_find(&hl, "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff") == NULL, 1);
+        hashlist_free(&hl);
+        char t2[] = "nothing here\n";
+        check_int("hashlist empty", (int)hashlist_parse(t2, &hl) == 0 && hashlist_find(&hl, "aa") == NULL, 1);
+        hashlist_free(&hl);
     }
 
     fprintf(stderr, "\n%s (%d failure%s)\n",

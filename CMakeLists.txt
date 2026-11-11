@@ -27,6 +27,7 @@ add_executable(winspect
     src/autoruns.c
     src/pipes.c
     src/hash.c
+    src/hashlist.c
     src/hosts.c
     src/certstore.c
     src/objects.c
