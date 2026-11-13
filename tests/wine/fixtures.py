@@ -1393,5 +1393,63 @@ try:
         print('checked detections  (remediated and open detection, archive + URL, --find, timeline rows)')
 except Exception as e:
     print('FAIL detections check:', e); fails += 1
+
+# autoruns, the less-known locations: each gets a planted entry that must be
+# flagged and, where Windows ships defaults, a stock-looking entry that must
+# not be.
+HKLM = 'HKLM\\'
+NT = HKLM + r'SOFTWARE\Microsoft\Windows NT\CurrentVersion'
+CCS = HKLM + r'SYSTEM\CurrentControlSet'
+reg(HKLM + r'SOFTWARE\Microsoft\Windows\Windows Error Reporting\Hangs', '/v', 'Debugger', '/t', 'REG_SZ', '/d', r'C:\ProgramData\hang.exe')
+reg(CCS + r'\Control\Session Manager', '/v', 'SetupExecute', '/t', 'REG_MULTI_SZ', '/d', r'C:\Windows\setupx.exe')
+reg(CCS + r'\Control\BootVerificationProgram', '/v', 'ImagePath', '/t', 'REG_SZ', '/d', r'C:\Windows\bvp.exe')
+reg(CCS + r'\Control\LsaExtensionConfig\LsaSrv', '/v', 'Extensions', '/t', 'REG_MULTI_SZ', '/d', r'lsasrv.dll\0C:\ProgramData\lsaext.dll')
+reg(NT + r'\Winlogon', '/v', 'mpnotify', '/t', 'REG_SZ', '/d', r'C:\Windows\mpn.exe')
+reg(CCS + r'\Services\DNS\Parameters', '/v', 'ServerLevelPluginDll', '/t', 'REG_SZ', '/d', r'\\10.0.0.5\s\dns.dll')
+reg(CCS + r'\Services\WinSock2\Parameters', '/v', 'AutodialDLL', '/t', 'REG_SZ', '/d', r'C:\Windows\System32\rasadhlp.dll')
+reg(NT + r'\Winlogon\GPExtensions\{00000000-0000-0000-0000-00000000aaaa}', '/v', 'DllName', '/t', 'REG_SZ', '/d', r'%SystemRoot%\System32\gptext.dll')
+reg(NT + r'\Winlogon\GPExtensions\{00000000-0000-0000-0000-00000000bbbb}', '/v', 'DllName', '/t', 'REG_SZ', '/d', r'C:\ProgramData\gpx.dll')
+reg(NT + r'\AppCompatFlags\TelemetryController\Appraiser', '/v', 'Command', '/t', 'REG_SZ', '/d', r'%windir%\system32\CompatTelRunner.exe -m:appraiser.dll -f:DoScheduledTelemetryRun')
+reg(NT + r'\AppCompatFlags\TelemetryController\Extra', '/v', 'Command', '/t', 'REG_SZ', '/d', r'C:\ProgramData\tele.exe')
+reg(CCS + r'\Services\FixtureSvc', '/v', 'FailureCommand', '/t', 'REG_SZ', '/d', r'C:\Users\Public\onfail.exe')
+reg(HKLM + r'SOFTWARE\Microsoft\AMSI\Providers\{11111111-aaaa-bbbb-cccc-000000000001}')
+reg(HKLM + r'SOFTWARE\Classes\CLSID\{11111111-aaaa-bbbb-cccc-000000000001}\InprocServer32', '/ve', '/t', 'REG_SZ', '/d', r'C:\ProgramData\amsix.dll')
+reg(HKLM + r'SOFTWARE\Microsoft\AMSI\Providers\{11111111-aaaa-bbbb-cccc-000000000002}')
+reg(HKLM + r'SOFTWARE\Classes\CLSID\{11111111-aaaa-bbbb-cccc-000000000002}\InprocServer32', '/ve', '/t', 'REG_SZ', '/d',
+    r'"C:\ProgramData\Microsoft\Windows Defender\Platform\4.18.1-0\MpOav.dll"')
+reg(HKCU + 'Environment', '/v', 'DOTNET_STARTUP_HOOKS', '/t', 'REG_SZ', '/d', r'C:\Users\Public\hook.dll')
+reg(CCS + r'\Control\Session Manager\Environment', '/v', 'COR_PROFILER_PATH', '/t', 'REG_SZ', '/d', r'C:\Program Files\Monitor\prof.dll')
+reg(NT + r'\AppCompatFlags\InstalledSDB\{22222222-0000-0000-0000-000000000001}', '/v', 'DatabasePath', '/t', 'REG_SZ', '/d', r'C:\Windows\AppPatch\Custom\x.sdb')
+reg(NT + r'\AppCompatFlags\Custom\putty.exe', '/v', '{22222222-0000-0000-0000-000000000001}.sdb', '/t', 'REG_QWORD', '/d', '1')
+os.makedirs(os.path.join(pfx, 'drive_c', 'windows', 'Setup', 'Scripts'), exist_ok=True)
+open(os.path.join(pfx, 'drive_c', 'windows', 'Setup', 'Scripts', 'ErrorHandler.cmd'), 'w').write('echo x\n')
+psd = os.path.join(pfx, 'drive_c', 'windows', 'system32', 'WindowsPowerShell', 'v1.0'); os.makedirs(psd, exist_ok=True)
+open(os.path.join(psd, 'profile.ps1'), 'w').write('# x\n')
+try:
+    rc, out, err = wine([exe, 'autoruns', '--json'])
+    ar = json.loads(out)
+    fl = {(r['location'], r['name']) for r in ar if r['suspicious']}
+    ok_rows = {(r['location'], r['name']) for r in ar if not r['suspicious']}
+    want_fl = {('WER Hangs Debugger', 'Debugger'), ('SetupExecute', 'SetupExecute'), ('BootVerificationProgram', 'ImagePath'),
+               ('HKLM\\...\\Winlogon', 'mpnotify'), ('DNS ServerLevelPluginDll', 'ServerLevelPluginDll'),
+               ('GP extensions', '{00000000-0000-0000-0000-00000000bbbb}'), ('TelemetryController', 'Extra'),
+               ('Service FailureCommand', 'FixtureSvc'), ('AMSI providers', '{11111111-aaaa-bbbb-cccc-000000000001}'),
+               ('HKCU\\Environment (.NET)', 'DOTNET_STARTUP_HOOKS'), ('Custom shim database', '{22222222-0000-0000-0000-000000000001}'),
+               ('Shimmed program', 'putty.exe'), ('Setup ErrorHandler.cmd', 'ErrorHandler.cmd'),
+               ('PowerShell profile (all users)', 'profile.ps1')}
+    want_ok = {('WinSock AutodialDLL', 'AutodialDLL'), ('GP extensions', '{00000000-0000-0000-0000-00000000aaaa}'),
+               ('TelemetryController', 'Appraiser'), ('AMSI providers', '{11111111-aaaa-bbbb-cccc-000000000002}'),
+               ('System environment (.NET)', 'COR_PROFILER_PATH')}
+    lsa = {r['command']: r['suspicious'] for r in ar if r['location'] == 'LSA extensions'}
+    if not want_fl <= fl:
+        print(f'FAIL autoruns (new locations): not flagged: {sorted(want_fl - fl)}'); fails += 1
+    elif not want_ok <= ok_rows:
+        print(f'FAIL autoruns (new locations): stock-looking entries missing or flagged: {sorted(want_ok - ok_rows)}'); fails += 1
+    elif lsa != {'lsasrv.dll': False, 'C:\\ProgramData\\lsaext.dll': True}:
+        print(f'FAIL autoruns LSA extensions: {lsa}'); fails += 1
+    else:
+        print('checked autoruns  (14 less-known locations flagged, 5 stock-looking controls not, LSA extension list split)')
+except Exception as e:
+    print('FAIL autoruns new locations check:', e); fails += 1
 print(f'\n{fails} failure(s)')
 sys.exit(1 if fails else 0)

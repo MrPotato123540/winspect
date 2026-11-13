@@ -21,6 +21,19 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Case-insensitive compare of n bytes (ASCII); 0 when equal.
+static int _strnicmp_portable(const char *a, const char *b, size_t n)
+{
+    for (size_t i = 0; i < n; i++) {
+        char x = a[i], y = b[i];
+        if (x >= 'A' && x <= 'Z') x = (char)(x + 32);
+        if (y >= 'A' && y <= 'Z') y = (char)(y + 32);
+        if (x != y) return x < y ? -1 : 1;
+        if (x == '\0') break;
+    }
+    return 0;
+}
+
 static uint32_t rd32(const unsigned char *p)
 {
     return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) |
@@ -280,6 +293,61 @@ int asep_netprovider_default(const char *dll)
     // RDPNP, LanmanWorkstation, webclient (WebDAV) and P9NP (WSL file access).
     static const char *const stock[] = { "drprov.dll", "ntlanman.dll", "davclnt.dll", "p9np.dll", NULL };
     return sys32_dll_in(dll, stock);
+}
+
+int asep_system_dir_default(const char *cmd)
+{
+    while (*cmd == ' ' || *cmd == '"') cmd++;
+    // The path part: up to the closing quote, or the first blank after an extension.
+    char path[600];
+    size_t n = 0;
+    for (const char *p = cmd; *p && *p != '"' && n + 1 < sizeof path; p++) path[n++] = *p;
+    path[n] = '\0';
+    const char *slash = strrchr(path, '\\');
+    if (slash == NULL) {
+        // Bare name (possibly with arguments): no directory at all, no '/'.
+        return path[0] != '\0' && strchr(path, '/') == NULL && strchr(path, ':') == NULL;
+    }
+    // Arguments after the file name may contain backslashes; judge the
+    // directory of the FIRST token that ends in a known extension, else all.
+    static const char *const exts[] = { ".dll ", ".exe ", ".dll", ".exe", NULL };
+    size_t end = n;
+    for (int e = 0; e < 2; e++) {
+        for (size_t i = 0; i + 5 <= n; i++) {
+            if (_strnicmp_portable(path + i, exts[e], 5) == 0) { end = i + 4; goto cut; }
+        }
+    }
+cut:
+    path[end] = '\0';
+    slash = strrchr(path, '\\');
+    if (slash == NULL) return 1;
+    size_t dl = (size_t)(slash - path);
+    static const char *const dirs[] = {
+        "%systemroot%\\system32", "%windir%\\system32", "%systemroot%\\syswow64", "%windir%\\syswow64",
+        "\\systemroot\\system32", "system32", "syswow64", NULL };
+    for (int i = 0; dirs[i]; i++) {
+        size_t L = strlen(dirs[i]);
+        if (dl == L && _strnicmp_portable(path, dirs[i], L) == 0) return 1;
+    }
+    // "<drive>:\Windows\System32" / "SysWOW64"
+    if (dl > 3 && path[1] == ':' && path[2] == '\\') {
+        static const char *const tails[] = { "\\windows\\system32", "\\windows\\syswow64", NULL };
+        for (int i = 0; tails[i]; i++) {
+            size_t L = strlen(tails[i]);
+            if (dl == 2 + L && _strnicmp_portable(path + 2, tails[i], L) == 0) return 1;
+        }
+    }
+    return 0;
+}
+
+int asep_amsi_default(const char *dll)
+{
+    if (asep_system_dir_default(dll)) return 1;
+    while (*dll == ' ' || *dll == '"') dll++;
+    // Defender ships its provider (MpOav.dll) in its versioned platform folder
+    // under ProgramData or in Program Files; both are admin-only locations.
+    return ioc_contains_ci(dll, "\\ProgramData\\Microsoft\\Windows Defender\\") || ioc_contains_ci(dll, "%ProgramData%\\Microsoft\\Windows Defender\\") ||
+           ioc_contains_ci(dll, ":\\Program Files\\Windows Defender\\") || ioc_contains_ci(dll, "%ProgramFiles%\\Windows Defender\\");
 }
 
 struct lineage_rule {

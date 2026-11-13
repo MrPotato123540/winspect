@@ -63,6 +63,18 @@ int asep_time_provider_default(const char *dll);
 // (T1556.008).
 int asep_netprovider_default(const char *dll);
 
+// 1 if a DLL / program reference stays inside the Windows system folders: a
+// bare file name (resolved from System32), or a path whose folder is
+// System32 / SysWOW64 of the Windows directory ("C:\Windows\System32\x.dll",
+// "%SystemRoot%\system32\x.dll", "%windir%\..."). Leading quotes and
+// arguments are ignored. Used for auto-start lists whose stock entries all
+// live there (GP extensions, LSA extensions, AutodialDLL, telemetry tasks).
+int asep_system_dir_default(const char *cmd);
+// 1 if an AMSI provider DLL is where the known providers live: Microsoft
+// Defender's platform folder or a system folder. A provider elsewhere sees
+// every script handed to AMSI and can blind it (T1562.001).
+int asep_amsi_default(const char *dll);
+
 // 1 if an image path uses the name of a core Windows binary that only ever
 // lives directly in System32 / SysWOW64 (see lineage_system32_only) but sits
 // somewhere else - including a SUBdirectory of System32, a favourite trick:

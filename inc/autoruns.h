@@ -6,7 +6,14 @@
 // IFEO Debugger, SilentProcessExit, AppInit_DLLs, BootExecute, LSA packages,
 // print monitors, NetSh helpers, AppCertDlls, cmd.exe AutoRun, logon scripts,
 // Active Setup, time providers, screensaver, exefile / ms-settings handler
-// hijacks, the "Office test" key and the Startup folders. Each flagged entry
+// hijacks, the "Office test" key and the Startup folders; plus the less-known
+// family: AeDebug / .NET / WER debuggers, SetupExecute / PlatformExecute,
+// BootVerificationProgram, LSA extensions, Winlogon mpnotify, DNS
+// ServerLevelPluginDll, WinSock AutodialDLL, Group Policy extensions,
+// TelemetryController commands, search-indexer DLL overrides, service
+// FailureCommand, AMSI providers, .NET profiler / start-up hook variables,
+// custom shim databases and the programs they apply to, Setup's
+// ErrorHandler.cmd and PowerShell profiles. Each flagged entry
 // carries a reason (user-writable path / non-default value / rare location).
 // A transparent subset of what Sysinternals Autoruns inspects.
 // --sig verifies the signature of what each entry runs (Autoruns' "Verify

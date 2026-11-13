@@ -239,6 +239,13 @@ static int def_security_providers(const char *s)
     return in_list_ci(s, d);
 }
 
+// For lists that are empty on a stock system: nothing is a default.
+static int def_never(const char *s)
+{
+    (void)s;
+    return 0;
+}
+
 static int def_print_processor(const char *s)
 {
     return _stricmp(s, "winprint.dll") == 0;
@@ -736,6 +743,153 @@ int cmd_autoruns(int argc, char **argv)
                "HKCU\\Office test", 1, NULL, &c);
     read_value(HKEY_LOCAL_MACHINE, "Software\\Microsoft\\Office test\\Special\\Perf", "",
                "HKLM\\Office test", 1, NULL, &c);
+
+    // ---- Less-known locations (the "beyond the Run key" family) ---------------
+    // Debuggers Windows starts by itself: AeDebug when any program crashes
+    // (T1546.012 family), the managed-code equivalent, and the two Windows
+    // Error Reporting hooks. The first two exist on developer machines; the
+    // WER ones are not set by Windows.
+    static const char AEDEBUG[]     = "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\AeDebug";
+    static const char AEDEBUG_WOW[] = "SOFTWARE\\Wow6432Node\\Microsoft\\Windows NT\\CurrentVersion\\AeDebug";
+    read_value(HKEY_LOCAL_MACHINE, AEDEBUG,     "Debugger", "AeDebug",         0, NULL, &c);
+    read_value(HKEY_LOCAL_MACHINE, AEDEBUG_WOW, "Debugger", "AeDebug (WOW64)", 0, NULL, &c);
+    read_value(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\.NETFramework", "DbgManagedDebugger", ".NET DbgManagedDebugger", 0, NULL, &c);
+    read_value(HKEY_LOCAL_MACHINE, "SOFTWARE\\Wow6432Node\\Microsoft\\.NETFramework", "DbgManagedDebugger",
+               ".NET DbgManagedDebugger (WOW64)", 0, NULL, &c);
+    static const char WER[] = "SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting";
+    read_value(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\Hangs", "Debugger", "WER Hangs Debugger", 1, NULL, &c);
+    read_value(HKEY_LOCAL_MACHINE, WER, "ReflectDebugger", "WER ReflectDebugger", 1, NULL, &c);
+
+    // More native programs smss.exe runs before Windows is up; empty on a
+    // stock system, so any entry is non-default.
+    read_multi_sz(HKEY_LOCAL_MACHINE, SESSMGR, "SetupExecute",    "SetupExecute",    def_never, &c);
+    read_multi_sz(HKEY_LOCAL_MACHINE, SESSMGR, "PlatformExecute", "PlatformExecute", def_never, &c);
+    // A program the Service Control Manager starts to "verify" each boot.
+    read_value(HKEY_LOCAL_MACHINE, "SYSTEM\\CurrentControlSet\\Control\\BootVerificationProgram", "ImagePath",
+               "BootVerificationProgram", 1, NULL, &c);
+
+    // DLLs lsass.exe loads as extensions (stock: lsasrv.dll, efslsaext.dll ...,
+    // all bare names from System32).
+    read_multi_sz(HKEY_LOCAL_MACHINE, "SYSTEM\\CurrentControlSet\\Control\\LsaExtensionConfig\\LsaSrv", "Extensions",
+                  "LSA extensions", asep_system_dir_default, &c);
+    // A DLL winlogon.exe hands the user's password to at logon.
+    read_value(HKEY_LOCAL_MACHINE, WINLOGON, "mpnotify", "HKLM\\...\\Winlogon", 1, NULL, &c);
+    // A DLL the DNS Server service loads as SYSTEM (domain controllers).
+    read_value(HKEY_LOCAL_MACHINE, "SYSTEM\\CurrentControlSet\\Services\\DNS\\Parameters", "ServerLevelPluginDll",
+               "DNS ServerLevelPluginDll", 1, NULL, &c);
+    // The DLL Winsock loads to trigger dial-up connections (stock: System32\rasadhlp.dll).
+    read_value(HKEY_LOCAL_MACHINE, "SYSTEM\\CurrentControlSet\\Services\\WinSock2\\Parameters", "AutodialDLL",
+               "WinSock AutodialDLL", 0, asep_system_dir_default, &c);
+
+    // Group Policy client-side extensions: DLLs winlogon / gpsvc load on every
+    // policy refresh. All stock ones are in System32.
+    enum_subkey_value(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon\\GPExtensions",
+                      "DllName", "GP extensions", 0, asep_system_dir_default, &c);
+    // Compatibility telemetry: commands CompatTelRunner.exe runs on its schedule.
+    enum_subkey_value(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\AppCompatFlags\\TelemetryController",
+                      "Command", "TelemetryController", 0, asep_system_dir_default, &c);
+    // Word breakers / stemmers the search indexer loads per language.
+    enum_subkey_value(HKEY_LOCAL_MACHINE, "SYSTEM\\CurrentControlSet\\Control\\ContentIndex\\Language",
+                      "StemmerDLLPathOverride", "ContentIndex stemmer override", 1, NULL, &c);
+    enum_subkey_value(HKEY_LOCAL_MACHINE, "SYSTEM\\CurrentControlSet\\Control\\ContentIndex\\Language",
+                      "WBDLLPathOverride", "ContentIndex word-breaker override", 1, NULL, &c);
+
+    // Service recovery: a command the Service Control Manager runs when the
+    // service FAILS - persistence that never shows as a service image.
+    enum_subkey_value(HKEY_LOCAL_MACHINE, "SYSTEM\\CurrentControlSet\\Services", "FailureCommand",
+                      "Service FailureCommand", 0, NULL, &c);
+
+    // AMSI providers: COM DLLs every AMSI-aware host (PowerShell, script
+    // hosts, Office) loads and hands each script to. Registered by CLSID.
+    {
+        regsrc *s;
+        rkey k;
+        if (open_at(&c, HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\AMSI\\Providers", &s, &k)) {
+            static struct subnames am;
+            am.count = 0;
+            rk_subkeys(s, &k, collect_sub, &am);
+            rk_close(&k);
+            for (int i = 0; i < am.count; i++) {
+                char key[400], dll[1024];
+                snprintf(key, sizeof key, "SOFTWARE\\Classes\\CLSID\\%s\\InprocServer32", am.n[i]);
+                regsrc *cs;
+                rkey ck;
+                if (!open_at(&c, HKEY_LOCAL_MACHINE, key, &cs, &ck)) {
+                    emit_reason(&c, "AMSI providers", am.n[i], "(CLSID not registered)", NULL);
+                    continue;
+                }
+                if (rk_get_str(cs, &ck, "", dll, sizeof dll) && dll[0]) {
+                    // Defender's provider lives under ProgramData, in a folder
+                    // only SYSTEM can write: known-good comes first here.
+                    if (asep_amsi_default(dll)) emit_reason(&c, "AMSI providers", am.n[i], dll, NULL);
+                    else emit_ex(&c, "AMSI providers", am.n[i], dll, 0, def_never);
+                }
+                rk_close(&ck);
+            }
+        }
+    }
+
+    // .NET start-up hooks set through environment variables: a profiler DLL
+    // or start-up assembly loaded into EVERY .NET process (T1574.012).
+    // Monitoring products set them machine-wide; per user they are unusual.
+    {
+        static const char *const vars[] = { "COR_PROFILER_PATH", "COR_PROFILER_PATH_32", "COR_PROFILER_PATH_64", "COR_PROFILER",
+                                            "CORECLR_PROFILER_PATH", "CORECLR_PROFILER_PATH_32", "CORECLR_PROFILER_PATH_64",
+                                            "CORECLR_PROFILER", "DOTNET_STARTUP_HOOKS", NULL };
+        for (int i = 0; vars[i]; i++) {
+            read_value(HKEY_CURRENT_USER, "Environment", vars[i], "HKCU\\Environment (.NET)", 1, NULL, &c);
+            read_value(HKEY_LOCAL_MACHINE, "SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment", vars[i],
+                       "System environment (.NET)", 0, NULL, &c);
+        }
+    }
+
+    // Custom application-compatibility (shim) databases (T1546.011): an
+    // installed .sdb can inject a DLL into, or redirect, the programs it names.
+    // Windows' own databases are not registered here.
+    {
+        static const char SDB[]  = "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\AppCompatFlags\\InstalledSDB";
+        static const char CUST[] = "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\AppCompatFlags\\Custom";
+        enum_subkey_value(HKEY_LOCAL_MACHINE, SDB, "DatabasePath", "Custom shim database", 1, NULL, &c);
+        regsrc *s;
+        rkey k;
+        if (open_at(&c, HKEY_LOCAL_MACHINE, CUST, &s, &k)) {
+            static struct subnames sh;
+            sh.count = 0;
+            rk_subkeys(s, &k, collect_sub, &sh);
+            rk_close(&k);
+            for (int i = 0; i < sh.count; i++) {
+                emit_reason(&c, "Shimmed program", sh.n[i], "(a custom shim database applies to this program)",
+                            "custom shim database applied (T1546.011)");
+            }
+        }
+    }
+
+    // Files that run by merely existing (live system only).
+    if (!offline) {
+        char win[MAX_PATH], path[MAX_PATH * 2];
+        if (GetWindowsDirectoryA(win, sizeof win) > 0) {
+            // Run by Windows Setup when an upgrade / repair hits an error.
+            snprintf(path, sizeof path, "%s\\Setup\\Scripts\\ErrorHandler.cmd", win);
+            if (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) emit_ex(&c, "Setup ErrorHandler.cmd", "ErrorHandler.cmd", path, 1, NULL);
+            // PowerShell profiles: scripts every PowerShell start runs. The
+            // machine-wide ones need admin to create and are rare.
+            static const char *const names[] = { "profile.ps1", "Microsoft.PowerShell_profile.ps1", NULL };
+            for (int i = 0; names[i]; i++) {
+                snprintf(path, sizeof path, "%s\\System32\\WindowsPowerShell\\v1.0\\%s", win, names[i]);
+                if (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) emit_reason(&c, "PowerShell profile (all users)", names[i], path, "machine-wide PowerShell profile: runs in every PowerShell session");
+            }
+            char home[MAX_PATH];
+            if (GetEnvironmentVariableA("USERPROFILE", home, sizeof home) > 0) {
+                static const char *const dirs[] = { "Documents\\WindowsPowerShell", "Documents\\PowerShell", NULL };
+                for (int d = 0; dirs[d]; d++) {
+                    for (int i = 0; names[i]; i++) {
+                        snprintf(path, sizeof path, "%s\\%s\\%s", home, dirs[d], names[i]);
+                        if (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) emit_reason(&c, "PowerShell profile (user)", names[i], path, NULL);
+                    }
+                }
+            }
+        }
+    }
 
     // Startup folders: per-user and all-users. Files here run at logon.
     if (!offline) {

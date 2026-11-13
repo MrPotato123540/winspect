@@ -1926,6 +1926,29 @@ int main(void)
 #undef SYS
     }
 
+    // --- autoruns: "lives in the Windows system folders" default -----------------
+    {
+        static const struct { const char *v; int def; } sd[] = {
+            { "rasadhlp.dll", 1 }, { "C:\\Windows\\System32\\rasadhlp.dll", 1 }, { "c:\\windows\\syswow64\\x.dll", 1 },
+            { "%SystemRoot%\\System32\\gptext.dll", 1 }, { "%windir%\\system32\\CompatTelRunner.exe -m:appraiser.dll -f:DoScheduledTelemetryRun", 1 },
+            { "\"C:\\Windows\\System32\\x.exe\" /arg C:\\Users\\bob\\file", 1 }, { "lsasrv.dll", 1 }, { "D:\\Windows\\System32\\a.dll", 1 },
+            { "C:\\Windows\\System32\\sub\\evil.dll", 0 }, { "C:\\Users\\bob\\AppData\\x.dll", 0 }, { "C:\\ProgramData\\x.dll", 0 },
+            { "C:\\Windows\\Temp\\x.dll", 0 }, { "\\\\10.0.0.5\\share\\x.dll", 0 }, { "C:\\Windows\\System32evil\\x.dll", 0 },
+            { "C:x.dll", 0 }, { "", 0 }, { "..\\x.dll", 0 }, { "C:\\Evil\\System32\\x.dll", 0 },
+            { "C:\\Users\\bob\\run.exe C:\\Windows\\System32\\x.dll", 0 } };
+        for (size_t i = 0; i < sizeof sd / sizeof sd[0]; i++) {
+            char label[48];
+            snprintf(label, sizeof label, "asep system dir %zu", i);
+            check_int(label, asep_system_dir_default(sd[i].v), sd[i].def);
+        }
+        check_int("amsi defender platform", asep_amsi_default("\"C:\\ProgramData\\Microsoft\\Windows Defender\\Platform\\4.18.2\\MpOav.dll\""), 1);
+        check_int("amsi defender program files", asep_amsi_default("C:\\Program Files\\Windows Defender\\MpOav.dll"), 1);
+        check_int("amsi look-alike folder", asep_amsi_default("C:\\Program Files\\Microsoft\\Windows Defender\\MpOav.dll"), 0);
+        check_int("amsi system32", asep_amsi_default("%windir%\\system32\\amsi.dll"), 1);
+        check_int("amsi elsewhere", asep_amsi_default("C:\\Users\\Public\\Microsoft\\Windows Defender\\x.dll"), 0);
+        check_int("amsi programdata other", asep_amsi_default("C:\\ProgramData\\evil\\amsi.dll"), 0);
+    }
+
     fprintf(stderr, "\n%s (%d failure%s)\n",
             failures == 0 ? "ALL PASSED" : "FAILED", failures, failures == 1 ? "" : "s");
     return failures == 0 ? 0 : 1;
