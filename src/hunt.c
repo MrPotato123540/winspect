@@ -96,6 +96,37 @@ static void query(hproc *p, NtQIP_t ntqip)
     CloseHandle(h);
 }
 
+// OriginalFilename from a file's version resource (first translation).
+// 1 if the file has one.
+static int original_filename(const char *path, char *out, size_t n)
+{
+    out[0] = '\0';
+    WCHAR wpath[1024];
+    if (MultiByteToWideChar(CP_UTF8, 0, path, -1, wpath, 1024) == 0) return 0;
+    DWORD handle = 0, size = GetFileVersionInfoSizeW(wpath, &handle);
+    if (size == 0 || size > (1u << 20)) return 0;
+    void *buf = malloc(size);
+    if (buf == NULL) return 0;
+    int ok = 0;
+    if (GetFileVersionInfoW(wpath, 0, size, buf)) {
+        struct { WORD lang, cp; } *tr = NULL;
+        UINT tl = 0;
+        WCHAR key[80];
+        WCHAR *val = NULL;
+        UINT vl = 0;
+        if (VerQueryValueW(buf, L"\\VarFileInfo\\Translation", (void **)&tr, &tl) && tl >= 4) {
+            swprintf(key, 80, L"\\StringFileInfo\\%04x%04x\\OriginalFilename", tr[0].lang, tr[0].cp);
+            if (VerQueryValueW(buf, key, (void **)&val, &vl) && vl > 0 && val != NULL) {
+                WideCharToMultiByte(CP_UTF8, 0, val, -1, out, (int)n, NULL, NULL);
+                out[n - 1] = '\0';
+                ok = out[0] != '\0';
+            }
+        }
+    }
+    free(buf);
+    return ok;
+}
+
 // Case-insensitive "path starts with dir\".
 static int under_dir(const char *path, const char *dir)
 {
@@ -253,6 +284,15 @@ int cmd_hunt(int argc, char **argv)
                 lineage_started_late(p->name, (p->created - boot) / 10000000ULL)) {
             snprintf(finding, sizeof finding, "%s started %llu min after boot (boot-time process)",
                      p->name, (unsigned long long)((p->created - boot) / 10000000ULL / 60));
+        }
+        if (finding[0] == '\0' && p->path[0]) {
+            // A renamed system tool: the file's version resource still says
+            // what it really is ("OriginalFilename"), whatever it is called now.
+            char orig[128];
+            if (original_filename(p->path, orig, sizeof orig)) {
+                const char *tool = asep_renamed_tool(orig, p->name);
+                if (tool) snprintf(finding, sizeof finding, "%s is %s under another name (OriginalFilename %s)", p->name, tool, orig);
+            }
         }
         report(&c, p, parent, finding[0] ? finding : NULL);
     }

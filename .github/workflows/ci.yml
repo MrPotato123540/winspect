@@ -362,6 +362,17 @@ jobs:
               throw "verify patch report ($mode): $($t | ConvertTo-Json -Compress -Depth 5)"
             }
           }
+          # hunt: a copy of cmd.exe under another name is still cmd.exe by its
+          # version resource; the real cmd.exe is not reported for that.
+          $ren = Join-Path $env:TEMP "svc_update.exe"
+          Copy-Item C:\Windows\System32\cmd.exe $ren
+          $rp = Start-Process $ren -ArgumentList "/c","ping -n 20 127.0.0.1" -PassThru -WindowStyle Hidden
+          Start-Sleep 2
+          $hj = @(& $exe hunt --all --json | ConvertFrom-Json)
+          Stop-Process -Id $rp.Id -Force -ErrorAction SilentlyContinue
+          $hit = $hj | Where-Object { $_.name -eq "svc_update.exe" }
+          if (-not $hit -or $hit.finding -notlike "*is cmd.exe under another name*") { throw "hunt renamed tool: $($hit | ConvertTo-Json -Compress)" }
+          if ($hj | Where-Object { $_.name -eq "cmd.exe" -and $_.finding -like "*under another name*" }) { throw "hunt: the real cmd.exe reported as renamed" }
           # logons: on an elevated runner the Security log is readable. If
           # Get-WinEvent sees logon events, winspect must list logons too, and
           # the offline reader must agree with the live API on an exported log.

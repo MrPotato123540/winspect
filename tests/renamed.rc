@@ -1,0 +1,20 @@
+// Version resource for the "renamed system tool" test: the file claims, in
+// its version resource, to be cmd.exe - as a real copy of cmd.exe would -
+// while the test gives it another file name. Linked to tests/holder.c.
+1 VERSIONINFO
+FILEVERSION 1,0,0,0
+PRODUCTVERSION 1,0,0,0
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "FileDescription", "winspect test helper"
+            VALUE "OriginalFilename", "Cmd.Exe"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 0x04B0
+    END
+END

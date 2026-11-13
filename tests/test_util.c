@@ -1949,6 +1949,20 @@ int main(void)
         check_int("amsi programdata other", asep_amsi_default("C:\\ProgramData\\evil\\amsi.dll"), 0);
     }
 
+    // --- hunt: system tools under another name -----------------------------------
+    {
+        check_str("renamed cmd", asep_renamed_tool("Cmd.Exe", "svc_update.exe"), "cmd.exe");
+        check_int("cmd as cmd", asep_renamed_tool("Cmd.Exe", "CMD.EXE") == NULL, 1);
+        check_str("renamed psexec", asep_renamed_tool("psexec.c", "remote-admin.exe"), "PsExec");
+        check_int("psexec64", asep_renamed_tool("psexec.c", "PsExec64.exe") == NULL, 1);
+        check_str("renamed procdump", asep_renamed_tool("procdump", "dump.exe"), "ProcDump");
+        check_int("mui copy", asep_renamed_tool("cmd.exe", "cmd.exe.mui") == NULL, 1);
+        check_int("other software is not judged", asep_renamed_tool("setup.exe", "MyApp-1.2-installer.exe") == NULL, 1);
+        check_int("prefix is not a match", asep_renamed_tool("cmd.exe.bak", "x.exe") == NULL && asep_renamed_tool("cmd", "x.exe") == NULL, 1);
+        check_int("empty / null", asep_renamed_tool("", "x.exe") == NULL && asep_renamed_tool(NULL, "x.exe") == NULL && asep_renamed_tool("cmd.exe", "") == NULL, 1);
+        check_str("pwsh host", asep_renamed_tool("pwsh.dll", "updater.exe"), "pwsh");
+    }
+
     fprintf(stderr, "\n%s (%d failure%s)\n",
             failures == 0 ? "ALL PASSED" : "FAILED", failures, failures == 1 ? "" : "s");
     return failures == 0 ? 0 : 1;

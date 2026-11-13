@@ -1482,5 +1482,35 @@ try:
         print('checked posture  (port proxy, hidden account, null-session pipe, WSUS over HTTP, RDP shadowing)')
 except Exception as e:
     print('FAIL posture list checks:', e); fails += 1
+
+# hunt, renamed system tool: a helper whose version resource says
+# OriginalFilename "Cmd.Exe" (what a copy of cmd.exe carries) runs as
+# svc_update.exe -> flagged; the same binary named cmd.exe is not flagged for
+# that reason.
+windres = cc.replace('gcc', 'windres') if cc else None
+if cc and shutil.which(windres):
+    res = os.path.join(fake, 'renamed.res.o')
+    subprocess.run([windres, os.path.join(here, '..', 'renamed.rc'), '-O', 'coff', '-o', res], check=True)
+    for nm in ('svc_update.exe', 'cmd.exe'):
+        subprocess.run([cc, os.path.join(here, '..', 'holder.c'), res, '-o', os.path.join(fake, nm)], check=True)
+    hs = [subprocess.Popen([WINE, 'C:\\fake\\' + nm, r'C:\users\Public\wsfind_marker.txt', 'block'], env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                           stdin=subprocess.DEVNULL, text=True) for nm in ('svc_update.exe', 'cmd.exe')]
+    for h_ in hs:
+        h_.stdout.readline()
+    try:
+        rc, out, err = wine([exe, 'hunt', '--all', '--json'])
+        hj = {r['name'].lower(): r for r in json.loads(out) if r.get('path', '').lower().startswith('c:\\fake\\')}
+        a, b = hj.get('svc_update.exe'), hj.get('cmd.exe')
+        if not a or 'is cmd.exe under another name' not in a.get('finding', ''):
+            print(f'FAIL hunt renamed tool: {a}'); fails += 1
+        elif not b or 'under another name' in b.get('finding', ''):
+            print(f'FAIL hunt: a file really named cmd.exe flagged as renamed: {b}'); fails += 1
+        else:
+            print('checked hunt  (system tool under another file name flagged by its version resource)')
+    except Exception as e:
+        print('FAIL hunt renamed tool check:', e); fails += 1
+    for h_ in hs:
+        h_.kill()
+    wine(['taskkill', '/f', '/im', 'svc_update.exe']); wine(['taskkill', '/f', '/im', 'cmd.exe'])
 print(f'\n{fails} failure(s)')
 sys.exit(1 if fails else 0)

@@ -350,6 +350,52 @@ int asep_amsi_default(const char *dll)
            ioc_contains_ci(dll, ":\\Program Files\\Windows Defender\\") || ioc_contains_ci(dll, "%ProgramFiles%\\Windows Defender\\");
 }
 
+const char *asep_renamed_tool(const char *original, const char *name)
+{
+    // OriginalFilename as shipped -> the tool's name -> file names it legitimately has.
+    static const struct { const char *orig, *tool, *names[4]; } t[] = {
+        { "cmd.exe",        "cmd.exe",        { "cmd.exe", NULL } },
+        { "powershell.exe", "powershell.exe", { "powershell.exe", NULL } },
+        { "pwsh.dll",       "pwsh",           { "pwsh.dll", "pwsh.exe", NULL } },
+        { "powershell_ise.exe", "powershell_ise.exe", { "powershell_ise.exe", NULL } },
+        { "rundll32.exe",   "rundll32.exe",   { "rundll32.exe", NULL } },
+        { "regsvr32.exe",   "regsvr32.exe",   { "regsvr32.exe", NULL } },
+        { "mshta.exe",      "mshta.exe",      { "mshta.exe", NULL } },
+        { "wscript.exe",    "wscript.exe",    { "wscript.exe", NULL } },
+        { "cscript.exe",    "cscript.exe",    { "cscript.exe", NULL } },
+        { "certutil.exe",   "certutil.exe",   { "certutil.exe", NULL } },
+        { "bitsadmin.exe",  "bitsadmin.exe",  { "bitsadmin.exe", NULL } },
+        { "msbuild.exe",    "MSBuild.exe",    { "msbuild.exe", NULL } },
+        { "installutil.exe","InstallUtil.exe",{ "installutil.exe", NULL } },
+        { "regasm.exe",     "RegAsm.exe",     { "regasm.exe", NULL } },
+        { "wmic.exe",       "wmic.exe",       { "wmic.exe", NULL } },
+        { "net.exe",        "net.exe",        { "net.exe", NULL } },
+        { "net1.exe",       "net1.exe",       { "net1.exe", NULL } },
+        { "schtasks.exe",   "schtasks.exe",   { "schtasks.exe", NULL } },
+        { "reg.exe",        "reg.exe",        { "reg.exe", NULL } },
+        { "sc.exe",         "sc.exe",         { "sc.exe", NULL } },
+        { "msiexec.exe",    "msiexec.exe",    { "msiexec.exe", NULL } },
+        { "curl.exe",       "curl.exe",       { "curl.exe", NULL } },
+        { "psexec.c",       "PsExec",         { "psexec.exe", "psexec64.exe", NULL } },
+        { "psexesvc.exe",   "PsExec service", { "psexesvc.exe", NULL } },
+        { "procdump",       "ProcDump",       { "procdump.exe", "procdump64.exe", "procdump64a.exe", NULL } },
+        { "rclone.exe",     "rclone",         { "rclone.exe", NULL } },
+    };
+    if (original == NULL || name == NULL || original[0] == '\0' || name[0] == '\0') return NULL;
+    size_t ol = strlen(original);
+    for (size_t i = 0; i < sizeof t / sizeof t[0]; i++) {
+        if (strlen(t[i].orig) != ol || _strnicmp_portable(original, t[i].orig, ol) != 0) continue;
+        // A localized resource copy ("cmd.exe.mui") is the same tool's own file.
+        size_t nl = strlen(name);
+        if (nl > 4 && _strnicmp_portable(name + nl - 4, ".mui", 4) == 0) return NULL;
+        for (int k = 0; k < 4 && t[i].names[k]; k++) {
+            if (strlen(t[i].names[k]) == nl && _strnicmp_portable(name, t[i].names[k], nl) == 0) return NULL;
+        }
+        return t[i].tool;
+    }
+    return NULL;
+}
+
 struct lineage_rule {
     const char *child;
     const char *parents[3];     // expected parent names (NULL-terminated)

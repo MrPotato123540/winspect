@@ -75,6 +75,17 @@ int asep_system_dir_default(const char *cmd);
 // every script handed to AMSI and can blind it (T1562.001).
 int asep_amsi_default(const char *dll);
 
+// A system tool running under another file name. original is the
+// OriginalFilename string of the file's version resource, name the file's
+// actual name. Returns the tool's real name when original is one of the
+// Windows command-line / script hosts and admin tools that attackers copy
+// and rename to dodge name-based rules (cmd.exe, powershell.exe,
+// rundll32.exe, mshta.exe, certutil.exe, PsExec, ProcDump ...) AND name is
+// not one of that tool's own names; else NULL. Other programs are never
+// judged: plenty of legitimate software ships with a mismatching
+// OriginalFilename.
+const char *asep_renamed_tool(const char *original, const char *name);
+
 // 1 if an image path uses the name of a core Windows binary that only ever
 // lives directly in System32 / SysWOW64 (see lineage_system32_only) but sits
 // somewhere else - including a SUBdirectory of System32, a favourite trick:

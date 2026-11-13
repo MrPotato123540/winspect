@@ -412,7 +412,9 @@ static const struct { const char *name, *text; } usage_table[] = {
         "must be unique (two lsass.exe), core binary names running from outside\n"
         "System32 (masquerading), svchost without a \"-k\" service group, core\n"
         "processes not running as SYSTEM, and boot-time processes (lsass, services,\n"
-        "wininit) that started long after boot. Rules come\n"
+        "wininit) that started long after boot, and system tools running under\n"
+        "another file name (the version resource still says cmd.exe / PsExec /\n"
+        "rundll32 ... while the file is called something else). Rules come\n"
         "from the public SANS \"Hunt Evil\" guidance. Read-only. Usage:\n"
         "  winspect hunt [--all] [--json | --csv]\n" },
     { "posture",
