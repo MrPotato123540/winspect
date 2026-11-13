@@ -1511,5 +1511,47 @@ if cc and shutil.which(windres):
     for h_ in hs:
         h_.kill()
     wine(['taskkill', '/f', '/im', 'svc_update.exe']); wine(['taskkill', '/f', '/im', 'cmd.exe'])
+
+# capability: ConsentStore entries in the live registry (machine and user)
+# and in an offline SOFTWARE hive. A program from Temp that used the
+# microphone is flagged; Zoom from Program Files and a packaged camera app
+# are not; one entry is still in use (stop = 0); a never-used entry shows
+# only with --all.
+CAM = r'SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore'
+def cam(root, cap, entry, start, stop, nonpackaged=True):
+    key = root + CAM + '\\' + cap + ('\\NonPackaged\\' if nonpackaged else '\\') + entry
+    reg(key, '/v', 'Value', '/t', 'REG_SZ', '/d', 'Allow')
+    reg(key, '/v', 'LastUsedTimeStart', '/t', 'REG_QWORD', '/d', str(start))
+    reg(key, '/v', 'LastUsedTimeStop', '/t', 'REG_QWORD', '/d', str(stop))
+cam(HKCU, 'microphone', 'C:#Users#bob#AppData#Local#Temp#rat.exe', OT, OT + 600000000)
+cam(HKCU, 'microphone', 'C:#Program Files#Zoom#bin#Zoom.exe', OT + 10000000, 0)
+cam(HKLM, 'webcam', 'Microsoft.WindowsCamera_8wekyb3d8bbwe', OT, OT + 10000000, nonpackaged=False)
+cam(HKCU, 'location', 'C:#Windows#explorer.exe', 0, 0)
+csw = K('ROOT', [], [K('Microsoft', [], [K('Windows', [], [K('CurrentVersion', [], [K('CapabilityAccessManager', [], [K('ConsentStore', [], [
+    K('webcam', [], [K('NonPackaged', [], [K('C:#Users#Public#cam.exe', [
+        rw.Value('LastUsedTimeStart', 11, struct.pack('<Q', OT)), rw.Value('LastUsedTimeStop', 11, struct.pack('<Q', OT + 50000000))])])])])])])])])])
+with open(os.path.join(off, 'SOFTWARE_cam'), 'wb') as f:
+    f.write(rw.build(csw))
+try:
+    rc, out, err = wine([exe, 'capability', '--json'])
+    cj = {r['app']: r for r in json.loads(out)}
+    rat, zoom, pkg = cj.get(r'C:\Users\bob\AppData\Local\Temp\rat.exe'), cj.get(r'C:\Program Files\Zoom\bin\Zoom.exe'), cj.get('Microsoft.WindowsCamera_8wekyb3d8bbwe')
+    rc2, out2, err2 = wine([exe, 'capability', '--all', '--csv'])
+    rc3, out3, err3 = wine([exe, 'capability', '--software', r'C:\offline\SOFTWARE_cam', '--flagged', '--json'])
+    offl = json.loads(out3)
+    if not rat or not rat['suspicious'] or rat['last_start'] != '2024-01-17 21:20:00' or rat['last_stop'] != '2024-01-17 21:21:00' or rat['scope'] != 'user':
+        print(f'FAIL capability: Temp program that used the microphone: {rat}'); fails += 1
+    elif not zoom or zoom['suspicious'] or not zoom['in_use'] or zoom['last_stop'] != '':
+        print(f'FAIL capability: in-use entry: {zoom}'); fails += 1
+    elif not pkg or pkg['suspicious'] or pkg['packaged'] is not True or pkg['scope'] != 'system':
+        print(f'FAIL capability: packaged app: {pkg}'); fails += 1
+    elif r'C:\Windows\explorer.exe' in cj or 'explorer.exe' not in out2:
+        print('FAIL capability: never-used entry must show only with --all'); fails += 1
+    elif len(offl) != 1 or offl[0]['app'] != r'C:\Users\Public\cam.exe' or 'camera' not in offl[0]['reason']:
+        print(f'FAIL capability --software: {offl}'); fails += 1
+    else:
+        print('checked capability  (live + offline hive: Temp program on the microphone flagged, in-use entry, packaged app)')
+except Exception as e:
+    print('FAIL capability check:', e); fails += 1
 print(f'\n{fails} failure(s)')
 sys.exit(1 if fails else 0)

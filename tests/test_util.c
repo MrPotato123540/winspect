@@ -1963,6 +1963,21 @@ int main(void)
         check_str("pwsh host", asep_renamed_tool("pwsh.dll", "updater.exe"), "pwsh");
     }
 
+    // --- capability: ConsentStore entries -----------------------------------------
+    {
+        char ap[64];
+        cam_app_path("C:#Users#bob#AppData#Local#Temp#rat.exe", ap, sizeof ap);
+        check_str("cam path", ap, "C:\\Users\\bob\\AppData\\Local\\Temp\\rat.exe");
+        cam_app_path("C:#aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ap, 8);
+        check_str("cam path clipped", ap, "C:\\aaaa");
+        check_int("cam mic from temp", cam_reason("microphone", "C:\\Users\\bob\\AppData\\Local\\Temp\\rat.exe", 1) != NULL, 1);
+        check_int("cam webcam from temp", cam_reason("Webcam", "C:\\Users\\bob\\AppData\\Local\\Temp\\rat.exe", 1) != NULL, 1);
+        check_int("cam mic from program files", cam_reason("microphone", "C:\\Program Files\\Zoom\\bin\\Zoom.exe", 1) == NULL, 1);
+        check_int("cam location from temp (not a recording device)", cam_reason("location", "C:\\Users\\bob\\AppData\\Local\\Temp\\x.exe", 1) == NULL, 1);
+        check_int("cam packaged app", cam_reason("microphone", "Microsoft.WindowsCamera_8wekyb3d8bbwe", 0) == NULL, 1);
+        check_int("cam similar name", cam_reason("microphones", "C:\\Users\\bob\\AppData\\Local\\Temp\\x.exe", 1) == NULL, 1);
+    }
+
     fprintf(stderr, "\n%s (%d failure%s)\n",
             failures == 0 ? "ALL PASSED" : "FAILED", failures, failures == 1 ? "" : "s");
     return failures == 0 ? 0 : 1;

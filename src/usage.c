@@ -122,6 +122,21 @@ static const struct { const char *name, *text; } usage_table[] = {
         "hashes are never read; group membership is not shown offline). Read-only.\n"
         "Usage:\n"
         "  winspect users [--sam <SAM>] [--flagged] [--json | --csv]\n" },
+    { "capability",
+        "winspect capability - which programs used the microphone, the camera, the\n"
+        "location service and the other privacy-guarded capabilities, and when.\n"
+        "Windows records it itself (Settings > Privacy shows the same data) in the\n"
+        "Capability Access Manager \"ConsentStore\": per capability one key per\n"
+        "packaged app and, under NonPackaged, one per desktop program (its path with\n"
+        "'#' for '\\'), each with LastUsedTimeStart / LastUsedTimeStop. A stop time\n"
+        "of zero means the capability is in use right now. Machine-wide (HKLM) and\n"
+        "per-user (HKCU) stores are read. Flagged: a desktop program in a\n"
+        "user-writable folder that used the microphone or the camera - how a\n"
+        "remote-access tool or stalkerware shows up here. Entries that never used\n"
+        "the capability are hidden unless --all. Offline: --software / --ntuser read\n"
+        "hive files. Read-only. Usage:\n"
+        "  winspect capability [--all] [--find <text>] [--flagged] [--json | --csv]\n"
+        "  winspect capability [--software <SOFTWARE>] [--ntuser <NTUSER.DAT>] ...\n" },
     { "office",
         "winspect office - Microsoft Office macro trust, per user:\n"
         "  documents  every document the user clicked \"Enable Editing\" or \"Enable\n"

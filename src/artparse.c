@@ -350,6 +350,23 @@ int asep_amsi_default(const char *dll)
            ioc_contains_ci(dll, ":\\Program Files\\Windows Defender\\") || ioc_contains_ci(dll, "%ProgramFiles%\\Windows Defender\\");
 }
 
+void cam_app_path(const char *key, char *out, size_t n)
+{
+    size_t i = 0;
+    for (; key[i] && i + 1 < n; i++) out[i] = key[i] == '#' ? '\\' : key[i];
+    out[i] = '\0';
+}
+
+const char *cam_reason(const char *capability, const char *app, int nonpackaged)
+{
+    if (!nonpackaged || !ioc_user_writable(app)) return NULL;
+    if (strlen(capability) == 10 && _strnicmp_portable(capability, "microphone", 10) == 0)
+        return "program in a user-writable dir used the microphone";
+    if (strlen(capability) == 6 && _strnicmp_portable(capability, "webcam", 6) == 0)
+        return "program in a user-writable dir used the camera";
+    return NULL;
+}
+
 const char *asep_renamed_tool(const char *original, const char *name)
 {
     // OriginalFilename as shipped -> the tool's name -> file names it legitimately has.

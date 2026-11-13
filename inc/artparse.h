@@ -75,6 +75,14 @@ int asep_system_dir_default(const char *cmd);
 // every script handed to AMSI and can blind it (T1562.001).
 int asep_amsi_default(const char *dll);
 
+// ---- Capability Access Manager (microphone / camera / location usage) ----------
+// A NonPackaged key name is the program's path with '#' for '\\':
+// "C:#Users#bob#AppData#x.exe" -> "C:\Users\bob\AppData\x.exe".
+void cam_app_path(const char *key, char *out, size_t n);
+// Why a usage entry deserves a look, or NULL: a desktop (non-packaged)
+// program in a user-writable folder that used the microphone or the camera.
+const char *cam_reason(const char *capability, const char *app, int nonpackaged);
+
 // A system tool running under another file name. original is the
 // OriginalFilename string of the file's version resource, name the file's
 // actual name. Returns the tool's real name when original is one of the
