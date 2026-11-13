@@ -1451,5 +1451,36 @@ try:
         print('checked autoruns  (14 less-known locations flagged, 5 stock-looking controls not, LSA extension list split)')
 except Exception as e:
     print('FAIL autoruns new locations check:', e); fails += 1
+
+# posture, list checks: a port forward to an internal RDP host, a hidden
+# account, an anonymous pipe, WSUS over HTTP and RDP shadowing with full
+# control must each be a WARN with the detail in the text.
+reg(CCS + r'\Services\PortProxy\v4tov4\tcp', '/v', '0.0.0.0/3340', '/t', 'REG_SZ', '/d', '10.0.0.5/3389')
+reg(NT + r'\Winlogon\SpecialAccounts\UserList', '/v', 'support$', '/t', 'REG_DWORD', '/d', '0')
+reg(NT + r'\Winlogon\SpecialAccounts\UserList', '/v', 'visible', '/t', 'REG_DWORD', '/d', '1')
+reg(CCS + r'\Services\LanmanServer\Parameters', '/v', 'NullSessionPipes', '/t', 'REG_MULTI_SZ', '/d', r'netlogon\0evilpipe')
+reg(HKLM + r'SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate', '/v', 'WUServer', '/t', 'REG_SZ', '/d', 'http://wsus.corp.example:8530')
+reg(HKLM + r'SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU', '/v', 'UseWUServer', '/t', 'REG_DWORD', '/d', '1')
+reg(HKLM + r'SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services', '/v', 'Shadow', '/t', 'REG_DWORD', '/d', '2')
+try:
+    rc, out, err = wine([exe, 'posture', '--json'])
+    pr = {r['check']: r for r in json.loads(out)}
+    def warn(check, needle):
+        r = pr.get(check)
+        return r is not None and r['status'] == 'WARN' and needle in r['detail']
+    if not warn('Port proxy rule', '0.0.0.0/3340 are forwarded to 10.0.0.5/3389'):
+        print(f"FAIL posture port proxy: {pr.get('Port proxy rule')}"); fails += 1
+    elif not warn('Hidden account', "'support$'") or 'visible' in json.dumps([r for r in json.loads(out) if r['check'] == 'Hidden account']):
+        print(f"FAIL posture hidden account: {pr.get('Hidden account')}"); fails += 1
+    elif not warn('Null session pipes', 'netlogon, evilpipe'):
+        print(f"FAIL posture null session pipes: {pr.get('Null session pipes')}"); fails += 1
+    elif not warn('Update server', 'plain HTTP') or not warn('RDP shadowing', 'CONTROLLED'):
+        print(f"FAIL posture WSUS / shadowing: {pr.get('Update server')} {pr.get('RDP shadowing')}"); fails += 1
+    elif pr.get('Sysmon', {}).get('status') != 'INFO' or 'Port proxy rules' in pr:
+        print('FAIL posture: Sysmon row / stray "none" row'); fails += 1
+    else:
+        print('checked posture  (port proxy, hidden account, null-session pipe, WSUS over HTTP, RDP shadowing)')
+except Exception as e:
+    print('FAIL posture list checks:', e); fails += 1
 print(f'\n{fails} failure(s)')
 sys.exit(1 if fails else 0)

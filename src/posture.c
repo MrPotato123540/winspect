@@ -228,6 +228,157 @@ static void emit(pctx *c, const char *area, const char *name, const char *value,
     }
 }
 
+// ---- checks that are lists, not single values ----------------------------------
+
+typedef struct { pctx *c; const char *proto; unsigned n; } pp_ctx;
+
+// One "netsh interface portproxy" rule: value name "listenaddr/port", data
+// "connectaddr/port".
+static void portproxy_value(const char *name, uint32_t type, const unsigned char *d, size_t len, void *vctx)
+{
+    pp_ctx *p = (pp_ctx *)vctx;
+    if (type != REG_SZ || name[0] == '\0') return;
+    char to[160], text[420];
+    regsrc_u16(d, len, to, sizeof to);
+    snprintf(text, sizeof text, "connections to %s are forwarded to %s (pivot / tunnel when not set up by you)", name, to);
+    emit(p->c, "Network", "Port proxy rule", p->proto, POSTURE_WARN, text);
+    p->n++;
+}
+
+typedef struct { pctx *c; unsigned n; } hid_ctx;
+
+// SpecialAccounts\UserList: a DWORD 0 hides that account from the sign-in
+// screen. Used to keep a backdoor account out of sight.
+static void hidden_account_value(const char *name, uint32_t type, const unsigned char *d, size_t len, void *vctx)
+{
+    hid_ctx *h = (hid_ctx *)vctx;
+    if (type != REG_DWORD || len < 4 || (d[0] | d[1] | d[2] | d[3]) != 0 || name[0] == '\0') return;
+    char text[300];
+    snprintf(text, sizeof text, "account '%.120s' is hidden from the sign-in screen", name);
+    emit(h->c, "Accounts", "Hidden account", "hidden", POSTURE_WARN, text);
+    h->n++;
+}
+
+static void list_checks(pctx *c, psrc *ps)
+{
+    char rel[512];
+    regsrc *s;
+    rkey k;
+
+    // Port forwards configured with "netsh interface portproxy". Normal
+    // machines have none; an attacker adds one to reach an internal host (or
+    // RDP) through this machine.
+    if ((s = pick(ps, HKEY_LOCAL_MACHINE, "SYSTEM\\CurrentControlSet\\Services\\PortProxy", rel, sizeof rel)) != NULL) {
+        static const char *const fam[] = { "v4tov4", "v4tov6", "v6tov4", "v6tov6", NULL };
+        pp_ctx pp = { c, "", 0 };
+        for (int i = 0; fam[i]; i++) {
+            char key[600];
+            snprintf(key, sizeof key, "%s\\%s\\tcp", rel, fam[i]);
+            if (rk_open(s, key, &k) != 0) continue;
+            pp.proto = fam[i];
+            rk_values(s, &k, portproxy_value, &pp);
+            rk_close(&k);
+        }
+        if (pp.n == 0) emit(c, "Network", "Port proxy rules", "none", POSTURE_OK, "no port forwarding (portproxy) rules");
+    }
+
+    // Named pipes reachable WITHOUT authentication. Empty on current Windows;
+    // domain controllers list netlogon / samr / lsarpc.
+    if ((s = pick(ps, HKEY_LOCAL_MACHINE, "SYSTEM\\CurrentControlSet\\Services\\LanmanServer\\Parameters", rel, sizeof rel)) != NULL &&
+            rk_open(s, rel, &k) == 0) {
+        unsigned char data[2048];
+        uint32_t type = 0;
+        long len = rk_get(s, &k, "NullSessionPipes", &type, data, sizeof data);
+        rk_close(&k);
+        char names[512] = "";
+        size_t o = 0;
+        int other = 0, count = 0;
+        if (len > 0 && type == REG_MULTI_SZ) {
+            size_t n = (size_t)len < sizeof data ? (size_t)len : sizeof data;
+            for (size_t i = 0; i + 1 < n;) {
+                size_t j = i;
+                while (j + 1 < n && (data[j] | data[j + 1])) j += 2;
+                if (j == i) break;
+                char item[96];
+                regsrc_u16(data + i, j - i, item, sizeof item);
+                if (item[0]) {
+                    count++;
+                    if (_stricmp(item, "netlogon") != 0 && _stricmp(item, "samr") != 0 && _stricmp(item, "lsarpc") != 0) other = 1;
+                    int w = snprintf(names + o, sizeof names - o, "%s%s", o ? ", " : "", item);
+                    if (w > 0 && (size_t)w < sizeof names - o) o += (size_t)w;
+                }
+                i = j + 2;
+            }
+        }
+        char text[640];
+        if (count == 0) emit(c, "Network", "Null session pipes", "none", POSTURE_OK, "no named pipe is reachable anonymously");
+        else {
+            snprintf(text, sizeof text, "pipes reachable without authentication: %s%s", names, other ? "" : " (the domain-controller set)");
+            emit(c, "Network", "Null session pipes", "set", other ? POSTURE_WARN : POSTURE_INFO, text);
+        }
+    }
+
+    // Accounts hidden from the sign-in screen.
+    if ((s = pick(ps, HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon\\SpecialAccounts\\UserList", rel, sizeof rel)) != NULL) {
+        hid_ctx h = { c, 0 };
+        if (rk_open(s, rel, &k) == 0) {
+            rk_values(s, &k, hidden_account_value, &h);
+            rk_close(&k);
+        }
+        if (h.n == 0) emit(c, "Accounts", "Hidden accounts", "none", POSTURE_OK, "no account is hidden from the sign-in screen");
+    }
+
+    // Windows Update pointed at an internal server over plain HTTP: update
+    // metadata can be altered on the network ("WSUS spoofing").
+    if ((s = pick(ps, HKEY_LOCAL_MACHINE, "SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate", rel, sizeof rel)) != NULL) {
+        char url[300] = "";
+        if (rk_open(s, rel, &k) == 0) {
+            rk_get_str(s, &k, "WUServer", url, sizeof url);
+            rk_close(&k);
+        }
+        DWORD use = 0;
+        int have = read_dword(ps, HKEY_LOCAL_MACHINE, "SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU", "UseWUServer", &use);
+        char text[420];
+        if (url[0] == '\0' || have != 1 || use != 1) {
+            emit(c, "Updates", "Update server", "default", POSTURE_OK, "updates come from Microsoft (no WSUS server configured)");
+        } else if (_strnicmp(url, "http://", 7) == 0) {
+            snprintf(text, sizeof text, "updates come from %.200s over plain HTTP: they can be tampered with on the network", url);
+            emit(c, "Updates", "Update server", "http", POSTURE_WARN, text);
+        } else {
+            snprintf(text, sizeof text, "updates come from the internal server %.200s", url);
+            emit(c, "Updates", "Update server", "wsus", POSTURE_OK, text);
+        }
+    }
+
+    // RDP session shadowing without the user's consent (2 = full control, 4 = view).
+    {
+        DWORD v = 0;
+        int have = read_dword(ps, HKEY_LOCAL_MACHINE, "SOFTWARE\\Policies\\Microsoft\\Windows NT\\Terminal Services", "Shadow", &v);
+        if (have >= 0) {
+            char val[16];
+            snprintf(val, sizeof val, have ? "%lu" : "(unset)", (unsigned long)v);
+            if (have == 1 && (v == 2 || v == 4))
+                emit(c, "Network", "RDP shadowing", val, POSTURE_WARN, v == 2 ? "sessions can be CONTROLLED remotely without the user's consent"
+                                                                              : "sessions can be VIEWED remotely without the user's consent");
+            else emit(c, "Network", "RDP shadowing", val, POSTURE_OK, "sessions cannot be shadowed without consent");
+        }
+    }
+
+    // Sysmon: if present, far richer process / network telemetry exists in
+    // Microsoft-Windows-Sysmon/Operational than in the Security log.
+    if ((s = pick(ps, HKEY_LOCAL_MACHINE, "SYSTEM\\CurrentControlSet\\Services", rel, sizeof rel)) != NULL) {
+        static const char *const svc[] = { "SysmonDrv", "Sysmon64", "Sysmon", NULL };
+        int found = 0;
+        for (int i = 0; svc[i] && !found; i++) {
+            char key[600];
+            snprintf(key, sizeof key, "%s\\%s", rel, svc[i]);
+            if (rk_open(s, key, &k) == 0) { found = 1; rk_close(&k); }
+        }
+        emit(c, "Logging", "Sysmon", found ? "installed" : "absent", POSTURE_INFO,
+             found ? "Sysmon is installed: see its Operational log for process / network events" : "Sysmon is not installed");
+    }
+}
+
 int cmd_posture(int argc, char **argv)
 {
     pctx c;
@@ -315,6 +466,7 @@ int cmd_posture(int argc, char **argv)
              has_pw ? "Winlogon DefaultPassword holds a PLAINTEXT password"
                     : (autologon ? "AutoAdminLogon on (password stored elsewhere)" : "no AutoLogon password in the registry"));
     }
+    list_checks(&c, &ps);
     for (int i = 0; i < 3; i++) {
         if (offline ? files[i] != NULL : 1) regsrc_close(&srcs[i]);
     }
