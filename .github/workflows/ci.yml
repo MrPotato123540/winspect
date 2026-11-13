@@ -204,6 +204,7 @@ jobs:
           curl -sSfL -o evtxref/DE_RDP_Tunneling_4624.evtx "$EAS/Command%20and%20Control/DE_RDP_Tunneling_4624.evtx"
           curl -sSfL -o evtxref/LM_4624_mimikatz_sekurlsa_pth_source_machine.evtx "$EAS/Lateral%20Movement/LM_4624_mimikatz_sekurlsa_pth_source_machine.evtx"
           curl -sSfL -o evtxref/LM_WMIC_4648_rpcss.evtx "$EAS/Lateral%20Movement/LM_WMIC_4648_rpcss.evtx"
+          curl -sSfL -o evtxref/CA_4624_4625_LogonType2_LogonProc_chrome.evtx "$EAS/Credential%20Access/CA_4624_4625_LogonType2_LogonProc_chrome.evtx"
           python3 tests/wine/evtxfiles.py ./winspect.exe evtxref
           curl -sSfL -o MFT "https://raw.githubusercontent.com/log2timeline/plaso/ee5a0ab4f7af07f61b0554ba8edc0700514efc5a/test_data/MFT"
           python3 tests/wine/mftfile.py ./winspect.exe MFT

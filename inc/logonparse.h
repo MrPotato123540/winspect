@@ -7,6 +7,8 @@
 //   Security 4624  logon           TargetUserName, TargetDomainName, TargetLogonId,
 //                                  LogonType, IpAddress, WorkstationName, ProcessName,
 //                                  LogonProcessName, AuthenticationPackageName, LmPackageName
+//            4625  logon FAILED    same names as 4624 plus Status / SubStatus
+//                                  (NTSTATUS: why it failed)
 //            4634  logoff          TargetUserName, TargetDomainName, TargetLogonId
 //            4647  user-initiated logoff (same fields)
 //            4648  logon attempted with explicit credentials (runas, net use,
@@ -34,6 +36,7 @@ enum logon_kind {
     LK_DISCONNECT,      // 4779, LSM 24
     LK_SESSION_LOGON,   // LSM 21
     LK_SESSION_LOGOFF,  // LSM 23
+    LK_FAILED,          // 4625
 };
 
 typedef struct {
@@ -52,6 +55,7 @@ typedef struct {
     char server[128];           // 4648 TargetServerName
     char logon_id[24];          // hex as logged, "" for LSM events
     char session[16];           // LSM SessionID / 4778 SessionName
+    char status[16];            // 4625: SubStatus (Status when SubStatus is 0), as logged
 } logon_rec;
 
 // Fills r from one event. channel is the event's Channel text (IDs 21..25
@@ -71,6 +75,20 @@ const char *logon_kind_name(enum logon_kind k);
 // NETWORK SERVICE, ANONYMOUS LOGON, DWM-n, UMFD-n, names ending in '$').
 // These are most of a Security log and are hidden unless asked for.
 int logon_is_noise(const logon_rec *r);
+
+// What a 4625 Status / SubStatus code means ("wrong password", "no such
+// user", "account locked out" ...); "" for a code not in the short list.
+const char *logon_failure_text(const char *status);
+
+// The key failures and successes are matched on: the client address when
+// there is one, else the client's name; "" when the event names neither (a
+// local logon), which is never matched.
+const char *logon_source_key(const logon_rec *r);
+
+// Password guessing that worked: how many FAILED logons came from the same
+// source as recs[idx] in the `window` seconds before it. recs holds n records
+// sorted oldest first. 0 when recs[idx] names no remote source.
+unsigned logon_failures_before(const logon_rec *const *recs, size_t n, size_t idx, long window);
 
 // Why a record deserves a look, or NULL. Each reason states a fact that can
 // be checked in the event itself:

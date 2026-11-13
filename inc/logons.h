@@ -13,14 +13,17 @@
 // network logon from a public address, remote desktop from loopback (a
 // tunnelled connection), cleartext network logon (type 8),
 // new-credentials logon by seclogo (type 9: runas /netonly - and what
-// pass-the-hash tools produce), NTLMv1. Passwords are never in these events.
+// pass-the-hash tools produce), NTLMv1, and a success that follows ten or
+// more failures (4625) from the same source within the hour (password
+// guessing that worked). --failed lists the failed logons themselves, with
+// the reason Windows recorded (wrong password, no such user, locked out ...). Passwords are never in these events.
 // --summary groups by account, logon type and source (count, first, last).
 // --evtx <file> (repeatable) reads copied logs with winspect's own parser.
 // --since <hours>, --user <text>, --type <n> and --flagged narrow the list;
 // --max <n> bounds the events read per live channel (default 5000).
 // The Security log needs elevation. Read-only. Usage:
 //   winspect logons [--evtx <file> ...] [--since <hours>] [--user <text>] [--type <n>]
-//                   [--all] [--flagged] [--summary] [--max <n>] [--json | --csv]
+//                   [--all] [--failed] [--flagged] [--summary] [--max <n>] [--json | --csv]
 int cmd_logons(int argc, char **argv);
 
 #endif

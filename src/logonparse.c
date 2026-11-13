@@ -3,6 +3,7 @@
 #include "logonparse.h"
 #include "artparse.h"
 #include "ioc.h"
+#include "bootparse.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -87,6 +88,21 @@ int logon_parse(const char *xml, const char *channel, logon_rec *r)
             evt_data(xml, "AuthenticationPackageName", r->auth, sizeof r->auth);
             evt_data(xml, "LmPackageName", r->lm, sizeof r->lm);
             break;
+        case 4625: {
+            r->kind = LK_FAILED;
+            two(xml, "TargetDomainName", "TargetUserName", r->user, sizeof r->user);
+            evt_data(xml, "LogonType", tmp, sizeof tmp);
+            r->type = (unsigned)strtoul(tmp, NULL, 10);
+            evt_data(xml, "IpAddress", r->source, sizeof r->source);
+            evt_data(xml, "WorkstationName", r->workstation, sizeof r->workstation);
+            evt_data(xml, "ProcessName", r->process, sizeof r->process);
+            evt_data(xml, "LogonProcessName", r->logon_process, sizeof r->logon_process);
+            evt_data(xml, "AuthenticationPackageName", r->auth, sizeof r->auth);
+            // SubStatus is the specific reason; Status the general one.
+            evt_data(xml, "SubStatus", r->status, sizeof r->status);
+            if (strtoul(r->status, NULL, 16) == 0) evt_data(xml, "Status", r->status, sizeof r->status);
+            break;
+        }
         case 4634:
         case 4647:
             r->kind = LK_LOGOFF;
@@ -177,8 +193,52 @@ const char *logon_kind_name(enum logon_kind k)
     case LK_DISCONNECT:     return "disconnect";
     case LK_SESSION_LOGON:  return "session";
     case LK_SESSION_LOGOFF: return "session end";
+    case LK_FAILED:         return "FAILED";
     default:                return "";
     }
+}
+
+const char *logon_failure_text(const char *status)
+{
+    switch (strtoul(status, NULL, 16)) {
+    case 0xC000006AUL: return "wrong password";
+    case 0xC0000064UL: return "no such user";
+    case 0xC000006DUL: return "bad user name or password";
+    case 0xC0000234UL: return "account locked out";
+    case 0xC0000072UL: return "account disabled";
+    case 0xC000006FUL: return "outside allowed logon hours";
+    case 0xC0000070UL: return "not allowed from this workstation";
+    case 0xC0000071UL: return "password expired";
+    case 0xC0000193UL: return "account expired";
+    case 0xC0000224UL: return "password must be changed";
+    case 0xC000015BUL: return "logon type not granted";
+    case 0xC000005EUL: return "no logon server available";
+    case 0xC0000133UL: return "clock skew too large";
+    default:           return "";
+    }
+}
+
+const char *logon_source_key(const logon_rec *r)
+{
+    if (r->source[0] && strcmp(r->source, "::1") != 0 && strcmp(ioc_ip_scope(r->source), "loopback") != 0) return r->source;
+    if (r->source[0]) return "";            // this machine itself
+    return r->workstation;
+}
+
+unsigned logon_failures_before(const logon_rec *const *recs, size_t n, size_t idx, long window)
+{
+    if (idx >= n) return 0;
+    const char *key = logon_source_key(recs[idx]);
+    if (key[0] == '\0') return 0;
+    long long t = iso_epoch(recs[idx]->time);
+    if (t < 0) return 0;
+    unsigned failed = 0;
+    for (size_t b = idx; b-- > 0;) {
+        long long tp = iso_epoch(recs[b]->time);
+        if (tp < 0 || t - tp > window) break;
+        if (recs[b]->kind == LK_FAILED && ci_eq(logon_source_key(recs[b]), key)) failed++;
+    }
+    return failed;
 }
 
 int logon_is_noise(const logon_rec *r)

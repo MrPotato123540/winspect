@@ -31,6 +31,7 @@
 typedef struct {
     logon_rec r;
     const char *reason;
+    char why[120];              // storage for a reason built per row
     int admin;
     char logoff[24];
     int64_t duration;           // seconds, -1 unknown
@@ -59,6 +60,7 @@ static void on_event(const char *xml, void *vctx)
         l->cap = nc;
     }
     w.reason = logon_reason(&w.r);
+    w.why[0] = '\0';
     w.admin = 0;
     w.logoff[0] = '\0';
     w.duration = -1;
@@ -137,6 +139,29 @@ static void join_sessions(rows *l)
     }
 }
 
+// Password guessing that worked: a successful logon from a source that
+// failed many times in the hour before it. Counting needs the failures
+// themselves, which is why 4625 is collected even when not listed. Rows are
+// sorted oldest first.
+#define GUESS_WINDOW 3600
+#define GUESS_MIN 10
+static void mark_guessing(rows *l)
+{
+    const logon_rec **ptr = (const logon_rec **)malloc((l->n ? l->n : 1) * sizeof *ptr);
+    if (ptr == NULL) return;
+    for (size_t k = 0; k < l->n; k++) ptr[k] = &l->v[k].r;
+    for (size_t k = 0; k < l->n; k++) {
+        row *w = &l->v[k];
+        if (w->r.kind != LK_LOGON || w->reason != NULL) continue;
+        unsigned failed = logon_failures_before(ptr, l->n, k, GUESS_WINDOW);
+        if (failed >= GUESS_MIN) {
+            snprintf(w->why, sizeof w->why, "%u failed logons from this source in the hour before this success (password guessing?)", failed);
+            w->reason = w->why;
+        }
+    }
+    free(ptr);
+}
+
 static void fmt_duration(int64_t s, char *out, size_t n)
 {
     if (s < 0) { out[0] = '\0'; return; }
@@ -165,7 +190,7 @@ typedef struct {
 
 int cmd_logons(int argc, char **argv)
 {
-    int mode = 0, all = 0, only_flagged = 0, summary = 0;
+    int mode = 0, all = 0, only_flagged = 0, summary = 0, show_failed = 0;
     unsigned max = 5000, hours = 0, want_type = 0;
     const char *user = NULL;
     char *files[32];
@@ -180,6 +205,7 @@ int cmd_logons(int argc, char **argv)
         else if (strcmp(argv[a], "--all") == 0)     all = 1;
         else if (strcmp(argv[a], "--flagged") == 0) only_flagged = 1;
         else if (strcmp(argv[a], "--summary") == 0) summary = 1;
+        else if (strcmp(argv[a], "--failed") == 0)  show_failed = 1;
         else if (strcmp(argv[a], "--user") == 0 && a + 1 < argc) user = argv[++a];
         else if (strcmp(argv[a], "--type") == 0 && a + 1 < argc) {
             want_type = (unsigned)strtoul(argv[++a], NULL, 10);
@@ -226,7 +252,7 @@ int cmd_logons(int argc, char **argv)
     } else {
         static const struct { const char *channel, *label, *xpath; } chans[] = {
             { "Security", "Security",
-              "*[System[(EventID=4624 or EventID=4634 or EventID=4647 or EventID=4648 or EventID=4672 or "
+              "*[System[(EventID=4624 or EventID=4625 or EventID=4634 or EventID=4647 or EventID=4648 or EventID=4672 or "
               "EventID=4778 or EventID=4779)]]" },
             { LSM_CHANNEL, "TerminalServices-LocalSessionManager",
               "*[System[(EventID=21 or EventID=23 or EventID=24 or EventID=25)]]" },
@@ -253,16 +279,19 @@ int cmd_logons(int argc, char **argv)
 
     qsort(l.v, l.n, sizeof *l.v, by_time);
     join_sessions(&l);
+    mark_guessing(&l);
+    // The reason pointers refer into the rows themselves, which do not move
+    // any more from here on.
 
     // ---- select ---------------------------------------------------------------
-    unsigned shown = 0, flagged = 0, hidden = 0;
+    unsigned shown = 0, flagged = 0, hidden = 0, failed_hidden = 0;
     static group groups[4096];
     unsigned ng = 0, group_overflow = 0;
     if (mode == 0 && !summary) {
         printf("logons  (newest first, UTC%s)\n\n", all ? "" : "; service and system-account logons hidden, --all shows them");
         printf("    %-19s  %-11s %-18s %-30s %-22s %s\n", "time", "event", "type", "account", "source", "detail");
     } else if (mode == 2 && !summary) {
-        puts("time,event,id,logon_type,type_name,account,by,source,workstation,server,process,auth,ntlm,logon_id,session,admin,logoff,duration_s,reason");
+        puts("time,event,id,logon_type,type_name,account,by,source,workstation,server,process,auth,ntlm,logon_id,session,admin,logoff,duration_s,reason,failure");
     } else if (mode == 1) {
         putchar('[');
     }
@@ -271,7 +300,9 @@ int cmd_logons(int argc, char **argv)
         const row *w = &l.v[k];
         const logon_rec *r = &w->r;
         if (r->kind == LK_LOGOFF || r->kind == LK_PRIVILEGED) continue;     // folded into the logon
-        if (!all && logon_is_noise(r)) { hidden++; continue; }
+        if (r->kind == LK_FAILED && !show_failed) { failed_hidden++; continue; }
+        if (r->kind != LK_FAILED && show_failed) continue;                  // --failed lists failures only
+        if (!all && r->kind != LK_FAILED && logon_is_noise(r)) { hidden++; continue; }
         if (want_type && r->type != want_type) continue;
         if (user && !ioc_contains_ci(r->user, user) && !ioc_contains_ci(r->by, user)) continue;
         if (only_flagged && w->reason == NULL) continue;
@@ -313,6 +344,8 @@ int cmd_logons(int argc, char **argv)
 #define ADD(...) do { int w_ = snprintf(detail + o, sizeof detail - o, __VA_ARGS__); \
                       if (w_ > 0 && (size_t)w_ < sizeof detail - o) o += (size_t)w_; } while (0)
             if (w->admin) ADD("admin");
+            if (r->kind == LK_FAILED) ADD("%s%s%s", logon_failure_text(r->status)[0] ? logon_failure_text(r->status) : "status ",
+                                          logon_failure_text(r->status)[0] ? "" : r->status, "");
             if (r->auth[0]) ADD("%s%s%s%s", o ? ", " : "", r->auth, r->lm[0] ? " " : "", r->lm);
             if (r->kind == LK_EXPLICIT) ADD("%sby %s%s%s", o ? ", " : "", r->by, r->server[0] ? " for " : "", r->server);
             if (r->session[0]) ADD("%ssession %s", o ? ", " : "", r->session);
@@ -343,7 +376,8 @@ int cmd_logons(int argc, char **argv)
             printf(",%d,%s,", w->admin, w->logoff);
             if (w->duration >= 0) printf("%lld", (long long)w->duration);
             putchar(',');
-            csv_str(w->reason ? w->reason : ""); putchar('\n');
+            csv_str(w->reason ? w->reason : ""); putchar(',');
+            csv_str(logon_failure_text(r->status)); putchar('\n');
         } else {
             printf("%s{\"time\":\"%s\",\"event\":\"%s\",\"id\":%u,\"logon_type\":%u,\"type_name\":", first ? "" : ",",
                    r->time, logon_kind_name(r->kind), r->id, r->type);
@@ -358,6 +392,8 @@ int cmd_logons(int argc, char **argv)
             fputs(",\"ntlm\":", stdout);        json_str(r->lm);
             fputs(",\"logon_id\":", stdout);    json_str(r->logon_id);
             fputs(",\"session\":", stdout);     json_str(r->session);
+            fputs(",\"status\":", stdout);      json_str(r->status);
+            fputs(",\"failure\":", stdout);     json_str(logon_failure_text(r->status));
             printf(",\"admin\":%s,\"logoff\":\"%s\",\"duration_s\":", w->admin ? "true" : "false", w->logoff);
             if (w->duration >= 0) printf("%lld", (long long)w->duration); else fputs("null", stdout);
             printf(",\"suspicious\":%s,\"reason\":", w->reason ? "true" : "false");
@@ -415,6 +451,7 @@ int cmd_logons(int argc, char **argv)
         if (summary) printf("\n%u group(s) from %u event(s), %u flagged", ng, shown, flagged);
         else printf("\n%u event(s), %u flagged", shown, flagged);
         if (hidden) printf("; %u service / system-account event(s) hidden", hidden);
+        if (failed_hidden) printf("; %u failed logon(s) not listed (--failed)", failed_hidden);
         putchar('\n');
         if (notes[0]) printf("\nlogs not read:\n%s", notes);
     }

@@ -474,14 +474,17 @@ static const struct { const char *name, *text; } usage_table[] = {
         "network logon from a public address, remote desktop from loopback (a\n"
         "tunnelled connection), cleartext network logon (type 8),\n"
         "new-credentials logon by seclogo (type 9: runas /netonly - and what\n"
-        "pass-the-hash tools produce), NTLMv1. Passwords are never in these events.\n"
+        "pass-the-hash tools produce), NTLMv1, and a success that follows ten or\n"
+        "more failures (4625) from the same source within the hour (password\n"
+        "guessing that worked). --failed lists the failed logons themselves, with\n"
+        "the reason Windows recorded (wrong password, no such user, locked out ...). Passwords are never in these events.\n"
         "--summary groups by account, logon type and source (count, first, last).\n"
         "--evtx <file> (repeatable) reads copied logs with winspect's own parser.\n"
         "--since <hours>, --user <text>, --type <n> and --flagged narrow the list;\n"
         "--max <n> bounds the events read per live channel (default 5000).\n"
         "The Security log needs elevation. Read-only. Usage:\n"
         "  winspect logons [--evtx <file> ...] [--since <hours>] [--user <text>] [--type <n>]\n"
-        "                  [--all] [--flagged] [--summary] [--max <n>] [--json | --csv]\n" },
+        "                  [--all] [--failed] [--flagged] [--summary] [--max <n>] [--json | --csv]\n" },
     { "boots",
         "winspect boots - when the machine was on: every boot and shutdown from the\n"
         "System log (the idea of `last -x` / `uptime` on Linux), with how long each\n"

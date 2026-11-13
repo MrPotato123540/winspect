@@ -19,7 +19,8 @@ for f in ('System.evtx', 'System2.evtx'):
     shutil.copy(os.path.join(src, f), dst)
 # Optional: Security logs of recorded attacks from the EVTX-ATTACK-SAMPLES
 # collection (data only), for `logons`. Their file names say what was done.
-ATTACK = ('DE_RDP_Tunneling_4624.evtx', 'LM_4624_mimikatz_sekurlsa_pth_source_machine.evtx', 'LM_WMIC_4648_rpcss.evtx')
+ATTACK = ('DE_RDP_Tunneling_4624.evtx', 'LM_4624_mimikatz_sekurlsa_pth_source_machine.evtx', 'LM_WMIC_4648_rpcss.evtx',
+          'CA_4624_4625_LogonType2_LogonProc_chrome.evtx')
 have_attack = all(os.path.exists(os.path.join(src, f)) for f in ATTACK)
 if have_attack:
     for f in ATTACK:
@@ -129,6 +130,15 @@ if have_attack:
     check(len(fl) == 3 and all(r['event'] == 'explicit' and r['by'] == 'EXAMPLE\\user01' and not r['suspicious'] for r in fl)
           and any(r['process'].lower().endswith('wmic.exe') for r in fl),
           'logons: explicit-credential use (WMIC with another account) listed with who / as whom / process, not flagged')
+    # One real failed logon (4625): chrome.exe tried the user's password
+    # through LogonUser and got it wrong (SubStatus 0xC000006A).
+    rc, out = run('logons', '--evtx', r'C:\evtx\CA_4624_4625_LogonType2_LogonProc_chrome.evtx', '--failed', '--json')
+    fl = json.loads(out) if rc == 0 else []
+    check(len(fl) == 1 and fl[0]['event'] == 'FAILED' and fl[0]['failure'] == 'wrong password' and fl[0]['logon_type'] == 2
+          and fl[0]['account'] == 'MSEDGEWIN10\\IEUser' and fl[0]['process'].lower().endswith('chrome.exe'),
+          'logons --failed: recorded failed logon with its reason, account and calling process')
+    rc, out = run('logons', '--evtx', r'C:\evtx\CA_4624_4625_LogonType2_LogonProc_chrome.evtx', '--json')
+    check(rc == 0 and all(r['event'] != 'FAILED' for r in json.loads(out)), 'logons: failures are not listed without --failed')
 else:
     print('skip logons attack samples (not downloaded)')
 print(f'{fails} failure(s)')

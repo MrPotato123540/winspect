@@ -1978,6 +1978,55 @@ int main(void)
         check_int("cam similar name", cam_reason("microphones", "C:\\Users\\bob\\AppData\\Local\\Temp\\x.exe", 1) == NULL, 1);
     }
 
+    // --- logons: failures, and a success after many of them -----------------------
+    {
+#define EV(id, data) "<Event><System><EventID>" #id "</EventID><TimeCreated SystemTime='2024-05-01T12:34:56.1Z'/><Channel>Security</Channel></System><EventData>" data "</EventData></Event>"
+#define D(n, v) "<Data Name='" n "'>" v "</Data>"
+        logon_rec f;
+        check_int("failed 4625", logon_parse(EV(4625, D("TargetUserName", "admin") D("TargetDomainName", "CORP") D("Status", "0xc000006d")
+                  D("SubStatus", "0xc000006a") D("LogonType", "3") D("IpAddress", "203.0.113.7") D("WorkstationName", "KALI")), "Security", &f) == 1 && f.kind == LK_FAILED, 1);
+        check_str("failed reason", logon_failure_text(f.status), "wrong password");
+        check_str("failed source key", logon_source_key(&f), "203.0.113.7");
+        logon_parse(EV(4625, D("TargetUserName", "x") D("Status", "0xC0000234") D("SubStatus", "0x0") D("LogonType", "3") D("IpAddress", "-") D("WorkstationName", "WS9")), "Security", &f);
+        check_str("failed: status when substatus is 0", logon_failure_text(f.status), "account locked out");
+        check_str("failed: workstation as key when no address", logon_source_key(&f), "WS9");
+        check_str("failure unknown code", logon_failure_text("0xC0000001"), "");
+        check_str("kind name failed", logon_kind_name(LK_FAILED), "FAILED");
+#undef EV
+#undef D
+        // 12 failures from .7 (one every 4 minutes), 3 from .8, then successes.
+        static logon_rec rs[20];
+        const logon_rec *pp[20];
+        size_t n = 0;
+        for (int i = 0; i < 12; i++, n++) {
+            rs[n].kind = LK_FAILED;
+            snprintf(rs[n].time, sizeof rs[n].time, "2024-05-01 10:%02d:00", i * 4);
+            snprintf(rs[n].source, sizeof rs[n].source, "203.0.113.7");
+        }
+        for (int i = 0; i < 3; i++, n++) {
+            rs[n].kind = LK_FAILED;
+            snprintf(rs[n].time, sizeof rs[n].time, "2024-05-01 10:5%d:00", i);
+            snprintf(rs[n].source, sizeof rs[n].source, "203.0.113.8");
+        }
+        const char *who[] = { "203.0.113.7", "203.0.113.8", "127.0.0.1", "" };
+        for (int i = 0; i < 4; i++, n++) {
+            rs[n].kind = LK_LOGON;
+            snprintf(rs[n].time, sizeof rs[n].time, "2024-05-01 10:55:0%d", i);
+            snprintf(rs[n].source, sizeof rs[n].source, "%s", who[i]);
+        }
+        rs[n].kind = LK_LOGON;                                   // the guesser again: only the 10:44 failure is within the hour
+        snprintf(rs[n].time, sizeof rs[n].time, "2024-05-01 11:40:30");
+        snprintf(rs[n].source, sizeof rs[n].source, "203.0.113.7");
+        n++;
+        for (size_t i = 0; i < n; i++) pp[i] = &rs[i];
+        check_int("guess: 12 failures before the success", (int)logon_failures_before(pp, n, 15, 3600), 12);
+        check_int("guess: other source counted separately", (int)logon_failures_before(pp, n, 16, 3600), 3);
+        check_int("guess: loopback is never matched", (int)logon_failures_before(pp, n, 17, 3600), 0);
+        check_int("guess: no source", (int)logon_failures_before(pp, n, 18, 3600), 0);
+        check_int("guess: only failures inside the window", (int)logon_failures_before(pp, n, 19, 3600), 1);
+        check_int("guess: index out of range", (int)logon_failures_before(pp, n, 99, 3600), 0);
+    }
+
     fprintf(stderr, "\n%s (%d failure%s)\n",
             failures == 0 ? "ALL PASSED" : "FAILED", failures, failures == 1 ? "" : "s");
     return failures == 0 ? 0 : 1;
