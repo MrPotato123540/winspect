@@ -6,7 +6,7 @@
 # one is reported WITH the expected reason - and that the benign controls
 # (stock LSA package, a normal firewall rule) are not. Never point WINEPREFIX
 # at a prefix you care about. Usage: python3 tests/wine/fixtures.py <winspect.exe>
-import subprocess, os, sys, json, struct, tempfile
+import subprocess, os, sys, json, struct, tempfile, time
 exe = sys.argv[1]
 # The wine prefix is a throw-away test sandbox: WINEPREFIX (default ./wpfx).
 # The wine binary comes from $WINE, else wine64/wine on PATH, else
@@ -1493,10 +1493,9 @@ if cc and shutil.which(windres):
     subprocess.run([windres, os.path.join(here, '..', 'renamed.rc'), '-O', 'coff', '-o', res], check=True)
     for nm in ('svc_update.exe', 'cmd.exe'):
         subprocess.run([cc, os.path.join(here, '..', 'holder.c'), res, '-o', os.path.join(fake, nm)], check=True)
-    hs = [subprocess.Popen([WINE, 'C:\\fake\\' + nm, r'C:\users\Public\wsfind_marker.txt', 'block'], env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+    hs = [subprocess.Popen([WINE, 'C:\\fake\\' + nm, 'C:\\users\\Public\\renamed_' + nm + '.txt'], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                            stdin=subprocess.DEVNULL, text=True) for nm in ('svc_update.exe', 'cmd.exe')]
-    for h_ in hs:
-        h_.stdout.readline()
+    time.sleep(4)                       # the helper prints nothing; give both time to start
     try:
         rc, out, err = wine([exe, 'hunt', '--all', '--json'])
         hj = {r['name'].lower(): r for r in json.loads(out) if r.get('path', '').lower().startswith('c:\\fake\\')}
