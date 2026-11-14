@@ -261,7 +261,7 @@ jobs:
           }
           Smoke @()
           foreach ($args in @(@("pe",$f), @("pe",$f,"--json"), @("sign",$f), @("hash",$f), @("strings",$f,"--ioc"))) { Smoke $args }
-          foreach ($c in "list","services","drivers","autoruns","pipes","hosts","net","arp","routes","sessions","shares","certstore","tasks","objects","defender","usb","prefetch","shimcache","bam","firewall","taskcache","wmi","lnk","hunt","posture","events","hidden","sweep","userassist","mru","jumplist","rdp","sysinfo","programs","shellbags","pshistory","recyclebin","bits","comhijack","users","timeline","image","browser","pca","activities","logons","boots","dns","wer","office","detections","capability") { Smoke @($c); Smoke @($c,"--json") }
+          foreach ($c in "list","services","drivers","autoruns","pipes","hosts","net","arp","routes","sessions","shares","certstore","tasks","objects","defender","usb","prefetch","shimcache","bam","firewall","taskcache","wmi","lnk","hunt","posture","events","hidden","sweep","userassist","mru","jumplist","rdp","sysinfo","programs","shellbags","pshistory","recyclebin","bits","comhijack","users","timeline","image","browser","pca","activities","logons","boots","dns","wer","office","detections","capability","volumes") { Smoke @($c); Smoke @($c,"--json") }
           foreach ($c in "inspect","threads","handles","regions","token","secinfo","modules","verify","triage") { Smoke @($c,"$p"); Smoke @($c,"$p","--json") }
           foreach ($args in @(@("modules","$p","--unsigned"), @("firewall","--inbound","--allow","--active","--csv"), @("autoruns","--csv"), @("objects","--global","--type","Mutant"), @("drivers","--sig"), @("services","--flagged"), @("prefetch","--dir","C:\Windows\Prefetch","--csv"), @("streams","C:\Windows\System32\drivers\etc"), @("lnk","--json"), @("autoruns","--sig"), @("services","--sig","--flagged"), @("events","--summary"), @("prefetch","--flagged"), @("hunt","--all"), @("handles","--find","ntdll","--type","File"), @("hive","C:\Windows\System32\config\SYSTEM"), @("amcache"), @("rdp"), @("rdp","--json"), @("magic","C:\Windows\System32\drivers\etc"), @("magic",$f,"--json"), @("magic","C:\Windows\System32\drivers","--flagged","--csv"), @("hash","C:\Windows\System32\drivers\etc","--csv"), @("logons","--summary"), @("logons","--all","--csv"), @("dns","--csv"), @("wer","--modules"), @("office","--flagged"), @("timeline","--sources","logons,wer,office"))) { Smoke $args }
           Write-Host "all commands ran without crashing"
@@ -401,6 +401,10 @@ jobs:
           if ($ba -ne $bb) { throw "boots --evtx differs from live: $($bl.Count) live vs $($bo.Count) offline" }
           $kb = @(Get-WinEvent -FilterHashtable @{LogName="System"; ProviderName="Microsoft-Windows-Kernel-General"; Id=12} -MaxEvents 3 -ErrorAction SilentlyContinue).Count
           if ($kb -gt 0 -and @($bl | Where-Object { $_.event -eq "boot" }).Count -eq 0) { throw "boots: Get-WinEvent sees boot events, winspect lists none" }
+          # volumes: the serial of C: is the one "vol" prints.
+          $vs = ((cmd /c vol C:) | Select-String -Pattern "[0-9A-F]{4}-[0-9A-F]{4}").Matches[0].Value
+          $vc = (& $exe volumes --json | ConvertFrom-Json) | Where-Object { $_.drive -eq "C:" }
+          if (-not $vc -or $vc.serial -ne $vs) { throw "volumes: C: serial '$($vc.serial)' but vol says '$vs'" }
           # dns: a name that ipconfig shows in the resolver cache must be in
           # winspect's list too (same cache, two readers).
           Resolve-DnsName example.com -ErrorAction SilentlyContinue | Out-Null

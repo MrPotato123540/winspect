@@ -1556,5 +1556,26 @@ try:
         print('checked capability  (live + offline hive: Temp program on the microphone flagged, in-use entry, packaged app)')
 except Exception as e:
     print('FAIL capability check:', e); fails += 1
+
+# volumes: the serial of C: must be the one the system's own "vol" command
+# prints (two readers of the same number), in both printed forms.
+try:
+    rc, out, err = wine([exe, 'volumes', '--json'])
+    vj = {v['drive']: v for v in json.loads(out)}
+    rc2, vo, err2 = wine(['cmd', '/c', 'vol', 'c:'])
+    import re as _re
+    m = _re.search(r'([0-9A-Fa-f]{4})-([0-9A-Fa-f]{4})', vo)
+    c_ = vj.get('C:')
+    rc3, out3, err3 = wine([exe, 'volumes', '--find', 'zz-no-such', '--csv'])
+    if not c_ or not m or c_['serial'].upper() != m.group(0).upper() or c_['serial_hex'].upper() != (m.group(1) + m.group(2)).upper():
+        print(f'FAIL volumes: C: serial {c_} vs vol "{vo.strip()[-40:]}"'); fails += 1
+    elif c_['type'] != 'fixed' or not c_['mounted'] or not c_['size'] or not c_['volume'].startswith('\\\\?\\Volume{'):
+        print(f'FAIL volumes: C: fields {c_}'); fails += 1
+    elif len(out3.strip().splitlines()) != 1:
+        print(f'FAIL volumes --find --csv: {out3}'); fails += 1
+    else:
+        print('checked volumes  (C: serial equals the one "vol" prints; type, size, volume GUID path)')
+except Exception as e:
+    print('FAIL volumes check:', e); fails += 1
 print(f'\n{fails} failure(s)')
 sys.exit(1 if fails else 0)

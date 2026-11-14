@@ -123,6 +123,14 @@ Bitiş zamanı sıfırsa yetenek **şu an kullanımda**dır. İşaretlenen tek d
 kullanıcının yazabildiği bir klasördeki masaüstü programının mikrofonu ya da
 kamerayı kullanması.
 
+### `volumes` (yeni komut): seri numarası hangi sürücü?
+
+`lnk`, `jumplist` ve `prefetch`, bir dosyanın bulunduğu birimin **seri
+numarasını** kaydeder. `volumes` o numaraya bakılacak listedir: numara
+buradaysa dosya o sürücüdeydi; yoksa artık takılı olmayan bir sürücüdeydi
+(USB bellek: `usb` komutuna bak). Doğrulama: `C:` için basılan numara,
+sistemin kendi `vol` komutunun bastığıyla aynı.
+
 ### `logons`: başarısız girişler ve tutan parola tahmini
 
 Velociraptor'ın *FailedLogBeforeSuccess* fikri.
@@ -223,7 +231,8 @@ yapılmıyor (nedeni yazılı).
 | bitlocker_info, tpm_info, deviceguard_status | — | sırada (WMI gerekir) |
 | windows_security_center, windows_security_products | — | sırada |
 | patches, windows_update_history | — | sırada |
-| logical_drives, disk_info | — | sırada (`volumes`: LNK / Prefetch'teki birim seri numaralarıyla eşleştirme) |
+| logical_drives | `volumes` | yeni (LNK / Prefetch'teki birim seri numaralarını sürücüye bağlar) |
+| disk_info | — | sırada |
 | ie_extensions, chocolatey_packages | — | düşük öncelik |
 
 ### PersistenceSniper teknikleri (58)
@@ -292,7 +301,6 @@ ayrıştırıcı yazmak, bu projede "doğrulanmamış bayrak" eklemekle aynı ş
 
 | # | İş | Neden önce | Doğrulama kaynağı |
 |---|---|---|---|
-| 1 | `volumes`: birim seri numaraları, dosya sistemi, etiket | `lnk` ve `prefetch` çıktısındaki seri numaralarını bir sürücüye bağlar | wine'da çalışır |
 | 2 | Denetim ilkesi (`auditpol` eşdeğeri) | `logons` boşsa nedenini söyler | gerçek Windows (CI) |
 | 3 | Yazılabilir servis ikilisi ve `PATH` klasörü | en yaygın yetki yükseltme yolu | wine + CI |
 | 4 | Güvenlik duvarı günlüğü, TeamViewer günlüğü | uzaktan erişim izleri; metin dosyası | plaso test verisi |

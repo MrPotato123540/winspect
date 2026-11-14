@@ -553,6 +553,18 @@ static const struct { const char *name, *text; } usage_table[] = {
         "(DNS_QUERY_NO_WIRE_ONLY): no query leaves the machine. Needs the DNS Client\n"
         "service; an empty or unavailable cache is said so. Read-only. Usage:\n"
         "  winspect dns [--find <text>] [--json | --csv]\n" },
+    { "volumes",
+        "winspect volumes - the mounted volumes: drive letter, type (fixed,\n"
+        "removable, network, CD), label, file system, size and free space, the\n"
+        "volume GUID path and above all the volume SERIAL NUMBER. Shortcuts (lnk),\n"
+        "jump lists and Prefetch files record the serial of the volume a file was\n"
+        "on; this is the list to look those numbers up in - \"serial 1A2B-3C4D\" in a\n"
+        "shortcut is drive E: if it is here, and a drive that is no longer attached\n"
+        "(a USB stick: see `usb`) if it is not. The serial is shown in both forms\n"
+        "the other commands print (XXXX-XXXX and XXXXXXXX). --find keeps rows whose\n"
+        "letter, label or serial contains the text. For a network drive the remote\n"
+        "path is shown. Read-only. Usage:\n"
+        "  winspect volumes [--find <text>] [--json | --csv]\n" },
     { "arp",
         "winspect arp - the IPv4 neighbour (ARP) cache: which IP maps to which MAC on\n"
         "the local segment. Read-only. Usage: winspect arp [--json | --csv]\n" },

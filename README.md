@@ -129,6 +129,7 @@ takes. The tables below are a map, not the full reference.
 | `mft <$MFT>` / `mft --live C:` | Files from a copied `$MFT`: full paths (deleted files too, broken chains under `$Orphan`), sizes, `$STANDARD_INFORMATION` and `$FILE_NAME` times, Object ID creation time and MAC. `--timestomp` lists files whose `$SI` creation time precedes `$FN`'s, as candidates rather than findings. `--live C:` reads the running volume's `$MFT` directly (read-only, administrator); `--image <file>` does the same on a raw image of an NTFS partition. A fragmented `$MFT` is followed through its attribute list, and a read that cannot map all of it says so. |
 | `usn <$J>` | The NTFS change journal (`$UsnJrnl:$J` copy): every create, delete, rename and data change with time and reasons; `--mft` adds each file's folder; `--live C:` reads the running system's journal through the documented FSCTLs. Flags deleted programs and files renamed into program names (`.pdf` to `.exe`). |
 | `hive <file> [key]` | Browse an offline registry hive. |
+| `volumes` | Mounted volumes with type, label, file system, size and the volume serial number - the number shortcuts, jump lists and Prefetch files record, so this is where to look one up. |
 | `pipes`, `objects`, `hosts`, `dns`, `arp`, `routes`, `sessions`, `shares` | Named pipes (known tool defaults flagged), Object Manager names, hosts file, DNS resolver cache (names recently looked up, read from the cache only), neighbour cache, routing table, logon sessions, SMB shares. |
 
 ### Offline options
