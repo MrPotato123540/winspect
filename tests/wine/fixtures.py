@@ -1400,6 +1400,8 @@ except Exception as e:
 HKLM = 'HKLM\\'
 NT = HKLM + r'SOFTWARE\Microsoft\Windows NT\CurrentVersion'
 CCS = HKLM + r'SYSTEM\CurrentControlSet'
+reg(HKCU + r'Software\Microsoft\Windows NT\CurrentVersion\Windows', '/v', 'Load', '/t', 'REG_SZ', '/d', r'C:\Windows\legacy.exe')
+reg(NT + r'\Winlogon\Notify\evil', '/v', 'DllName', '/t', 'REG_SZ', '/d', r'C:\ProgramData\notify.dll')
 reg(HKLM + r'SOFTWARE\Microsoft\Windows\Windows Error Reporting\Hangs', '/v', 'Debugger', '/t', 'REG_SZ', '/d', r'C:\ProgramData\hang.exe')
 reg(CCS + r'\Control\Session Manager', '/v', 'SetupExecute', '/t', 'REG_MULTI_SZ', '/d', r'C:\Windows\setupx.exe')
 reg(CCS + r'\Control\BootVerificationProgram', '/v', 'ImagePath', '/t', 'REG_SZ', '/d', r'C:\Windows\bvp.exe')
@@ -1436,7 +1438,8 @@ try:
                ('Service FailureCommand', 'FixtureSvc'), ('AMSI providers', '{11111111-aaaa-bbbb-cccc-000000000001}'),
                ('HKCU\\Environment (.NET)', 'DOTNET_STARTUP_HOOKS'), ('Custom shim database', '{22222222-0000-0000-0000-000000000001}'),
                ('Shimmed program', 'putty.exe'), ('Setup ErrorHandler.cmd', 'ErrorHandler.cmd'),
-               ('PowerShell profile (all users)', 'profile.ps1')}
+               ('PowerShell profile (all users)', 'profile.ps1'), ('HKCU\\...\\Windows (legacy Load)', 'Load'),
+               ('Winlogon Notify', 'evil')}
     want_ok = {('WinSock AutodialDLL', 'AutodialDLL'), ('GP extensions', '{00000000-0000-0000-0000-00000000aaaa}'),
                ('TelemetryController', 'Appraiser'), ('AMSI providers', '{11111111-aaaa-bbbb-cccc-000000000002}'),
                ('System environment (.NET)', 'COR_PROFILER_PATH')}
@@ -1448,7 +1451,7 @@ try:
     elif lsa != {'lsasrv.dll': False, 'C:\\ProgramData\\lsaext.dll': True}:
         print(f'FAIL autoruns LSA extensions: {lsa}'); fails += 1
     else:
-        print('checked autoruns  (14 less-known locations flagged, 5 stock-looking controls not, LSA extension list split)')
+        print('checked autoruns  (16 less-known locations flagged, 5 stock-looking controls not, LSA extension list split)')
 except Exception as e:
     print('FAIL autoruns new locations check:', e); fails += 1
 

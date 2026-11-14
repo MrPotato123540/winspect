@@ -744,6 +744,17 @@ int cmd_autoruns(int argc, char **argv)
     read_value(HKEY_LOCAL_MACHINE, "Software\\Microsoft\\Office test\\Special\\Perf", "",
                "HKLM\\Office test", 1, NULL, &c);
 
+    // Legacy auto-start values kept for Windows 3.x compatibility and still
+    // honoured: programs listed in "Load" / "Run" start at logon. Empty today.
+    static const char NTWIN[] = "Software\\Microsoft\\Windows NT\\CurrentVersion\\Windows";
+    read_value(HKEY_CURRENT_USER, NTWIN, "Load", "HKCU\\...\\Windows (legacy Load)", 1, NULL, &c);
+    read_value(HKEY_CURRENT_USER, NTWIN, "Run",  "HKCU\\...\\Windows (legacy Run)",  1, NULL, &c);
+    // Winlogon notification packages: DLLs winlogon.exe called on logon /
+    // logoff / lock events. Removed in Vista; a key here on a current system
+    // was put there by something else.
+    enum_subkey_value(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon\\Notify",
+                      "DllName", "Winlogon Notify", 0, asep_system_dir_default, &c);
+
     // ---- Less-known locations (the "beyond the Run key" family) ---------------
     // Debuggers Windows starts by itself: AeDebug when any program crashes
     // (T1546.012 family), the managed-code equivalent, and the two Windows

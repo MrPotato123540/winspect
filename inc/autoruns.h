@@ -7,7 +7,8 @@
 // print monitors, NetSh helpers, AppCertDlls, cmd.exe AutoRun, logon scripts,
 // Active Setup, time providers, screensaver, exefile / ms-settings handler
 // hijacks, the "Office test" key and the Startup folders; plus the less-known
-// family: AeDebug / .NET / WER debuggers, SetupExecute / PlatformExecute,
+// family: the legacy Load / Run values, Winlogon Notify DLLs, AeDebug / .NET /
+// WER debuggers, SetupExecute / PlatformExecute,
 // BootVerificationProgram, LSA extensions, Winlogon mpnotify, DNS
 // ServerLevelPluginDll, WinSock AutodialDLL, Group Policy extensions,
 // TelemetryController commands, search-indexer DLL overrides, service

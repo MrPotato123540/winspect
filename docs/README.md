@@ -89,6 +89,11 @@ Sırayla oku. Her dosya bir öncekinin üstüne kurulu:
     `detections`: Defender'ın Detection History dosyaları ve biçimi;
     `boots`: açılış / kapanış, kimin istediği, saat değişiklikleri ve neden
     kayıt sırası; EVTX okuyucusunda klasik olay dizgileri düzeltmesi.
+28. **[27 — Diğer araçlarla karşılaştırma ve yol haritası](27-arac-karsilastirmasi-ve-yol-haritasi.md)**
+    KAPE, Velociraptor, osquery, PersistenceSniper, Volatility, plaso ve
+    winPEAS'in kapsam listeleriyle satır satır karşılaştırma: ne var, bu turda
+    ne eklendi (`autoruns` +22 nokta, `posture` +6, `hunt` adı değiştirilmiş
+    araç, `capability`, `logons --failed`), sırada ne var, ne bilerek yapılmıyor.
 
 ## Aklında tut: tek cümlelik fikir
 
