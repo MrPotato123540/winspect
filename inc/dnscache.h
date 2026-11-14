@@ -11,7 +11,8 @@
 // flagged: a name is not suspicious by its look. --find keeps rows whose
 // name or data contains the text. The cache is answered from memory
 // (DNS_QUERY_NO_WIRE_ONLY): no query leaves the machine. Needs the DNS Client
-// service; an empty or unavailable cache is said so. Read-only. Usage:
+// service; recent Windows 11 builds also need administrator (as ipconfig
+// /displaydns does). An empty or unreadable cache is said so. Read-only. Usage:
 //   winspect dns [--find <text>] [--json | --csv]
 int cmd_dns(int argc, char **argv);
 

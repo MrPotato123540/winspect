@@ -933,12 +933,22 @@ with open(os.path.join(ntd, 'J'), 'wb') as f:
                     (50 | (2 << 48), dl, T0 + 10, 0x2000, 'invoice.exe'),
                     (51 | (1 << 48), dl, T0 + 20, 0x80000200, 'tool.ps1'),
                     (52 | (1 << 48), dl, T0 + 30, 0x100, 'notes.txt'),
-                    (53 | (1 << 48), 99 | (7 << 48), T0 + 40, 0x100, 'lost.txt')]))
+                    (53 | (1 << 48), 99 | (7 << 48), T0 + 40, 0x100, 'lost.txt'),
+                    # app execution alias (a reparse point) deleted: not code, not flagged
+                    (54 | (1 << 48), dl, T0 + 50, 0x80000200, 'python.exe', 0x420),
+                    # the same dll recreated and deleted three times: one flag, on the last
+                    (55 | (1 << 48), dl, T0 + 60, 0x80000200, 'rules-verify.dll'),
+                    (56 | (1 << 48), dl, T0 + 70, 0x80000200, 'rules-verify.dll'),
+                    (57 | (1 << 48), dl, T0 + 80, 0x80000200, 'rules-verify.dll')]))
 rc, out, err = wine([exe, 'usn', r'C:\ntfs\J', '--mft', r'C:\ntfs\MFT', '--json'])
 try:
     ur = json.loads(out)
     fl = {r['name']: r['reason'] for r in ur if r['suspicious']}
     folders = {r['name']: r['folder'] for r in ur}
+    rv = [r for r in ur if r['name'] == 'rules-verify.dll' and r['suspicious']]
+    if len(rv) != 1 or '3 times' not in rv[0]['reason'] or rv[0]['time'] != max(r['time'] for r in ur if r['name'] == 'rules-verify.dll'):
+        print(f'FAIL usn: repeated deletion should be flagged once, on the last: {rv}'); fails += 1
+    fl.pop('rules-verify.dll', None)
     if fl != {'invoice.exe': 'renamed into a program or script', 'tool.ps1': 'program or script deleted'}:
         print(f'FAIL usn: flags {fl}'); fails += 1
     elif folders.get('notes.txt') != '\\Users\\bob\\Downloads' or 'reused or missing' not in folders.get('lost.txt', ''):
@@ -946,7 +956,7 @@ try:
     elif not any(r['old_name'] == 'invoice.pdf' for r in ur if r['name'] == 'invoice.exe'):
         print('FAIL usn: old name not paired with the new one'); fails += 1
     else:
-        print('checked usn --mft --json  (rename into exe and deleted script flagged, folders from the $MFT)')
+        print('checked usn --mft --json  (rename into exe and deleted script flagged, deleted alias not, repeated delete once; folders from the $MFT)')
 except Exception as e:
     print('FAIL usn check:', e, out[:200]); fails += 1
 rc, out, err = wine([exe, 'mft', r'C:\ntfs\MFT', '--timestomp', '--json'])
@@ -1423,6 +1433,15 @@ reg(HKCU + 'Environment', '/v', 'DOTNET_STARTUP_HOOKS', '/t', 'REG_SZ', '/d', r'
 reg(CCS + r'\Control\Session Manager\Environment', '/v', 'COR_PROFILER_PATH', '/t', 'REG_SZ', '/d', r'C:\Program Files\Monitor\prof.dll')
 reg(NT + r'\AppCompatFlags\InstalledSDB\{22222222-0000-0000-0000-000000000001}', '/v', 'DatabasePath', '/t', 'REG_SZ', '/d', r'C:\Windows\AppPatch\Custom\x.sdb')
 reg(NT + r'\AppCompatFlags\Custom\putty.exe', '/v', '{22222222-0000-0000-0000-000000000001}.sdb', '/t', 'REG_QWORD', '/d', '1')
+# Controls seen on a real Windows 11: the compatibility database Windows
+# Update installs, the program it applies to, and NVIDIA's recovery command
+# (a log folder under ProgramData as an argument of a script in the driver store).
+MSG = '{22221111-1111-1111-1111-111111111111}'
+reg(NT + r'\AppCompatFlags\InstalledSDB' + '\\' + MSG, '/v', 'DatabasePath', '/t', 'REG_SZ', '/d', r'C:\WINDOWS\AppPatch\CustomSDB' + '\\' + MSG + '.sdb')
+reg(NT + r'\AppCompatFlags\InstalledSDB' + '\\' + MSG, '/v', 'DatabaseDescription', '/t', 'REG_SZ', '/d', 'Microsoft Windows Application Compatibility Fix Database')
+reg(NT + r'\AppCompatFlags\Custom\patchsdbtest.exe', '/v', MSG + '.sdb', '/t', 'REG_QWORD', '/d', '1')
+reg(CCS + r'\Services\NvFixture', '/v', 'FailureCommand', '/t', 'REG_SZ', '/d',
+    r'cmd.exe /C C:\WINDOWS\System32\DriverStore\FileRepository\nv.inf_amd64_1\Recovery.bat NvFixture %ProgramData%\NVIDIA\log.txt')
 os.makedirs(os.path.join(pfx, 'drive_c', 'windows', 'Setup', 'Scripts'), exist_ok=True)
 open(os.path.join(pfx, 'drive_c', 'windows', 'Setup', 'Scripts', 'ErrorHandler.cmd'), 'w').write('echo x\n')
 psd = os.path.join(pfx, 'drive_c', 'windows', 'system32', 'WindowsPowerShell', 'v1.0'); os.makedirs(psd, exist_ok=True)
@@ -1441,6 +1460,8 @@ try:
                ('PowerShell profile (all users)', 'profile.ps1'), ('HKCU\\...\\Windows (legacy Load)', 'Load'),
                ('Winlogon Notify', 'evil')}
     want_ok = {('WinSock AutodialDLL', 'AutodialDLL'), ('GP extensions', '{00000000-0000-0000-0000-00000000aaaa}'),
+               ('Custom shim database', '{22221111-1111-1111-1111-111111111111}'), ('Shimmed program', 'patchsdbtest.exe'),
+               ('Service FailureCommand', 'NvFixture'),
                ('TelemetryController', 'Appraiser'), ('AMSI providers', '{11111111-aaaa-bbbb-cccc-000000000002}'),
                ('System environment (.NET)', 'COR_PROFILER_PATH')}
     lsa = {r['command']: r['suspicious'] for r in ar if r['location'] == 'LSA extensions'}
@@ -1527,6 +1548,12 @@ def cam(root, cap, entry, start, stop, nonpackaged=True):
     reg(key, '/v', 'LastUsedTimeStart', '/t', 'REG_QWORD', '/d', str(start))
     reg(key, '/v', 'LastUsedTimeStop', '/t', 'REG_QWORD', '/d', str(stop))
 cam(HKCU, 'microphone', 'C:#Users#bob#AppData#Local#Temp#rat.exe', OT, OT + 600000000)
+# A file that exists, unsigned, in a user-writable folder (the helper built above).
+unsigned_app = os.path.join(pfx, 'drive_c', 'users', 'Public', 'camtool.exe')
+shutil.copy(os.path.join(fake, 'holder.exe') if os.path.exists(os.path.join(fake, 'holder.exe')) else exe, unsigned_app)
+cam(HKCU, 'webcam', 'C:#users#Public#camtool.exe', OT + 20000000, OT + 30000000)
+# An old per-user install that is gone now: listed, not flagged.
+cam(HKCU, 'microphone', 'C:#Users#bob#AppData#Local#Discord#app-1.0.9006#Discord.exe', OT, OT + 10000000)
 cam(HKCU, 'microphone', 'C:#Program Files#Zoom#bin#Zoom.exe', OT + 10000000, 0)
 cam(HKLM, 'webcam', 'Microsoft.WindowsCamera_8wekyb3d8bbwe', OT, OT + 10000000, nonpackaged=False)
 cam(HKCU, 'location', 'C:#Windows#explorer.exe', 0, 0)
@@ -1548,12 +1575,18 @@ try:
         print(f'FAIL capability: in-use entry: {zoom}'); fails += 1
     elif not pkg or pkg['suspicious'] or pkg['packaged'] is not True or pkg['scope'] != 'system':
         print(f'FAIL capability: packaged app: {pkg}'); fails += 1
+    elif not cj.get(r'C:\users\Public\camtool.exe') or not cj[r'C:\users\Public\camtool.exe']['suspicious'] \
+            or cj[r'C:\users\Public\camtool.exe']['signature'] != 'UNSIGNED' or 'unsigned' not in cj[r'C:\users\Public\camtool.exe']['reason']:
+        print(f"FAIL capability: unsigned program on disk: {cj.get(r'C:\\users\\Public\\camtool.exe')}"); fails += 1
+    elif cj.get(r'C:\Users\bob\AppData\Local\Discord\app-1.0.9006\Discord.exe', {}).get('suspicious', True) \
+            or cj[r'C:\Users\bob\AppData\Local\Discord\app-1.0.9006\Discord.exe']['signature'] != 'gone':
+        print('FAIL capability: a deleted per-user install must be listed as gone, not flagged'); fails += 1
     elif r'C:\Windows\explorer.exe' in cj or 'explorer.exe' not in out2:
         print('FAIL capability: never-used entry must show only with --all'); fails += 1
     elif len(offl) != 1 or offl[0]['app'] != r'C:\Users\Public\cam.exe' or 'camera' not in offl[0]['reason']:
         print(f'FAIL capability --software: {offl}'); fails += 1
     else:
-        print('checked capability  (live + offline hive: Temp program on the microphone flagged, in-use entry, packaged app)')
+        print('checked capability  (live + offline hive: unsigned program and gone-from-Temp flagged; gone per-user install, in-use entry, packaged app not)')
 except Exception as e:
     print('FAIL capability check:', e); fails += 1
 

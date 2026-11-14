@@ -357,14 +357,120 @@ void cam_app_path(const char *key, char *out, size_t n)
     out[i] = '\0';
 }
 
-const char *cam_reason(const char *capability, const char *app, int nonpackaged)
+const char *cam_reason(const char *capability, const char *app, int nonpackaged, int trust)
 {
-    if (!nonpackaged || !ioc_user_writable(app)) return NULL;
-    if (strlen(capability) == 10 && _strnicmp_portable(capability, "microphone", 10) == 0)
-        return "program in a user-writable dir used the microphone";
-    if (strlen(capability) == 6 && _strnicmp_portable(capability, "webcam", 6) == 0)
-        return "program in a user-writable dir used the camera";
+    if (!nonpackaged || trust == 1) return NULL;
+    int mic = strlen(capability) == 10 && _strnicmp_portable(capability, "microphone", 10) == 0;
+    int cam = strlen(capability) == 6 && _strnicmp_portable(capability, "webcam", 6) == 0;
+    if (!mic && !cam) return NULL;
+    if (trust == 0 && ioc_user_writable(app))
+        return mic ? "unsigned program in a user-writable dir used the microphone"
+                   : "unsigned program in a user-writable dir used the camera";
+    if (trust < 0 && (ioc_contains_ci(app, "\\Temp\\") || ioc_contains_ci(app, "\\Downloads\\") ||
+                      ioc_contains_ci(app, "\\Users\\Public\\") || ioc_contains_ci(app, "\\$Recycle.Bin\\")))
+        return mic ? "program in a temp / download / public folder used the microphone"
+                   : "program in a temp / download / public folder used the camera";
     return NULL;
+}
+
+// Next whitespace-separated token of s (quotes group), copied unquoted.
+// Returns a pointer past it, or NULL at the end.
+static const char *next_token(const char *s, char *out, size_t n)
+{
+    while (*s == ' ' || *s == '\t') s++;
+    if (*s == '\0') return NULL;
+    size_t o = 0;
+    if (*s == '"') {
+        s++;
+        while (*s && *s != '"') { if (o + 1 < n) out[o++] = *s; s++; }
+        if (*s == '"') s++;
+    } else {
+        while (*s && *s != ' ' && *s != '\t') { if (o + 1 < n) out[o++] = *s; s++; }
+    }
+    out[o] = '\0';
+    return s;
+}
+
+static const char *base_name(const char *p)
+{
+    const char *b = strrchr(p, '\\');
+    return b ? b + 1 : p;
+}
+
+static int name_is(const char *path, const char *a, const char *b)
+{
+    const char *bn = base_name(path);
+    size_t L = strlen(bn);
+    return (strlen(a) == L && _strnicmp_portable(bn, a, L) == 0) || (b && strlen(b) == L && _strnicmp_portable(bn, b, L) == 0);
+}
+
+// A token that names a file: has a backslash, or ends in a dotted extension.
+static int pathlike(const char *t)
+{
+    if (strchr(t, '\\')) return 1;
+    const char *dot = strrchr(t, '.');
+    return dot && dot != t && dot[1] && strlen(dot) <= 5;
+}
+
+int asep_command_target(const char *cmd, char *out, size_t n)
+{
+    char prog[1024], tok[1024];
+    out[0] = '\0';
+    const char *rest = next_token(cmd, prog, sizeof prog);
+    if (rest == NULL || prog[0] == '\0') return 0;
+    if (name_is(prog, "rundll32.exe", "rundll32") || name_is(prog, "regsvr32.exe", "regsvr32")) {
+        return ioc_command_image(cmd, out, n);
+    }
+    if (name_is(prog, "cmd.exe", "cmd")) {
+        // The first file-like token after /c or /k ("start", "call" skipped).
+        int after = 0;
+        while ((rest = next_token(rest, tok, sizeof tok)) != NULL) {
+            if (!after) {
+                if (_strnicmp_portable(tok, "/c", 3) == 0 || _strnicmp_portable(tok, "/k", 3) == 0) after = 1;
+                continue;
+            }
+            if (pathlike(tok)) { snprintf(out, n, "%s", tok); return 1; }
+            if (tok[0] != '/' && tok[0] != '\0' && _strnicmp_portable(tok, "start", 6) != 0 && _strnicmp_portable(tok, "call", 5) != 0) return 0;
+        }
+        return 0;
+    }
+    if (name_is(prog, "powershell.exe", "pwsh.exe") || name_is(prog, "powershell", "pwsh")) {
+        while ((rest = next_token(rest, tok, sizeof tok)) != NULL) {
+            if (_strnicmp_portable(tok, "-file", 6) == 0 || _strnicmp_portable(tok, "-f", 3) == 0) {
+                if (next_token(rest, tok, sizeof tok) && tok[0]) { snprintf(out, n, "%s", tok); return 1; }
+                return 0;
+            }
+        }
+        return 0;                                    // -command <text>: no file to judge
+    }
+    if (name_is(prog, "wscript.exe", "cscript.exe") || name_is(prog, "mshta.exe", "mshta") || name_is(prog, "wscript", "cscript")) {
+        while ((rest = next_token(rest, tok, sizeof tok)) != NULL) {
+            if (tok[0] == '/') continue;             // //B, //NoLogo, /e:jscript
+            if (pathlike(tok) || strstr(tok, "://")) { snprintf(out, n, "%s", tok); return 1; }
+            return 0;
+        }
+        return 0;
+    }
+    snprintf(out, n, "%s", prog);
+    return 1;
+}
+
+int asep_ms_compat_sdb(const char *guid, const char *path)
+{
+    static const char G[] = "{22221111-1111-1111-1111-111111111111}";
+    if (guid == NULL || path == NULL || strlen(guid) != sizeof G - 1 || _strnicmp_portable(guid, G, sizeof G - 1) != 0) return 0;
+    // "...\AppPatch\CustomSDB\{GUID}.sdb", the Windows directory written as
+    // C:\Windows, %windir% or %SystemRoot%.
+    static const char *const roots[] = { "%windir%", "%systemroot%", NULL };
+    char tail[128];
+    snprintf(tail, sizeof tail, "\\AppPatch\\CustomSDB\\%s.sdb", G);
+    size_t pl = strlen(path), tl = strlen(tail);
+    if (pl <= tl || _strnicmp_portable(path + pl - tl, tail, tl) != 0) return 0;
+    size_t hl = pl - tl;                             // the Windows directory part
+    for (int i = 0; roots[i]; i++) {
+        if (strlen(roots[i]) == hl && _strnicmp_portable(path, roots[i], hl) == 0) return 1;
+    }
+    return hl == 10 && path[1] == ':' && _strnicmp_portable(path + 2, "\\windows", 8) == 0;
 }
 
 const char *asep_renamed_tool(const char *original, const char *name)

@@ -14,6 +14,7 @@
 #include "artparse.h"
 #include "ioc.h"
 #include "jsonutil.h"
+#include "sign.h"
 
 #include <windows.h>
 #include <stdint.h>
@@ -30,7 +31,7 @@ static void collect(const char *name, void *vctx)
 }
 
 typedef struct {
-    int mode, first, all, only_flagged;
+    int mode, first, all, only_flagged, live;
     const char *find;
     unsigned shown, flagged;
 } cctx;
@@ -57,7 +58,20 @@ static void one(cctx *c, regsrc *s, const char *keypath, const char *scope, cons
     char app[600];
     if (nonpackaged) cam_app_path(entry, app, sizeof app);
     else snprintf(app, sizeof app, "%s", entry);
-    const char *reason = start ? cam_reason(capability, app, nonpackaged) : NULL;
+    // Signature of the program, when it is on this machine (live only).
+    int trust = -1;
+    const char *sig = "-";
+    if (nonpackaged && c->live) {
+        WCHAR w[700];
+        if (MultiByteToWideChar(CP_UTF8, 0, app, -1, w, 700) && GetFileAttributesW(w) != INVALID_FILE_ATTRIBUTES) {
+            const char *src = "none";
+            trust = sign_file_trust(w, &src) ? 1 : 0;
+            sig = trust ? "signed" : "UNSIGNED";
+        } else {
+            sig = "gone";
+        }
+    }
+    const char *reason = start ? cam_reason(capability, app, nonpackaged, trust) : NULL;
     if (c->only_flagged && reason == NULL) return;
     if (c->find && !ioc_contains_ci(app, c->find) && !ioc_contains_ci(capability, c->find)) return;
     char t0[24] = "", t1[24] = "", iso[40];
@@ -67,15 +81,15 @@ static void one(cctx *c, regsrc *s, const char *keypath, const char *scope, cons
     c->shown++;
     if (reason) c->flagged++;
     if (c->mode == 0) {
-        printf("%s %-22s %-19s  %-19s  %-5s %-6s %s\n", reason ? "[!]" : "   ", capability, t0[0] ? t0 : "-",
-               in_use ? "IN USE NOW" : (t1[0] ? t1 : "-"), consent[0] ? consent : "-", scope, app);
+        printf("%s %-22s %-19s  %-19s  %-6s %-8s %s\n", reason ? "[!]" : "   ", capability, t0[0] ? t0 : "-",
+               in_use ? "IN USE NOW" : (t1[0] ? t1 : "-"), scope, sig, app);
         if (reason) printf("        <- %s\n", reason);
     } else if (c->mode == 2) {
         csv_str(capability);
         printf(",%s,%s,%d,", t0, t1, in_use);
         csv_str(consent); putchar(',');
         csv_str(scope); putchar(',');
-        printf("%d,", nonpackaged ? 0 : 1);
+        printf("%d,%s,", nonpackaged ? 0 : 1, sig);
         csv_str(app); putchar(',');
         csv_str(reason ? reason : ""); putchar('\n');
     } else {
@@ -84,7 +98,7 @@ static void one(cctx *c, regsrc *s, const char *keypath, const char *scope, cons
         printf(",\"last_start\":\"%s\",\"last_stop\":\"%s\",\"in_use\":%s,\"consent\":", t0, t1, in_use ? "true" : "false");
         json_str(consent);
         fputs(",\"scope\":", stdout); json_str(scope);
-        printf(",\"packaged\":%s,\"app\":", nonpackaged ? "false" : "true");
+        printf(",\"packaged\":%s,\"signature\":\"%s\",\"app\":", nonpackaged ? "false" : "true", sig);
         json_str(app);
         printf(",\"suspicious\":%s,\"reason\":", reason ? "true" : "false");
         json_str(reason ? reason : "");
@@ -167,14 +181,15 @@ int cmd_capability(int argc, char **argv)
             have_u = 1;
         }
     } else {
+        c.live = 1;
         have_m = regsrc_open_live(&machine, HKEY_LOCAL_MACHINE, "SOFTWARE", "HKLM\\SOFTWARE") == 0;
         have_u = regsrc_open_live(&user, HKEY_CURRENT_USER, NULL, "HKCU") == 0;
     }
     if (c.mode == 0) {
         puts("capability  (who used the microphone, camera, location ...; UTC)\n");
-        printf("    %-22s %-19s  %-19s  %-5s %-6s %s\n", "capability", "last start", "last stop", "set", "scope", "app");
+        printf("    %-22s %-19s  %-19s  %-6s %-8s %s\n", "capability", "last start", "last stop", "scope", "file", "app");
     } else if (c.mode == 2) {
-        puts("capability,last_start,last_stop,in_use,consent,scope,packaged,app,reason");
+        puts("capability,last_start,last_stop,in_use,consent,scope,packaged,signature,app,reason");
     } else {
         putchar('[');
     }

@@ -40,6 +40,12 @@ enum patch_kind {
 enum patch_kind patch_decode(const unsigned char *code, size_t n, uint64_t addr,
                              int is64, uint64_t *target);
 
+// 1 for an executable section whose in-memory bytes the Windows loader
+// itself rewrites, so a disk / memory difference there says nothing about
+// tampering: "fothk" (function-override thunks, Windows 11 24H2+). name is
+// the 8-byte, possibly unterminated, IMAGE_SECTION_HEADER.Name.
+int patch_loader_written_section(const char *name);
+
 // Short lowercase name for a kind ("jmp", "call", "jmp [mem]", ...).
 const char *patch_kind_name(enum patch_kind k);
 

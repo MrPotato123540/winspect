@@ -412,6 +412,17 @@ int detect_image_tamper(HANDLE proc, struct tamper_result *out)
         if (!(secs[i].Characteristics & IMAGE_SCN_MEM_EXECUTE)) {
             continue;
         }
+        // Windows 11 24H2+ system images carry a "fothk" section: function-
+        // override thunks that the LOADER rewrites in every process (the
+        // dynamic-relocation table's function-override entries). Its bytes
+        // always differ from the file, so comparing it only produces a false
+        // "tampered" verdict. Skipped and counted, not compared.
+        if (patch_loader_written_section((const char *)secs[i].Name)) {
+            memcpy(out->skipped_section, secs[i].Name, 8);
+            out->skipped_section[8] = '\0';
+            out->skipped_sections++;
+            continue;
+        }
         DWORD va = secs[i].VirtualAddress;
         DWORD raw = secs[i].SizeOfRawData;
         DWORD vsize = secs[i].Misc.VirtualSize;
@@ -514,6 +525,9 @@ void detect_tamper_summary(const struct tamper_result *t, char *out, size_t n)
 
 void detect_print_patches(const struct tamper_result *t, const char *indent)
 {
+    if (t->skipped_sections) {
+        printf("%snot compared: %s (written by the Windows loader in every process)\n", indent, t->skipped_section);
+    }
     for (unsigned i = 0; i < t->npatches; i++) {
         const struct tamper_patch *p = &t->patches[i];
         char d[TAMPER_PATCH_BYTES * 3 + 4], m[TAMPER_PATCH_BYTES * 3 + 4];

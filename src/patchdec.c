@@ -106,3 +106,11 @@ const char *patch_kind_name(enum patch_kind k)
     default:             return "other";
     }
 }
+
+int patch_loader_written_section(const char *name)
+{
+    char n[9];
+    memcpy(n, name, 8);
+    n[8] = '\0';
+    return strcmp(n, "fothk") == 0;
+}

@@ -162,14 +162,27 @@ int cmd_dns(int argc, char **argv)
     HMODULE dnsapi = LoadLibraryExA("dnsapi.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
     get_cache_table_fn get_table = dnsapi ? (get_cache_table_fn)(void (*)(void))GetProcAddress(dnsapi, "DnsGetCacheDataTable") : NULL;
     ws_dns_cache_entry *head = NULL;
+    SetLastError(0);
     if (get_table == NULL || !get_table(&head)) {
-        // FALSE with no entries is also what an empty cache returns.
+        DWORD err = GetLastError();
+        // FALSE with no error is what an empty cache returns. Recent Windows 11
+        // builds also refuse the cache to non-administrators (ipconfig
+        // /displaydns then says "The requested operation requires elevation").
         if (c.mode == 1) puts("[]");
         else if (c.mode == 2) puts("name,type,data,ttl,section");
-        fputs(get_table == NULL ? "dns: this system does not expose the resolver cache (DnsGetCacheDataTable missing)\n"
-                                : "dns: the resolver cache is empty or the DNS Client service is not running\n", stderr);
+        int rc = 0;
+        if (get_table == NULL) {
+            fputs("dns: this system does not expose the resolver cache (DnsGetCacheDataTable missing)\n", stderr);
+            rc = 1;
+        } else if (err == ERROR_ACCESS_DENIED || err == ERROR_ELEVATION_REQUIRED) {
+            fputs("dns: access to the resolver cache denied - run as administrator\n", stderr);
+            rc = 1;
+        } else {
+            fprintf(stderr, "dns: the resolver cache could not be read (error %lu): it is empty, the DNS Client service is not running, "
+                            "or this Windows requires elevation - try again as administrator\n", (unsigned long)err);
+        }
         if (dnsapi) FreeLibrary(dnsapi);
-        return get_table == NULL ? 1 : 0;
+        return rc;
     }
     if (c.mode == 0) {
         puts("dns  (resolver cache; TTL = seconds left)\n");

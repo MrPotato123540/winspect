@@ -47,6 +47,48 @@ static hproc g[HUNT_MAX];
 // reading the target's memory.
 typedef LONG (NTAPI *NtQIP_t)(HANDLE, ULONG, PVOID, ULONG, PULONG);
 
+// SYSTEM_PROCESS_INFORMATION as returned by NtQuerySystemInformation(5):
+// NextEntryOffset @0, CreateTime @0x20, UniqueProcessId @0x50 (x64) / @0x44
+// (x86). Only those three fields are read, each bounds-checked.
+typedef LONG (NTAPI *NtQSI_t)(ULONG, PVOID, ULONG, PULONG);
+
+static void fill_created_from_system(hproc *procs, int n)
+{
+    NtQSI_t q = (NtQSI_t)(void (*)(void))GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtQuerySystemInformation");
+    if (q == NULL) return;
+    ULONG size = 1u << 20, need = 0;
+    unsigned char *buf = NULL;
+    for (int tries = 0; tries < 6; tries++) {
+        free(buf);
+        buf = (unsigned char *)malloc(size);
+        if (buf == NULL) return;
+        LONG st = q(5, buf, size, &need);
+        if (st == 0) break;
+        if (st != (LONG)0xC0000004L || tries == 5) { free(buf); return; }   // STATUS_INFO_LENGTH_MISMATCH
+        size = (need > size ? need : size) + (1u << 16);
+    }
+    const size_t pid_off = sizeof(void *) == 8 ? 0x50 : 0x44;
+    size_t off = 0;
+    for (int guard = 0; guard < 65536; guard++) {
+        if (off + pid_off + sizeof(void *) > size) break;
+        ULONG next;
+        LARGE_INTEGER ct;
+        ULONG_PTR pid;
+        memcpy(&next, buf + off, sizeof next);
+        memcpy(&ct, buf + off + 0x20, sizeof ct);
+        memcpy(&pid, buf + off + pid_off, sizeof pid);
+        for (int i = 0; i < n; i++) {
+            if (procs[i].pid == (DWORD)pid && procs[i].created == 0 && ct.QuadPart > 0) {
+                procs[i].created = (ULONGLONG)ct.QuadPart;
+                break;
+            }
+        }
+        if (next == 0) break;
+        off += next;
+    }
+    free(buf);
+}
+
 static void query(hproc *p, NtQIP_t ntqip)
 {
     HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, p->pid);
@@ -216,11 +258,21 @@ int cmd_hunt(int argc, char **argv)
     }
     CloseHandle(snap);
 
-    // Resolve real parents (guarding against PID reuse via creation time).
+    // Creation times without opening the processes: the system process list
+    // carries them for every process, protected ones included. Opening csrss
+    // or wininit fails without elevation, and without their creation time a
+    // reused parent PID cannot be told from the real parent.
+    fill_created_from_system(g, n);
+
+    // Resolve real parents. The parent of csrss / wininit / winlogon (an smss
+    // instance) exits by design, and its PID is soon reused: a "parent"
+    // created AFTER the child is not the parent. When either time is still
+    // unknown the link cannot be checked, so none is made.
     for (int i = 0; i < n; i++) {
         for (int j = 0; j < n; j++) {
             if (j == i || g[j].pid != g[i].ppid) continue;
-            if (g[i].created && g[j].created && g[j].created > g[i].created) break;   // reused PID
+            if (g[i].created == 0 || g[j].created == 0) break;              // cannot verify
+            if (g[j].created > g[i].created) break;                         // reused PID
             g[i].parent = j;
             break;
         }

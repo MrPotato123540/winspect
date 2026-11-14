@@ -239,6 +239,27 @@ static int def_security_providers(const char *s)
     return in_list_ci(s, d);
 }
 
+// Values under AppCompatFlags\\Custom\\<program>: "{GUID}.sdb" per database.
+struct sdb_refs { int n, all_ms; char text[600]; };
+
+static void collect_sdb_ref(const char *name, uint32_t type, const unsigned char *d, size_t len, void *vctx)
+{
+    (void)type; (void)d; (void)len;
+    struct sdb_refs *r = (struct sdb_refs *)vctx;
+    size_t L = strlen(name);
+    if (L < 5 || _stricmp(name + L - 4, ".sdb") != 0) return;
+    char guid[64];
+    snprintf(guid, sizeof guid, "%.*s", (int)(L - 4 < 63 ? L - 4 : 63), name);
+    char path[200];
+    snprintf(path, sizeof path, "%%windir%%\\AppPatch\\CustomSDB\\%s.sdb", guid);
+    int ms = asep_ms_compat_sdb(guid, path);
+    if (r->n == 0) r->all_ms = 1;
+    if (!ms) r->all_ms = 0;
+    r->n++;
+    size_t o = strlen(r->text);
+    snprintf(r->text + o, sizeof r->text - o, "%s%s%s", o ? ", " : "", guid, ms ? " = Microsoft compatibility fixes" : "");
+}
+
 // For lists that are empty on a stock system: nothing is a default.
 static int def_never(const char *s)
 {
@@ -807,8 +828,37 @@ int cmd_autoruns(int argc, char **argv)
 
     // Service recovery: a command the Service Control Manager runs when the
     // service FAILS - persistence that never shows as a service image.
-    enum_subkey_value(HKEY_LOCAL_MACHINE, "SYSTEM\\CurrentControlSet\\Services", "FailureCommand",
-                      "Service FailureCommand", 0, NULL, &c);
+    // Judged by what it runs (the program, or the script cmd /c starts), not
+    // by every path in its arguments: NVIDIA's stock recovery command passes
+    // a log folder under ProgramData to a script in the driver store.
+    {
+        regsrc *s;
+        rkey k;
+        if (open_at(&c, HKEY_LOCAL_MACHINE, "SYSTEM\\CurrentControlSet\\Services", &s, &k)) {
+            static struct subnames sv;
+            sv.count = 0;
+            rk_subkeys(s, &k, collect_sub, &sv);
+            rk_close(&k);
+            char rel[512];
+            pick(&c, HKEY_LOCAL_MACHINE, "SYSTEM\\CurrentControlSet\\Services", rel, sizeof rel);
+            for (int i = 0; i < sv.count; i++) {
+                char p[900], cmd[2048], run[1024];
+                snprintf(p, sizeof p, "%s\\%s", rel, sv.n[i]);
+                rkey sk;
+                if (rk_open(s, p, &sk) != 0) continue;
+                if (rk_get_str(s, &sk, "FailureCommand", cmd, sizeof cmd) && cmd[0]) {
+                    const char *reason = NULL;
+                    if (asep_command_target(cmd, run, sizeof run)) {
+                        if (ioc_user_writable(run)) reason = "runs from a user-writable path";
+                    } else if (ioc_user_writable(cmd)) {
+                        reason = "user-writable path";
+                    }
+                    emit_reason(&c, "Service FailureCommand", sv.n[i], cmd, reason);
+                }
+                rk_close(&sk);
+            }
+        }
+    }
 
     // AMSI providers: COM DLLs every AMSI-aware host (PowerShell, script
     // hosts, Office) loads and hands each script to. Registered by CLSID.
@@ -860,17 +910,51 @@ int cmd_autoruns(int argc, char **argv)
     {
         static const char SDB[]  = "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\AppCompatFlags\\InstalledSDB";
         static const char CUST[] = "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\AppCompatFlags\\Custom";
-        enum_subkey_value(HKEY_LOCAL_MACHINE, SDB, "DatabasePath", "Custom shim database", 1, NULL, &c);
         regsrc *s;
         rkey k;
+        char rel[512];
+        // Installed databases. Windows Update installs one itself (the
+        // "Application Compatibility Fix Database"); it is listed, not flagged.
+        if (open_at(&c, HKEY_LOCAL_MACHINE, SDB, &s, &k)) {
+            static struct subnames db;
+            db.count = 0;
+            rk_subkeys(s, &k, collect_sub, &db);
+            rk_close(&k);
+            pick(&c, HKEY_LOCAL_MACHINE, SDB, rel, sizeof rel);
+            for (int i = 0; i < db.count; i++) {
+                char p[900], path[1024] = "", desc[300] = "", shown[1400];
+                snprintf(p, sizeof p, "%s\\%s", rel, db.n[i]);
+                rkey dk;
+                if (rk_open(s, p, &dk) != 0) continue;
+                rk_get_str(s, &dk, "DatabasePath", path, sizeof path);
+                rk_get_str(s, &dk, "DatabaseDescription", desc, sizeof desc);
+                rk_close(&dk);
+                int ms = asep_ms_compat_sdb(db.n[i], path);
+                snprintf(shown, sizeof shown, "%s%s%s%s", path, desc[0] ? "  (" : "", desc, desc[0] ? ")" : "");
+                emit_reason(&c, "Custom shim database", db.n[i], shown,
+                            ms ? NULL : "custom shim database installed (T1546.011)");
+            }
+        }
+        // Programs a database applies to: one value "{GUID}.sdb" per database.
         if (open_at(&c, HKEY_LOCAL_MACHINE, CUST, &s, &k)) {
             static struct subnames sh;
             sh.count = 0;
             rk_subkeys(s, &k, collect_sub, &sh);
             rk_close(&k);
+            pick(&c, HKEY_LOCAL_MACHINE, CUST, rel, sizeof rel);
             for (int i = 0; i < sh.count; i++) {
-                emit_reason(&c, "Shimmed program", sh.n[i], "(a custom shim database applies to this program)",
-                            "custom shim database applied (T1546.011)");
+                char p[900];
+                snprintf(p, sizeof p, "%s\\%s", rel, sh.n[i]);
+                rkey pk;
+                if (rk_open(s, p, &pk) != 0) continue;
+                struct sdb_refs refs;
+                memset(&refs, 0, sizeof refs);
+                rk_values(s, &pk, collect_sdb_ref, &refs);
+                rk_close(&pk);
+                char shown[700];
+                snprintf(shown, sizeof shown, "(shim database%s %s)", refs.n > 1 ? "s" : "", refs.text[0] ? refs.text : "?");
+                emit_reason(&c, "Shimmed program", sh.n[i], shown,
+                            refs.n > 0 && refs.all_ms ? NULL : "custom shim database applied (T1546.011)");
             }
         }
     }

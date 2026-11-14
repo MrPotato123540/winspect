@@ -157,6 +157,22 @@ static int staging_name(const char *old)
 }
 
 #define OLD_SLOTS 4096
+#define DEL_SLOTS 65536
+
+// Identity of "this name in this folder" for counting repeated deletions:
+// FNV-1a over the parent reference and the lower-cased name.
+static uint64_t del_key(uint64_t parent, const char *name)
+{
+    uint64_t h = 1469598103934665603ULL;
+    for (int i = 0; i < 8; i++) { h ^= (parent >> (8 * i)) & 0xFF; h *= 1099511628211ULL; }
+    for (const char *p = name; *p; p++) {
+        unsigned char c = (unsigned char)*p;
+        if (c >= 'A' && c <= 'Z') c = (unsigned char)(c + 32);
+        h ^= c;
+        h *= 1099511628211ULL;
+    }
+    return h ? h : 1;
+}
 typedef struct { uint64_t ref; char name[260]; int flagged; } oldname;
 
 int cmd_usn(int argc, char **argv)
@@ -267,6 +283,30 @@ int cmd_usn(int argc, char **argv)
     else putchar('[');
     static oldname olds[OLD_SLOTS];
     memset(olds, 0, sizeof olds);
+    // First pass: how often each (folder, name) is deleted, and the USN of the
+    // last deletion. A program file deleted again and again is one that some
+    // software regenerates (an updater's cache, a verification copy); it is
+    // reported once, on its last deletion, with the count.
+    static struct { uint64_t key, last_usn; unsigned count; } dels[DEL_SLOTS];
+    memset(dels, 0, sizeof dels);
+    {
+        size_t o2 = 0;
+        usn_rec q;
+        while (usn_next(d, n, &o2, &q)) {
+            if (!(q.reason & 0x00000200) || !is_prog(q.name)) continue;
+            uint64_t key = del_key(q.parent_ref, q.name);
+            size_t h = (size_t)(key % DEL_SLOTS);
+            for (unsigned probe = 0; probe < 64; probe++, h = (h + 1) % DEL_SLOTS) {
+                if (dels[h].count == 0 || dels[h].key == key) {
+                    dels[h].key = key;
+                    dels[h].count++;
+                    dels[h].last_usn = q.usn;
+                    break;
+                }
+            }
+        }
+    }
+    static char recur[160];
     size_t off = 0;
     usn_rec r;
     unsigned long count = 0, shown = 0, flagged = 0;
@@ -303,6 +343,26 @@ int cmd_usn(int argc, char **argv)
             char full[8192 + 300];
             snprintf(full, sizeof full, "%s\\%s", folder, r.name);
             if (!known || !ioc_user_writable(full)) reason = NULL;
+        }
+        // A reparse point is not a program's content: deleting one (the app
+        // execution aliases in ...\Microsoft\WindowsApps are reparse points
+        // that Windows recreates per user and per profile) removes no code.
+        if (reason && (r.reason & 0x00000200) && (r.attributes & 0x00000400)) reason = NULL;
+        if (reason && (r.reason & 0x00000200)) {
+            uint64_t key = del_key(r.parent_ref, r.name);
+            size_t h = (size_t)(key % DEL_SLOTS);
+            for (unsigned probe = 0; probe < 64; probe++, h = (h + 1) % DEL_SLOTS) {
+                if (dels[h].count == 0) break;
+                if (dels[h].key != key) continue;
+                if (dels[h].count > 1) {
+                    if (r.usn != dels[h].last_usn) reason = NULL;
+                    else {
+                        snprintf(recur, sizeof recur, "program or script deleted (%u times in this journal - recreated and deleted repeatedly)", dels[h].count);
+                        reason = recur;
+                    }
+                }
+                break;
+            }
         }
         // A rename is logged twice (RENAME_NEW_NAME, then with CLOSE): judge it once.
         if (reason && (r.reason & 0x2000) && slot->ref == r.file_ref && slot->flagged) reason = NULL;

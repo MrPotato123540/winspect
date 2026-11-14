@@ -563,6 +563,9 @@ int cmd_triage(int argc, char **argv)
         printf("  ntdll hooks  %d\n", hooks);
         printf("  private +x   %d region(s)\n", privx);
         printf("  image tamper %d section(s) differ from disk\n", tamper.modified_sections);
+        if (tamper.modified_sections == 0 && tamper.skipped_sections) {
+            printf("               not compared: %s (written by the Windows loader in every process)\n", tamper.skipped_section);
+        }
         if (tamper.modified_sections > 0) {
             // The evidence behind the signal, so it can be judged rather than
             // trusted: a few short jumps into a named DLL is a hooking product,

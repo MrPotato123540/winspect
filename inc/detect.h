@@ -45,6 +45,8 @@ struct tamper_result {
     // new bytes are a jump/call, where it leads. A handful of 5..14 byte jumps
     // into a named module is a hooking product; megabytes of difference is a
     // replaced image.
+    int      skipped_sections;   // executable sections left out on purpose (loader-written)
+    char     skipped_section[16];// name of the last one skipped
     unsigned total_diff_bytes;   // across all executable sections
     unsigned patch_count;        // total patches found (may exceed TAMPER_MAX_PATCHES)
     unsigned npatches;           // entries filled in patches[]
