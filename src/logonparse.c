@@ -31,6 +31,20 @@ static int ci_prefix(const char *s, const char *p)
     return 1;
 }
 
+// IPv4 dotted quad, or IPv6 (hex digits, ':' and an optional embedded IPv4).
+static int ip_literal(const char *s)
+{
+    if (s[0] == '\0') return 0;
+    if (ioc_ip_scope(s)[0]) return 1;
+    int colons = 0;
+    for (const char *p = s; *p; p++) {
+        char c = *p;
+        if (c == ':') colons++;
+        else if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F') || c == '.' || c == '%')) return 0;
+    }
+    return colons >= 2;
+}
+
 // Windows logs "-" (and sometimes an empty string) for "not applicable".
 static void blank_dash(char *s)
 {
@@ -149,7 +163,10 @@ int logon_parse(const char *xml, const char *channel, logon_rec *r)
         evt_system(xml, "User", r->user, sizeof r->user);
         evt_system(xml, "SessionID", r->session, sizeof r->session);
         evt_system(xml, "Address", r->source, sizeof r->source);
-        if (ci_eq(r->source, "LOCAL")) r->source[0] = '\0';      // the console, not a client
+        // Address is a client IP for remote sessions; for the console Windows
+        // writes the word "LOCAL" - translated on localized systems ("YEREL"
+        // on Turkish Windows). Only an IP literal is a source.
+        if (!ip_literal(r->source)) r->source[0] = '\0';
     } else {
         return 0;
     }

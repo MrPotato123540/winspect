@@ -88,6 +88,11 @@ int wer_parse(char *text, wer_report *r)
         const char *alt = module0[0] ? module0 : (strchr(ui2, '\\') ? ui2 : "");
         copy(r->app_path, sizeof r->app_path, alt);
     }
+    // Packaged apps report a package-relative id ("praid:App",
+    // "praid:Microsoft.WindowsTerminal") as their name; the file name of the
+    // program path says more.
+    if (strncmp(r->app_name, "praid:", 6) == 0) r->app_name[0] = '\0';
+    if (strncmp(ns_app, "praid:", 6) == 0) ns_app[0] = '\0';
     if (r->app_name[0] == '\0') {
         if (ns_app[0]) copy(r->app_name, sizeof r->app_name, ns_app);
         else if (r->app_path[0]) {

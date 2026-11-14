@@ -28,6 +28,8 @@ typedef struct {
     brow *v;
     size_t n, cap;
     char since[24];
+    int all;                    // --all: also Windows' own forward clock adjustments
+    unsigned hidden_clock;
 } blist;
 
 static void on_event(const char *xml, void *vctx)
@@ -37,6 +39,11 @@ static void on_event(const char *xml, void *vctx)
     if (!boot_parse(xml, &w.r)) return;
     // Small clock corrections (time sync) are constant noise.
     if (w.r.kind == BK_CLOCK && w.r.clock_delta > -60 && w.r.clock_delta < 60) return;
+    // Forward adjustments Windows makes itself (reason other than 1 = "an
+    // application or system component changed the time") follow every wake
+    // from sleep or hibernation: hundreds on a laptop. Changes BACK, and every
+    // change an application made, are always listed.
+    if (w.r.kind == BK_CLOCK && !l->all && w.r.clock_delta > 0 && w.r.clock_reason > 1) { l->hidden_clock++; return; }
     if (l->since[0] && strcmp(w.r.time, l->since) < 0) return;
     if (l->n == l->cap) {
         size_t nc = l->cap ? l->cap * 2 : 128;
@@ -52,7 +59,7 @@ static void on_event(const char *xml, void *vctx)
 
 int cmd_boots(int argc, char **argv)
 {
-    int mode = 0;
+    int mode = 0, all = 0;
     unsigned max = 5000, hours = 0;
     char *files[32];
     int nfiles = 0;
@@ -63,6 +70,7 @@ int cmd_boots(int argc, char **argv)
         }
         else if (strcmp(argv[a], "--json") == 0) mode = 1;
         else if (strcmp(argv[a], "--csv") == 0)  mode = 2;
+        else if (strcmp(argv[a], "--all") == 0)  all = 1;
         else if (strcmp(argv[a], "--since") == 0 && a + 1 < argc) {
             hours = (unsigned)strtoul(argv[++a], NULL, 10);
             if (hours == 0 || hours > 24u * 3650u) { fputs("boots: --since takes hours, 1..87600\n", stderr); return 1; }
@@ -78,6 +86,7 @@ int cmd_boots(int argc, char **argv)
     }
     blist l;
     memset(&l, 0, sizeof l);
+    l.all = all;
     unsigned readable = 0;
     if (nfiles) {
         if (hours) {
@@ -141,7 +150,7 @@ int cmd_boots(int argc, char **argv)
         puts("boots  (boot / shutdown history and clock changes; newest first in the order written, UTC)\n");
         printf("    %-19s  %-13s %s\n", "time", "event", "detail");
     } else if (mode == 2) {
-        puts("time,event,id,detail,uptime_s,clean_shutdown,clock_delta_s,action,user,process");
+        puts("time,event,id,detail,uptime_s,clean_shutdown,clock_delta_s,action,user,process,clock_reason");
     } else {
         putchar('[');
     }
@@ -157,7 +166,7 @@ int cmd_boots(int argc, char **argv)
             char span[32];
             if (w->clean == 1 && w->uptime >= 0) {
                 fmt_span(w->uptime, span, sizeof span);
-                snprintf(detail + o, sizeof detail - o, "; up %s, then shut down cleanly", span);
+                snprintf(detail + o, sizeof detail - o, "; shut down cleanly %s later (wall clock, sleep included)", span);
             } else if (w->clean == 1) {
                 snprintf(detail + o, sizeof detail - o, "; shut down cleanly (uptime unknown: the clock was changed in between)");
             } else if (w->clean == 0) {
@@ -179,7 +188,9 @@ int cmd_boots(int argc, char **argv)
             putchar(',');
             csv_str(r->action); putchar(',');
             csv_str(r->user); putchar(',');
-            csv_str(r->process); putchar('\n');
+            csv_str(r->process); putchar(',');
+            if (r->kind == BK_CLOCK && r->clock_reason >= 0) printf("%d", r->clock_reason);
+            putchar('\n');
         } else {
             printf("%s{\"time\":\"%s\",\"event\":\"%s\",\"id\":%u,\"detail\":", k + 1 < l.n ? "," : "", r->time, boot_kind_name(r->kind), r->id);
             json_str(detail);
@@ -192,11 +203,17 @@ int cmd_boots(int argc, char **argv)
             fputs(",\"action\":", stdout);  json_str(r->action);
             fputs(",\"user\":", stdout);    json_str(r->user);
             fputs(",\"process\":", stdout); json_str(r->process);
+            fputs(",\"clock_reason\":", stdout);
+            if (r->kind == BK_CLOCK && r->clock_reason >= 0) printf("%d", r->clock_reason); else fputs("null", stdout);
             putchar('}');
         }
     }
     if (mode == 1) puts("]");
-    else if (mode == 0) printf("\n%u boot(s), %u not preceded by a clean shutdown, %u clock change(s) of a minute or more\n", boots, unclean, clock);
+    else if (mode == 0) {
+        printf("\n%u boot(s), %u not preceded by a clean shutdown, %u clock change(s) of a minute or more listed", boots, unclean, clock);
+        if (l.hidden_clock) printf("; %u forward adjustment(s) made by Windows itself (wake from sleep) hidden, --all shows them", l.hidden_clock);
+        putchar('\n');
+    }
     free(l.v);
     return 0;
 }

@@ -59,14 +59,16 @@ def mft(entries, count=None):
 
 
 def usn(records, sparse=4096):
-    """records: list of (file_ref, parent_ref, filetime, reason, name)."""
+    """records: list of (file_ref, parent_ref, filetime, reason, name[, attributes])."""
     out = bytearray(sparse)
     u = sparse
-    for fref, pref, ft, reason, name in records:
+    for rec_ in records:
+        fref, pref, ft, reason, name = rec_[:5]
+        attrs = rec_[5] if len(rec_) > 5 else 0x20
         nb = name.encode('utf-16-le')
         ln = (60 + len(nb) + 7) & ~7
         r = bytearray(ln)
-        struct.pack_into('<IHHQQqQIIII', r, 0, ln, 2, 0, fref, pref, u, ft, reason, 0, 0, 0x20)
+        struct.pack_into('<IHHQQqQIIII', r, 0, ln, 2, 0, fref, pref, u, ft, reason, 0, 0, attrs)
         struct.pack_into('<HH', r, 56, len(nb), 60)
         r[60:60 + len(nb)] = nb
         out += r

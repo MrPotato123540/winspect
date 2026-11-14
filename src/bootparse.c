@@ -56,6 +56,31 @@ int evt_data_nth(const char *xml, int n, char *out, size_t cap)
     return 0;
 }
 
+int evt_data_pos(const char *xml, int n, char *out, size_t cap)
+{
+    out[0] = '\0';
+    const char *p = xml;
+    int idx = 0;
+    while ((p = strstr(p, "<Data")) != NULL) {
+        char c = p[5];
+        if (c != '>' && c != ' ' && c != '/' && c != '\t') { p += 5; continue; }   // <DataItem>, <Database> ...
+        const char *gt = strchr(p, '>');
+        if (gt == NULL) return 0;
+        if (gt[-1] == '/') {                             // <Data/> or <Data Name='x'/>: empty
+            if (idx == n) return 1;
+            idx++;
+            p = gt + 1;
+            continue;
+        }
+        const char *e = strstr(gt + 1, "</Data>");
+        if (e == NULL) return 0;
+        if (idx == n) { xml_text(gt + 1, e, out, cap); return 1; }
+        idx++;
+        p = e + 7;
+    }
+    return 0;
+}
+
 int evt_provider(const char *xml, char *out, size_t cap)
 {
     out[0] = '\0';
@@ -134,10 +159,15 @@ int boot_parse(const char *xml, boot_rec *r)
             int64_t t0 = iso_epoch(a), t1 = iso_epoch(b);
             if (t0 < 0 || t1 < 0) return 0;
             r->clock_delta = t1 - t0;
+            char rs[16];
+            r->clock_reason = evt_data(xml, "Reason", rs, sizeof rs) && rs[0] ? (int)strtol(rs, NULL, 10) : -1;
             char span[32];
             fmt_span(r->clock_delta, span, sizeof span);
-            snprintf(r->detail, sizeof r->detail, "system clock set %s by %s (%.19s -> %.19s)",
-                     r->clock_delta < 0 ? "BACK" : "forward", span, a, b);
+            char why[64] = "";
+            if (r->clock_reason == 1) snprintf(why, sizeof why, ", by an application or system component");
+            else if (r->clock_reason > 1) snprintf(why, sizeof why, ", reason %d", r->clock_reason);
+            snprintf(r->detail, sizeof r->detail, "system clock set %s by %s (%.19s -> %.19s)%s",
+                     r->clock_delta < 0 ? "BACK" : "forward", span, a, b, why);
             for (char *p = r->detail; *p; p++) if (*p == 'T' && p > r->detail && p[-1] >= '0' && p[-1] <= '9' && p[1] >= '0' && p[1] <= '9') *p = ' ';
         } else return 0;
     } else if (ci_eq(prov, "Microsoft-Windows-Kernel-Power") && r->id == 41) {
@@ -148,19 +178,19 @@ int boot_parse(const char *xml, boot_rec *r)
         else snprintf(r->detail, sizeof r->detail, "rebooted without a clean shutdown (power loss, reset or hang)");
     } else if (ci_eq(prov, "EventLog") && r->id == 6008) {
         r->kind = BK_UNEXPECTED;
-        evt_data_nth(xml, 0, a, sizeof a);
-        evt_data_nth(xml, 1, b, sizeof b);
+        evt_data_pos(xml, 0, a, sizeof a);
+        evt_data_pos(xml, 1, b, sizeof b);
         strip_marks(a);
         strip_marks(b);
         snprintf(r->detail, sizeof r->detail, "the previous shutdown, at %.60s on %.60s (local time as logged), was unexpected", a, b);
     } else if (ci_eq(prov, "User32") && r->id == 1074) {
         r->kind = BK_REQUEST;
         char reason[320], comment[320];
-        evt_data_nth(xml, 0, a, sizeof a);              // process (computer)
-        evt_data_nth(xml, 2, reason, sizeof reason);
-        evt_data_nth(xml, 4, r->action, sizeof r->action);
-        evt_data_nth(xml, 5, comment, sizeof comment);
-        evt_data_nth(xml, 6, r->user, sizeof r->user);
+        evt_data_pos(xml, 0, a, sizeof a);              // process (computer)
+        evt_data_pos(xml, 2, reason, sizeof reason);
+        evt_data_pos(xml, 4, r->action, sizeof r->action);
+        evt_data_pos(xml, 5, comment, sizeof comment);
+        evt_data_pos(xml, 6, r->user, sizeof r->user);
         // "C:\Windows\system32\winlogon.exe (HOSTNAME)" -> the path alone.
         char *paren = strstr(a, " (");
         if (paren) *paren = '\0';

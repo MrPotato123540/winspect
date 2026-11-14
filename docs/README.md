@@ -94,6 +94,11 @@ Sırayla oku. Her dosya bir öncekinin üstüne kurulu:
     winPEAS'in kapsam listeleriyle satır satır karşılaştırma: ne var, bu turda
     ne eklendi (`autoruns` +22 nokta, `posture` +6, `hunt` adı değiştirilmiş
     araç, `capability`, `logons --failed`), sırada ne var, ne bilerek yapılmıyor.
+29. **[28 — Gerçek Windows testi: yanlış alarmlar ve düzeltmeler](28-gercek-windows-testi-ve-duzeltmeler.md)**
+    Bir Windows 11 makinesinde çalıştırılan testin sonuçları: hangi [!]
+    yanlış alarmdı, neden öyleydi (fothk bölümü, PID yeniden kullanımı,
+    Microsoft uyumluluk veritabanı, imzalı kullanıcı kurulumları, "YEREL",
+    uykudan uyanınca saat ayarı, uygulama takma adları) ve nasıl düzeltildi.
 
 ## Aklında tut: tek cümlelik fikir
 

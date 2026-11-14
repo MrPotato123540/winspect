@@ -79,9 +79,34 @@ int asep_amsi_default(const char *dll);
 // A NonPackaged key name is the program's path with '#' for '\\':
 // "C:#Users#bob#AppData#x.exe" -> "C:\Users\bob\AppData\x.exe".
 void cam_app_path(const char *key, char *out, size_t n);
-// Why a usage entry deserves a look, or NULL: a desktop (non-packaged)
-// program in a user-writable folder that used the microphone or the camera.
-const char *cam_reason(const char *capability, const char *app, int nonpackaged);
+// Why a usage entry deserves a look, or NULL. Only desktop (non-packaged)
+// programs that used the microphone or the camera are judged. trust is the
+// file's signature state: 1 signed by someone the machine trusts, 0 present
+// but not trusted, -1 unknown (file gone, or an offline hive). Per-user
+// installers (Discord, Teams, games) put signed programs under AppData, so a
+// user-writable folder alone is not enough:
+//   trust 0  + user-writable folder           -> flagged
+//   trust -1 + temp / Downloads / Public / Recycle Bin -> flagged
+// Everything else is listed only.
+const char *cam_reason(const char *capability, const char *app, int nonpackaged, int trust);
+
+// What a command line really executes: the program, or - when the program is
+// a script host started to run something else - that something. For
+// "cmd.exe /c <file> ...", "powershell -file <file>", "wscript|cscript|mshta
+// <file>" the file is returned; for rundll32 / regsvr32 the DLL (as
+// ioc_command_image does); otherwise the program itself. Later arguments
+// (log paths, data folders) are deliberately ignored. Returns 1 and the path
+// in out, 0 when nothing path-like could be found (the caller should then
+// judge the whole command as before).
+int asep_command_target(const char *cmd, char *out, size_t n);
+
+// The application-compatibility fix database Windows Update installs on
+// current Windows (described as "Microsoft Windows Application Compatibility
+// Fix Database"; it blocks or fixes known-incompatible programs, e.g. test
+// entries patchsdbtest.exe). 1 when guid is its GUID and path is that file
+// under %windir%\AppPatch\CustomSDB. An attacker with administrator rights
+// could imitate it; that is accepted, the entry is still listed.
+int asep_ms_compat_sdb(const char *guid, const char *path);
 
 // A system tool running under another file name. original is the
 // OriginalFilename string of the file's version resource, name the file's

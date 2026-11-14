@@ -8,9 +8,12 @@
 // packaged app and, under NonPackaged, one per desktop program (its path with
 // '#' for '\'), each with LastUsedTimeStart / LastUsedTimeStop. A stop time
 // of zero means the capability is in use right now. Machine-wide (HKLM) and
-// per-user (HKCU) stores are read. Flagged: a desktop program in a
-// user-writable folder that used the microphone or the camera - how a
-// remote-access tool or stalkerware shows up here. Entries that never used
+// per-user (HKCU) stores are read. For desktop programs still on disk the
+// signature is checked (file column: signed / UNSIGNED / gone). Flagged, for
+// the microphone and the camera only: an UNSIGNED program in a user-writable
+// folder, or - when the file can no longer be checked - one that ran from a
+// temp, Downloads, Public or Recycle Bin folder. Signed per-user installs
+// (Discord, Teams, games under AppData) are listed, not flagged. Entries that never used
 // the capability are hidden unless --all. Offline: --software / --ntuser read
 // hive files. Read-only. Usage:
 //   winspect capability [--all] [--find <text>] [--flagged] [--json | --csv]

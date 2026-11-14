@@ -6,7 +6,10 @@
 // provider (12 and 13 mean other things elsewhere), so both are checked.
 //   Microsoft-Windows-Kernel-General 12   the OS started (StartTime)
 //                                    13   the OS is shutting down (StopTime)
-//                                    1    the system time was changed (OldTime, NewTime)
+//                                    1    the system time was changed (OldTime, NewTime,
+//                                         Reason: 1 = "an application or system component
+//                                         changed the time"; other values are Windows'
+//                                         own adjustments, e.g. after waking from sleep)
 //   Microsoft-Windows-Kernel-Power   41   rebooted without a clean shutdown
 //                                         (BugcheckCode: non-zero after a crash)
 //   EventLog                         6008 the previous shutdown was unexpected
@@ -14,7 +17,8 @@
 //   User32                           1074 a process asked for a shutdown / restart
 //                                         (strings: process, computer, reason,
 //                                         reason code, type, comment, user)
-// Classic events (6008, 1074) carry unnamed <Data> strings, read by position.
+// 6008 and 1074 carry their strings by position: unnamed <Data> in older logs,
+// <Data Name="param1"> ... on current Windows. Both are read by position.
 
 #include <stddef.h>
 #include <stdint.h>
@@ -27,6 +31,7 @@ typedef struct {
     char time[24];              // event time, "YYYY-MM-DD HH:MM:SS" UTC
     char detail[600];           // one line, built from the event's own fields
     int64_t clock_delta;        // BK_CLOCK: new - old, seconds
+    int clock_reason;           // BK_CLOCK: the event's Reason, -1 when absent (older Windows)
     char user[200];             // BK_REQUEST
     char process[300];          // BK_REQUEST
     char action[40];            // BK_REQUEST: "restart", "power off" ...
@@ -38,6 +43,9 @@ int boot_parse(const char *xml, boot_rec *r);
 // Text of the n-th (0-based) <Data> element WITHOUT a Name attribute.
 // Returns 1 if it exists.
 int evt_data_nth(const char *xml, int n, char *out, size_t cap);
+
+// Text of the n-th (0-based) <Data> element, named or not. Returns 1 if it exists.
+int evt_data_pos(const char *xml, int n, char *out, size_t cap);
 
 // Name attribute of <Provider ...>. Returns 1 if found.
 int evt_provider(const char *xml, char *out, size_t cap);

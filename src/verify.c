@@ -399,7 +399,7 @@ static int check_image_tamper(HANDLE h, int json)
             fputs(",\"first_section\":", stdout); json_str(t.first_section);
             printf(",\"diff_bytes\":%u,\"first_diff_rva\":\"0x%08lX\"",
                    t.diff_bytes, (unsigned long)t.first_diff_rva);
-            printf(",\"total_diff_bytes\":%u,\"patch_count\":%u,\"patches\":",
+            printf(",\"skipped_sections\":%d,\"total_diff_bytes\":%u,\"patch_count\":%u,\"patches\":", t.skipped_sections,
                    t.total_diff_bytes, t.patch_count);
             detect_json_patches(&t);
         }

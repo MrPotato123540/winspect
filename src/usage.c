@@ -130,9 +130,12 @@ static const struct { const char *name, *text; } usage_table[] = {
         "packaged app and, under NonPackaged, one per desktop program (its path with\n"
         "'#' for '\\'), each with LastUsedTimeStart / LastUsedTimeStop. A stop time\n"
         "of zero means the capability is in use right now. Machine-wide (HKLM) and\n"
-        "per-user (HKCU) stores are read. Flagged: a desktop program in a\n"
-        "user-writable folder that used the microphone or the camera - how a\n"
-        "remote-access tool or stalkerware shows up here. Entries that never used\n"
+        "per-user (HKCU) stores are read. For desktop programs still on disk the\n"
+        "signature is checked (file column: signed / UNSIGNED / gone). Flagged, for\n"
+        "the microphone and the camera only: an UNSIGNED program in a user-writable\n"
+        "folder, or - when the file can no longer be checked - one that ran from a\n"
+        "temp, Downloads, Public or Recycle Bin folder. Signed per-user installs\n"
+        "(Discord, Teams, games under AppData) are listed, not flagged. Entries that never used\n"
         "the capability are hidden unless --all. Offline: --software / --ntuser read\n"
         "hive files. Read-only. Usage:\n"
         "  winspect capability [--all] [--find <text>] [--flagged] [--json | --csv]\n"
@@ -491,7 +494,9 @@ static const struct { const char *name, *text; } usage_table[] = {
         "session lasted and whether it ended cleanly; who or what asked for each\n"
         "shutdown or restart (process, account, stated reason); reboots without a\n"
         "clean shutdown (power loss, reset, crash with its bugcheck code); and\n"
-        "changes of the system clock of a minute or more. Why it matters: activity\n"
+        "changes of the system clock of a minute or more: every change BACK and\n"
+        "every change an application made; Windows' own forward adjustments after a\n"
+        "wake from sleep are counted and hidden unless --all. Why it matters: activity\n"
         "cannot have happened while the machine was off, an unexplained restart or\n"
         "crash is a lead, and a clock that was set back makes every other timestamp\n"
         "of that period suspect. Clock changes are shown, not flagged: time-zone\n"
@@ -501,7 +506,7 @@ static const struct { const char *name, *text; } usage_table[] = {
         "--evtx <file> (repeatable) reads a copied System.evtx. --since <hours>\n"
         "narrows, --max <n> bounds the events read live (default 5000).\n"
         "Read-only. Usage:\n"
-        "  winspect boots [--evtx <file> ...] [--since <hours>] [--max <n>] [--json | --csv]\n" },
+        "  winspect boots [--evtx <file> ...] [--since <hours>] [--max <n>] [--all] [--json | --csv]\n" },
     { "hidden",
         "winspect hidden - cross-view checks for things hidden from the usual tools:\n"
         "  processes: Toolhelp snapshot vs NtQuerySystemInformation vs opening every\n"
@@ -551,7 +556,8 @@ static const struct { const char *name, *text; } usage_table[] = {
         "flagged: a name is not suspicious by its look. --find keeps rows whose\n"
         "name or data contains the text. The cache is answered from memory\n"
         "(DNS_QUERY_NO_WIRE_ONLY): no query leaves the machine. Needs the DNS Client\n"
-        "service; an empty or unavailable cache is said so. Read-only. Usage:\n"
+        "service; recent Windows 11 builds also need administrator (as ipconfig\n"
+        "/displaydns does). An empty or unreadable cache is said so. Read-only. Usage:\n"
         "  winspect dns [--find <text>] [--json | --csv]\n" },
     { "volumes",
         "winspect volumes - the mounted volumes: drive letter, type (fixed,\n"
