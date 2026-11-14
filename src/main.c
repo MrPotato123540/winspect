@@ -107,6 +107,8 @@
 #include "dnscache.h"
 #include "wer.h"
 #include "office.h"
+#include "capability.h"
+#include "volumes.h"
 #include "magic.h"
 #include "detections.h"
 
@@ -251,6 +253,7 @@ static const struct {
     { "image",    cmd_image,    "offline triage of a mounted Windows image", "security" },
     { "timeline", cmd_timeline, "merged, time-ordered evidence (UTC)",        "security" },
     { "users",    cmd_users,    "local accounts: admin, last logon, flags",  "security" },
+    { "capability",cmd_capability,"who used the microphone / camera / location",   "security" },
     { "office",   cmd_office,   "Office macro trust: enabled documents, settings", "security" },
     { "comhijack",cmd_comhijack,"per-user COM classes overriding HKLM ones",  "security" },
     { "bits",     cmd_bits,     "BITS jobs: files, owner, notify command",   "security" },
@@ -292,6 +295,7 @@ static const struct {
 
     { "net",     cmd_net,     "per-process TCP/UDP endpoints",              "system" },
     { "dns",     cmd_dns,     "DNS resolver cache: names recently looked up", "system" },
+    { "volumes", cmd_volumes, "mounted volumes and their serial numbers",    "system" },
     { "arp",     cmd_arp,     "IPv4 neighbour (ARP) cache",                 "system" },
     { "routes",  cmd_routes,  "IPv4 routing table",                         "system" },
     { "sessions",cmd_sessions,"terminal/logon sessions and users",          "system" },

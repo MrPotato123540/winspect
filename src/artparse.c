@@ -21,6 +21,19 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Case-insensitive compare of n bytes (ASCII); 0 when equal.
+static int _strnicmp_portable(const char *a, const char *b, size_t n)
+{
+    for (size_t i = 0; i < n; i++) {
+        char x = a[i], y = b[i];
+        if (x >= 'A' && x <= 'Z') x = (char)(x + 32);
+        if (y >= 'A' && y <= 'Z') y = (char)(y + 32);
+        if (x != y) return x < y ? -1 : 1;
+        if (x == '\0') break;
+    }
+    return 0;
+}
+
 static uint32_t rd32(const unsigned char *p)
 {
     return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) |
@@ -280,6 +293,124 @@ int asep_netprovider_default(const char *dll)
     // RDPNP, LanmanWorkstation, webclient (WebDAV) and P9NP (WSL file access).
     static const char *const stock[] = { "drprov.dll", "ntlanman.dll", "davclnt.dll", "p9np.dll", NULL };
     return sys32_dll_in(dll, stock);
+}
+
+int asep_system_dir_default(const char *cmd)
+{
+    while (*cmd == ' ' || *cmd == '"') cmd++;
+    // The path part: up to the closing quote, or the first blank after an extension.
+    char path[600];
+    size_t n = 0;
+    for (const char *p = cmd; *p && *p != '"' && n + 1 < sizeof path; p++) path[n++] = *p;
+    path[n] = '\0';
+    const char *slash = strrchr(path, '\\');
+    if (slash == NULL) {
+        // Bare name (possibly with arguments): no directory at all, no '/'.
+        return path[0] != '\0' && strchr(path, '/') == NULL && strchr(path, ':') == NULL;
+    }
+    // Arguments after the file name may contain backslashes; judge the
+    // directory of the FIRST token that ends in a known extension, else all.
+    static const char *const exts[] = { ".dll ", ".exe ", ".dll", ".exe", NULL };
+    size_t end = n;
+    for (int e = 0; e < 2; e++) {
+        for (size_t i = 0; i + 5 <= n; i++) {
+            if (_strnicmp_portable(path + i, exts[e], 5) == 0) { end = i + 4; goto cut; }
+        }
+    }
+cut:
+    path[end] = '\0';
+    slash = strrchr(path, '\\');
+    if (slash == NULL) return 1;
+    size_t dl = (size_t)(slash - path);
+    static const char *const dirs[] = {
+        "%systemroot%\\system32", "%windir%\\system32", "%systemroot%\\syswow64", "%windir%\\syswow64",
+        "\\systemroot\\system32", "system32", "syswow64", NULL };
+    for (int i = 0; dirs[i]; i++) {
+        size_t L = strlen(dirs[i]);
+        if (dl == L && _strnicmp_portable(path, dirs[i], L) == 0) return 1;
+    }
+    // "<drive>:\Windows\System32" / "SysWOW64"
+    if (dl > 3 && path[1] == ':' && path[2] == '\\') {
+        static const char *const tails[] = { "\\windows\\system32", "\\windows\\syswow64", NULL };
+        for (int i = 0; tails[i]; i++) {
+            size_t L = strlen(tails[i]);
+            if (dl == 2 + L && _strnicmp_portable(path + 2, tails[i], L) == 0) return 1;
+        }
+    }
+    return 0;
+}
+
+int asep_amsi_default(const char *dll)
+{
+    if (asep_system_dir_default(dll)) return 1;
+    while (*dll == ' ' || *dll == '"') dll++;
+    // Defender ships its provider (MpOav.dll) in its versioned platform folder
+    // under ProgramData or in Program Files; both are admin-only locations.
+    return ioc_contains_ci(dll, "\\ProgramData\\Microsoft\\Windows Defender\\") || ioc_contains_ci(dll, "%ProgramData%\\Microsoft\\Windows Defender\\") ||
+           ioc_contains_ci(dll, ":\\Program Files\\Windows Defender\\") || ioc_contains_ci(dll, "%ProgramFiles%\\Windows Defender\\");
+}
+
+void cam_app_path(const char *key, char *out, size_t n)
+{
+    size_t i = 0;
+    for (; key[i] && i + 1 < n; i++) out[i] = key[i] == '#' ? '\\' : key[i];
+    out[i] = '\0';
+}
+
+const char *cam_reason(const char *capability, const char *app, int nonpackaged)
+{
+    if (!nonpackaged || !ioc_user_writable(app)) return NULL;
+    if (strlen(capability) == 10 && _strnicmp_portable(capability, "microphone", 10) == 0)
+        return "program in a user-writable dir used the microphone";
+    if (strlen(capability) == 6 && _strnicmp_portable(capability, "webcam", 6) == 0)
+        return "program in a user-writable dir used the camera";
+    return NULL;
+}
+
+const char *asep_renamed_tool(const char *original, const char *name)
+{
+    // OriginalFilename as shipped -> the tool's name -> file names it legitimately has.
+    static const struct { const char *orig, *tool, *names[4]; } t[] = {
+        { "cmd.exe",        "cmd.exe",        { "cmd.exe", NULL } },
+        { "powershell.exe", "powershell.exe", { "powershell.exe", NULL } },
+        { "pwsh.dll",       "pwsh",           { "pwsh.dll", "pwsh.exe", NULL } },
+        { "powershell_ise.exe", "powershell_ise.exe", { "powershell_ise.exe", NULL } },
+        { "rundll32.exe",   "rundll32.exe",   { "rundll32.exe", NULL } },
+        { "regsvr32.exe",   "regsvr32.exe",   { "regsvr32.exe", NULL } },
+        { "mshta.exe",      "mshta.exe",      { "mshta.exe", NULL } },
+        { "wscript.exe",    "wscript.exe",    { "wscript.exe", NULL } },
+        { "cscript.exe",    "cscript.exe",    { "cscript.exe", NULL } },
+        { "certutil.exe",   "certutil.exe",   { "certutil.exe", NULL } },
+        { "bitsadmin.exe",  "bitsadmin.exe",  { "bitsadmin.exe", NULL } },
+        { "msbuild.exe",    "MSBuild.exe",    { "msbuild.exe", NULL } },
+        { "installutil.exe","InstallUtil.exe",{ "installutil.exe", NULL } },
+        { "regasm.exe",     "RegAsm.exe",     { "regasm.exe", NULL } },
+        { "wmic.exe",       "wmic.exe",       { "wmic.exe", NULL } },
+        { "net.exe",        "net.exe",        { "net.exe", NULL } },
+        { "net1.exe",       "net1.exe",       { "net1.exe", NULL } },
+        { "schtasks.exe",   "schtasks.exe",   { "schtasks.exe", NULL } },
+        { "reg.exe",        "reg.exe",        { "reg.exe", NULL } },
+        { "sc.exe",         "sc.exe",         { "sc.exe", NULL } },
+        { "msiexec.exe",    "msiexec.exe",    { "msiexec.exe", NULL } },
+        { "curl.exe",       "curl.exe",       { "curl.exe", NULL } },
+        { "psexec.c",       "PsExec",         { "psexec.exe", "psexec64.exe", NULL } },
+        { "psexesvc.exe",   "PsExec service", { "psexesvc.exe", NULL } },
+        { "procdump",       "ProcDump",       { "procdump.exe", "procdump64.exe", "procdump64a.exe", NULL } },
+        { "rclone.exe",     "rclone",         { "rclone.exe", NULL } },
+    };
+    if (original == NULL || name == NULL || original[0] == '\0' || name[0] == '\0') return NULL;
+    size_t ol = strlen(original);
+    for (size_t i = 0; i < sizeof t / sizeof t[0]; i++) {
+        if (strlen(t[i].orig) != ol || _strnicmp_portable(original, t[i].orig, ol) != 0) continue;
+        // A localized resource copy ("cmd.exe.mui") is the same tool's own file.
+        size_t nl = strlen(name);
+        if (nl > 4 && _strnicmp_portable(name + nl - 4, ".mui", 4) == 0) return NULL;
+        for (int k = 0; k < 4 && t[i].names[k]; k++) {
+            if (strlen(t[i].names[k]) == nl && _strnicmp_portable(name, t[i].names[k], nl) == 0) return NULL;
+        }
+        return t[i].tool;
+    }
+    return NULL;
 }
 
 struct lineage_rule {

@@ -6,7 +6,7 @@
 # one is reported WITH the expected reason - and that the benign controls
 # (stock LSA package, a normal firewall rule) are not. Never point WINEPREFIX
 # at a prefix you care about. Usage: python3 tests/wine/fixtures.py <winspect.exe>
-import subprocess, os, sys, json, struct, tempfile
+import subprocess, os, sys, json, struct, tempfile, time
 exe = sys.argv[1]
 # The wine prefix is a throw-away test sandbox: WINEPREFIX (default ./wpfx).
 # The wine binary comes from $WINE, else wine64/wine on PATH, else
@@ -1393,5 +1393,189 @@ try:
         print('checked detections  (remediated and open detection, archive + URL, --find, timeline rows)')
 except Exception as e:
     print('FAIL detections check:', e); fails += 1
+
+# autoruns, the less-known locations: each gets a planted entry that must be
+# flagged and, where Windows ships defaults, a stock-looking entry that must
+# not be.
+HKLM = 'HKLM\\'
+NT = HKLM + r'SOFTWARE\Microsoft\Windows NT\CurrentVersion'
+CCS = HKLM + r'SYSTEM\CurrentControlSet'
+reg(HKCU + r'Software\Microsoft\Windows NT\CurrentVersion\Windows', '/v', 'Load', '/t', 'REG_SZ', '/d', r'C:\Windows\legacy.exe')
+reg(NT + r'\Winlogon\Notify\evil', '/v', 'DllName', '/t', 'REG_SZ', '/d', r'C:\ProgramData\notify.dll')
+reg(HKLM + r'SOFTWARE\Microsoft\Windows\Windows Error Reporting\Hangs', '/v', 'Debugger', '/t', 'REG_SZ', '/d', r'C:\ProgramData\hang.exe')
+reg(CCS + r'\Control\Session Manager', '/v', 'SetupExecute', '/t', 'REG_MULTI_SZ', '/d', r'C:\Windows\setupx.exe')
+reg(CCS + r'\Control\BootVerificationProgram', '/v', 'ImagePath', '/t', 'REG_SZ', '/d', r'C:\Windows\bvp.exe')
+reg(CCS + r'\Control\LsaExtensionConfig\LsaSrv', '/v', 'Extensions', '/t', 'REG_MULTI_SZ', '/d', r'lsasrv.dll\0C:\ProgramData\lsaext.dll')
+reg(NT + r'\Winlogon', '/v', 'mpnotify', '/t', 'REG_SZ', '/d', r'C:\Windows\mpn.exe')
+reg(CCS + r'\Services\DNS\Parameters', '/v', 'ServerLevelPluginDll', '/t', 'REG_SZ', '/d', r'\\10.0.0.5\s\dns.dll')
+reg(CCS + r'\Services\WinSock2\Parameters', '/v', 'AutodialDLL', '/t', 'REG_SZ', '/d', r'C:\Windows\System32\rasadhlp.dll')
+reg(NT + r'\Winlogon\GPExtensions\{00000000-0000-0000-0000-00000000aaaa}', '/v', 'DllName', '/t', 'REG_SZ', '/d', r'%SystemRoot%\System32\gptext.dll')
+reg(NT + r'\Winlogon\GPExtensions\{00000000-0000-0000-0000-00000000bbbb}', '/v', 'DllName', '/t', 'REG_SZ', '/d', r'C:\ProgramData\gpx.dll')
+reg(NT + r'\AppCompatFlags\TelemetryController\Appraiser', '/v', 'Command', '/t', 'REG_SZ', '/d', r'%windir%\system32\CompatTelRunner.exe -m:appraiser.dll -f:DoScheduledTelemetryRun')
+reg(NT + r'\AppCompatFlags\TelemetryController\Extra', '/v', 'Command', '/t', 'REG_SZ', '/d', r'C:\ProgramData\tele.exe')
+reg(CCS + r'\Services\FixtureSvc', '/v', 'FailureCommand', '/t', 'REG_SZ', '/d', r'C:\Users\Public\onfail.exe')
+reg(HKLM + r'SOFTWARE\Microsoft\AMSI\Providers\{11111111-aaaa-bbbb-cccc-000000000001}')
+reg(HKLM + r'SOFTWARE\Classes\CLSID\{11111111-aaaa-bbbb-cccc-000000000001}\InprocServer32', '/ve', '/t', 'REG_SZ', '/d', r'C:\ProgramData\amsix.dll')
+reg(HKLM + r'SOFTWARE\Microsoft\AMSI\Providers\{11111111-aaaa-bbbb-cccc-000000000002}')
+reg(HKLM + r'SOFTWARE\Classes\CLSID\{11111111-aaaa-bbbb-cccc-000000000002}\InprocServer32', '/ve', '/t', 'REG_SZ', '/d',
+    r'"C:\ProgramData\Microsoft\Windows Defender\Platform\4.18.1-0\MpOav.dll"')
+reg(HKCU + 'Environment', '/v', 'DOTNET_STARTUP_HOOKS', '/t', 'REG_SZ', '/d', r'C:\Users\Public\hook.dll')
+reg(CCS + r'\Control\Session Manager\Environment', '/v', 'COR_PROFILER_PATH', '/t', 'REG_SZ', '/d', r'C:\Program Files\Monitor\prof.dll')
+reg(NT + r'\AppCompatFlags\InstalledSDB\{22222222-0000-0000-0000-000000000001}', '/v', 'DatabasePath', '/t', 'REG_SZ', '/d', r'C:\Windows\AppPatch\Custom\x.sdb')
+reg(NT + r'\AppCompatFlags\Custom\putty.exe', '/v', '{22222222-0000-0000-0000-000000000001}.sdb', '/t', 'REG_QWORD', '/d', '1')
+os.makedirs(os.path.join(pfx, 'drive_c', 'windows', 'Setup', 'Scripts'), exist_ok=True)
+open(os.path.join(pfx, 'drive_c', 'windows', 'Setup', 'Scripts', 'ErrorHandler.cmd'), 'w').write('echo x\n')
+psd = os.path.join(pfx, 'drive_c', 'windows', 'system32', 'WindowsPowerShell', 'v1.0'); os.makedirs(psd, exist_ok=True)
+open(os.path.join(psd, 'profile.ps1'), 'w').write('# x\n')
+try:
+    rc, out, err = wine([exe, 'autoruns', '--json'])
+    ar = json.loads(out)
+    fl = {(r['location'], r['name']) for r in ar if r['suspicious']}
+    ok_rows = {(r['location'], r['name']) for r in ar if not r['suspicious']}
+    want_fl = {('WER Hangs Debugger', 'Debugger'), ('SetupExecute', 'SetupExecute'), ('BootVerificationProgram', 'ImagePath'),
+               ('HKLM\\...\\Winlogon', 'mpnotify'), ('DNS ServerLevelPluginDll', 'ServerLevelPluginDll'),
+               ('GP extensions', '{00000000-0000-0000-0000-00000000bbbb}'), ('TelemetryController', 'Extra'),
+               ('Service FailureCommand', 'FixtureSvc'), ('AMSI providers', '{11111111-aaaa-bbbb-cccc-000000000001}'),
+               ('HKCU\\Environment (.NET)', 'DOTNET_STARTUP_HOOKS'), ('Custom shim database', '{22222222-0000-0000-0000-000000000001}'),
+               ('Shimmed program', 'putty.exe'), ('Setup ErrorHandler.cmd', 'ErrorHandler.cmd'),
+               ('PowerShell profile (all users)', 'profile.ps1'), ('HKCU\\...\\Windows (legacy Load)', 'Load'),
+               ('Winlogon Notify', 'evil')}
+    want_ok = {('WinSock AutodialDLL', 'AutodialDLL'), ('GP extensions', '{00000000-0000-0000-0000-00000000aaaa}'),
+               ('TelemetryController', 'Appraiser'), ('AMSI providers', '{11111111-aaaa-bbbb-cccc-000000000002}'),
+               ('System environment (.NET)', 'COR_PROFILER_PATH')}
+    lsa = {r['command']: r['suspicious'] for r in ar if r['location'] == 'LSA extensions'}
+    if not want_fl <= fl:
+        print(f'FAIL autoruns (new locations): not flagged: {sorted(want_fl - fl)}'); fails += 1
+    elif not want_ok <= ok_rows:
+        print(f'FAIL autoruns (new locations): stock-looking entries missing or flagged: {sorted(want_ok - ok_rows)}'); fails += 1
+    elif lsa != {'lsasrv.dll': False, 'C:\\ProgramData\\lsaext.dll': True}:
+        print(f'FAIL autoruns LSA extensions: {lsa}'); fails += 1
+    else:
+        print('checked autoruns  (16 less-known locations flagged, 5 stock-looking controls not, LSA extension list split)')
+except Exception as e:
+    print('FAIL autoruns new locations check:', e); fails += 1
+
+# posture, list checks: a port forward to an internal RDP host, a hidden
+# account, an anonymous pipe, WSUS over HTTP and RDP shadowing with full
+# control must each be a WARN with the detail in the text.
+reg(CCS + r'\Services\PortProxy\v4tov4\tcp', '/v', '0.0.0.0/3340', '/t', 'REG_SZ', '/d', '10.0.0.5/3389')
+reg(NT + r'\Winlogon\SpecialAccounts\UserList', '/v', 'support$', '/t', 'REG_DWORD', '/d', '0')
+reg(NT + r'\Winlogon\SpecialAccounts\UserList', '/v', 'visible', '/t', 'REG_DWORD', '/d', '1')
+reg(CCS + r'\Services\LanmanServer\Parameters', '/v', 'NullSessionPipes', '/t', 'REG_MULTI_SZ', '/d', r'netlogon\0evilpipe')
+reg(HKLM + r'SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate', '/v', 'WUServer', '/t', 'REG_SZ', '/d', 'http://wsus.corp.example:8530')
+reg(HKLM + r'SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU', '/v', 'UseWUServer', '/t', 'REG_DWORD', '/d', '1')
+reg(HKLM + r'SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services', '/v', 'Shadow', '/t', 'REG_DWORD', '/d', '2')
+try:
+    rc, out, err = wine([exe, 'posture', '--json'])
+    pr = {r['check']: r for r in json.loads(out)}
+    def warn(check, needle):
+        r = pr.get(check)
+        return r is not None and r['status'] == 'WARN' and needle in r['detail']
+    if not warn('Port proxy rule', '0.0.0.0/3340 are forwarded to 10.0.0.5/3389'):
+        print(f"FAIL posture port proxy: {pr.get('Port proxy rule')}"); fails += 1
+    elif not warn('Hidden account', "'support$'") or 'visible' in json.dumps([r for r in json.loads(out) if r['check'] == 'Hidden account']):
+        print(f"FAIL posture hidden account: {pr.get('Hidden account')}"); fails += 1
+    elif not warn('Null session pipes', 'netlogon, evilpipe'):
+        print(f"FAIL posture null session pipes: {pr.get('Null session pipes')}"); fails += 1
+    elif not warn('Update server', 'plain HTTP') or not warn('RDP shadowing', 'CONTROLLED'):
+        print(f"FAIL posture WSUS / shadowing: {pr.get('Update server')} {pr.get('RDP shadowing')}"); fails += 1
+    elif pr.get('Sysmon', {}).get('status') != 'INFO' or 'Port proxy rules' in pr:
+        print('FAIL posture: Sysmon row / stray "none" row'); fails += 1
+    else:
+        print('checked posture  (port proxy, hidden account, null-session pipe, WSUS over HTTP, RDP shadowing)')
+except Exception as e:
+    print('FAIL posture list checks:', e); fails += 1
+
+# hunt, renamed system tool: a helper whose version resource says
+# OriginalFilename "Cmd.Exe" (what a copy of cmd.exe carries) runs as
+# svc_update.exe -> flagged; the same binary named cmd.exe is not flagged for
+# that reason.
+windres = cc.replace('gcc', 'windres') if cc else None
+if cc and shutil.which(windres):
+    res = os.path.join(fake, 'renamed.res.o')
+    subprocess.run([windres, os.path.join(here, '..', 'renamed.rc'), '-O', 'coff', '-o', res], check=True)
+    for nm in ('svc_update.exe', 'cmd.exe'):
+        subprocess.run([cc, os.path.join(here, '..', 'holder.c'), res, '-o', os.path.join(fake, nm)], check=True)
+    hs = [subprocess.Popen([WINE, 'C:\\fake\\' + nm, 'C:\\users\\Public\\renamed_' + nm + '.txt'], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           stdin=subprocess.DEVNULL, text=True) for nm in ('svc_update.exe', 'cmd.exe')]
+    time.sleep(4)                       # the helper prints nothing; give both time to start
+    try:
+        rc, out, err = wine([exe, 'hunt', '--all', '--json'])
+        hj = {r['name'].lower(): r for r in json.loads(out) if r.get('path', '').lower().startswith('c:\\fake\\')}
+        a, b = hj.get('svc_update.exe'), hj.get('cmd.exe')
+        if not a or 'is cmd.exe under another name' not in a.get('finding', ''):
+            print(f'FAIL hunt renamed tool: {a}'); fails += 1
+        elif not b or 'under another name' in b.get('finding', ''):
+            print(f'FAIL hunt: a file really named cmd.exe flagged as renamed: {b}'); fails += 1
+        else:
+            print('checked hunt  (system tool under another file name flagged by its version resource)')
+    except Exception as e:
+        print('FAIL hunt renamed tool check:', e); fails += 1
+    for h_ in hs:
+        h_.kill()
+    wine(['taskkill', '/f', '/im', 'svc_update.exe']); wine(['taskkill', '/f', '/im', 'cmd.exe'])
+
+# capability: ConsentStore entries in the live registry (machine and user)
+# and in an offline SOFTWARE hive. A program from Temp that used the
+# microphone is flagged; Zoom from Program Files and a packaged camera app
+# are not; one entry is still in use (stop = 0); a never-used entry shows
+# only with --all.
+CAM = r'SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore'
+def cam(root, cap, entry, start, stop, nonpackaged=True):
+    key = root + CAM + '\\' + cap + ('\\NonPackaged\\' if nonpackaged else '\\') + entry
+    reg(key, '/v', 'Value', '/t', 'REG_SZ', '/d', 'Allow')
+    reg(key, '/v', 'LastUsedTimeStart', '/t', 'REG_QWORD', '/d', str(start))
+    reg(key, '/v', 'LastUsedTimeStop', '/t', 'REG_QWORD', '/d', str(stop))
+cam(HKCU, 'microphone', 'C:#Users#bob#AppData#Local#Temp#rat.exe', OT, OT + 600000000)
+cam(HKCU, 'microphone', 'C:#Program Files#Zoom#bin#Zoom.exe', OT + 10000000, 0)
+cam(HKLM, 'webcam', 'Microsoft.WindowsCamera_8wekyb3d8bbwe', OT, OT + 10000000, nonpackaged=False)
+cam(HKCU, 'location', 'C:#Windows#explorer.exe', 0, 0)
+csw = K('ROOT', [], [K('Microsoft', [], [K('Windows', [], [K('CurrentVersion', [], [K('CapabilityAccessManager', [], [K('ConsentStore', [], [
+    K('webcam', [], [K('NonPackaged', [], [K('C:#Users#Public#cam.exe', [
+        rw.Value('LastUsedTimeStart', 11, struct.pack('<Q', OT)), rw.Value('LastUsedTimeStop', 11, struct.pack('<Q', OT + 50000000))])])])])])])])])])
+with open(os.path.join(off, 'SOFTWARE_cam'), 'wb') as f:
+    f.write(rw.build(csw))
+try:
+    rc, out, err = wine([exe, 'capability', '--json'])
+    cj = {r['app']: r for r in json.loads(out)}
+    rat, zoom, pkg = cj.get(r'C:\Users\bob\AppData\Local\Temp\rat.exe'), cj.get(r'C:\Program Files\Zoom\bin\Zoom.exe'), cj.get('Microsoft.WindowsCamera_8wekyb3d8bbwe')
+    rc2, out2, err2 = wine([exe, 'capability', '--all', '--csv'])
+    rc3, out3, err3 = wine([exe, 'capability', '--software', r'C:\offline\SOFTWARE_cam', '--flagged', '--json'])
+    offl = json.loads(out3)
+    if not rat or not rat['suspicious'] or rat['last_start'] != '2024-01-17 21:20:00' or rat['last_stop'] != '2024-01-17 21:21:00' or rat['scope'] != 'user':
+        print(f'FAIL capability: Temp program that used the microphone: {rat}'); fails += 1
+    elif not zoom or zoom['suspicious'] or not zoom['in_use'] or zoom['last_stop'] != '':
+        print(f'FAIL capability: in-use entry: {zoom}'); fails += 1
+    elif not pkg or pkg['suspicious'] or pkg['packaged'] is not True or pkg['scope'] != 'system':
+        print(f'FAIL capability: packaged app: {pkg}'); fails += 1
+    elif r'C:\Windows\explorer.exe' in cj or 'explorer.exe' not in out2:
+        print('FAIL capability: never-used entry must show only with --all'); fails += 1
+    elif len(offl) != 1 or offl[0]['app'] != r'C:\Users\Public\cam.exe' or 'camera' not in offl[0]['reason']:
+        print(f'FAIL capability --software: {offl}'); fails += 1
+    else:
+        print('checked capability  (live + offline hive: Temp program on the microphone flagged, in-use entry, packaged app)')
+except Exception as e:
+    print('FAIL capability check:', e); fails += 1
+
+# volumes: the serial of C: must be the one the system's own "vol" command
+# prints (two readers of the same number), in both printed forms.
+try:
+    rc, out, err = wine([exe, 'volumes', '--json'])
+    vj = {v['drive']: v for v in json.loads(out)}
+    rc2, vo, err2 = wine(['cmd', '/c', 'vol', 'c:'])
+    import re as _re
+    m = _re.search(r'([0-9A-Fa-f]{4})-([0-9A-Fa-f]{4})', vo)
+    c_ = vj.get('C:')
+    rc3, out3, err3 = wine([exe, 'volumes', '--find', 'zz-no-such', '--csv'])
+    if not c_ or not m or c_['serial'].upper() != m.group(0).upper() or c_['serial_hex'].upper() != (m.group(1) + m.group(2)).upper():
+        print(f'FAIL volumes: C: serial {c_} vs vol "{vo.strip()[-40:]}"'); fails += 1
+    elif c_['type'] != 'fixed' or not c_['mounted'] or not c_['size'] or not c_['volume'].startswith('\\\\?\\Volume{'):
+        print(f'FAIL volumes: C: fields {c_}'); fails += 1
+    elif len(out3.strip().splitlines()) != 1:
+        print(f'FAIL volumes --find --csv: {out3}'); fails += 1
+    else:
+        print('checked volumes  (C: serial equals the one "vol" prints; type, size, volume GUID path)')
+except Exception as e:
+    print('FAIL volumes check:', e); fails += 1
 print(f'\n{fails} failure(s)')
 sys.exit(1 if fails else 0)

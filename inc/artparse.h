@@ -63,6 +63,37 @@ int asep_time_provider_default(const char *dll);
 // (T1556.008).
 int asep_netprovider_default(const char *dll);
 
+// 1 if a DLL / program reference stays inside the Windows system folders: a
+// bare file name (resolved from System32), or a path whose folder is
+// System32 / SysWOW64 of the Windows directory ("C:\Windows\System32\x.dll",
+// "%SystemRoot%\system32\x.dll", "%windir%\..."). Leading quotes and
+// arguments are ignored. Used for auto-start lists whose stock entries all
+// live there (GP extensions, LSA extensions, AutodialDLL, telemetry tasks).
+int asep_system_dir_default(const char *cmd);
+// 1 if an AMSI provider DLL is where the known providers live: Microsoft
+// Defender's platform folder or a system folder. A provider elsewhere sees
+// every script handed to AMSI and can blind it (T1562.001).
+int asep_amsi_default(const char *dll);
+
+// ---- Capability Access Manager (microphone / camera / location usage) ----------
+// A NonPackaged key name is the program's path with '#' for '\\':
+// "C:#Users#bob#AppData#x.exe" -> "C:\Users\bob\AppData\x.exe".
+void cam_app_path(const char *key, char *out, size_t n);
+// Why a usage entry deserves a look, or NULL: a desktop (non-packaged)
+// program in a user-writable folder that used the microphone or the camera.
+const char *cam_reason(const char *capability, const char *app, int nonpackaged);
+
+// A system tool running under another file name. original is the
+// OriginalFilename string of the file's version resource, name the file's
+// actual name. Returns the tool's real name when original is one of the
+// Windows command-line / script hosts and admin tools that attackers copy
+// and rename to dodge name-based rules (cmd.exe, powershell.exe,
+// rundll32.exe, mshta.exe, certutil.exe, PsExec, ProcDump ...) AND name is
+// not one of that tool's own names; else NULL. Other programs are never
+// judged: plenty of legitimate software ships with a mismatching
+// OriginalFilename.
+const char *asep_renamed_tool(const char *original, const char *name);
+
 // 1 if an image path uses the name of a core Windows binary that only ever
 // lives directly in System32 / SysWOW64 (see lineage_system32_only) but sits
 // somewhere else - including a SUBdirectory of System32, a favourite trick:

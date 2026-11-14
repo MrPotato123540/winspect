@@ -47,6 +47,7 @@
 #include "comhijack.h"
 #include "logons.h"
 #include "detections.h"
+#include "capability.h"
 #include "wer.h"
 #include "office.h"
 #include "events.h"
@@ -119,7 +120,7 @@ static void describe(const jm_node *r, char *out, size_t n)
     static const char *const keys[] = {
         "location", "name", "task", "check", "executable", "program", "list", "path", "command",
         "binary_path", "service_dll", "com_dll", "target", "value", "subject", "summary", "clsid",
-        "user_server", "threat", "file", "item", "account", "source", NULL
+        "user_server", "threat", "file", "item", "account", "source", "app", NULL
     };
     out[0] = 0;
     int used = 0;
@@ -228,7 +229,7 @@ int cmd_image(int argc, char **argv)
     }
 
     // ---- machine-wide checks ----------------------------------------------------
-    job jobs[24];
+    job jobs[32];
     int nj = 0;
 #define JOB(nm, f, lst, rl, fx, ...) do { job *j = &jobs[nj++]; memset(j, 0, sizeof *j); j->name = nm; j->fn = f; \
         j->list = lst; j->rule = rl; j->fixed = fx; const char *t_[] = { __VA_ARGS__, NULL }; \
@@ -237,6 +238,7 @@ int cmd_image(int argc, char **argv)
     else if (has_sw)       JOB("posture", cmd_posture, NULL, RULE_POSTURE, NULL, "--software", sw);
     if (has_sw && has_sys) JOB("autoruns", cmd_autoruns, NULL, RULE_FLAGGED, NULL, "--software", sw, "--system", sys);
     else if (has_sw)       JOB("autoruns", cmd_autoruns, NULL, RULE_FLAGGED, NULL, "--software", sw);
+    if (has_sw)            JOB("capability", cmd_capability, NULL, RULE_FLAGGED, NULL, "--software", sw);
     if (has_sys) {
         JOB("services", cmd_services, NULL, RULE_FLAGGED, NULL, "--hive", sys);
         JOB("shimcache", cmd_shimcache, NULL, RULE_WRITABLE, "seen in a user-writable dir (AppCompatCache)", "--hive", sys);
@@ -286,6 +288,7 @@ int cmd_image(int argc, char **argv)
         JOB("userassist", cmd_userassist, NULL, RULE_FLAGGED, NULL, "--hive", p->ntuser);
         JOB("mru", cmd_mru, NULL, RULE_FLAGGED, NULL, "--hive", p->ntuser);
         JOB("office", cmd_office, NULL, RULE_FLAGGED, NULL, "--hive", p->ntuser);
+        JOB("capability", cmd_capability, NULL, RULE_FLAGGED, NULL, "--ntuser", p->ntuser);
         if (p->usrclass[0] && has_sw)
             JOB("comhijack", cmd_comhijack, NULL, RULE_FLAGGED, NULL, "--usrclass", p->usrclass, "--software", sw);
         if (p->pshist[0]) JOB("pshistory", cmd_pshistory, NULL, RULE_FLAGGED, NULL, p->pshist);

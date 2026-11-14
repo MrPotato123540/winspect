@@ -7,7 +7,9 @@
 // must be unique (two lsass.exe), core binary names running from outside
 // System32 (masquerading), svchost without a "-k" service group, core
 // processes not running as SYSTEM, and boot-time processes (lsass, services,
-// wininit) that started long after boot. Rules come
+// wininit) that started long after boot, and system tools running under
+// another file name (the version resource still says cmd.exe / PsExec /
+// rundll32 ... while the file is called something else). Rules come
 // from the public SANS "Hunt Evil" guidance. Read-only. Usage:
 //   winspect hunt [--all] [--json | --csv]
 int cmd_hunt(int argc, char **argv);

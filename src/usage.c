@@ -122,6 +122,21 @@ static const struct { const char *name, *text; } usage_table[] = {
         "hashes are never read; group membership is not shown offline). Read-only.\n"
         "Usage:\n"
         "  winspect users [--sam <SAM>] [--flagged] [--json | --csv]\n" },
+    { "capability",
+        "winspect capability - which programs used the microphone, the camera, the\n"
+        "location service and the other privacy-guarded capabilities, and when.\n"
+        "Windows records it itself (Settings > Privacy shows the same data) in the\n"
+        "Capability Access Manager \"ConsentStore\": per capability one key per\n"
+        "packaged app and, under NonPackaged, one per desktop program (its path with\n"
+        "'#' for '\\'), each with LastUsedTimeStart / LastUsedTimeStop. A stop time\n"
+        "of zero means the capability is in use right now. Machine-wide (HKLM) and\n"
+        "per-user (HKCU) stores are read. Flagged: a desktop program in a\n"
+        "user-writable folder that used the microphone or the camera - how a\n"
+        "remote-access tool or stalkerware shows up here. Entries that never used\n"
+        "the capability are hidden unless --all. Offline: --software / --ntuser read\n"
+        "hive files. Read-only. Usage:\n"
+        "  winspect capability [--all] [--find <text>] [--flagged] [--json | --csv]\n"
+        "  winspect capability [--software <SOFTWARE>] [--ntuser <NTUSER.DAT>] ...\n" },
     { "office",
         "winspect office - Microsoft Office macro trust, per user:\n"
         "  documents  every document the user clicked \"Enable Editing\" or \"Enable\n"
@@ -412,7 +427,9 @@ static const struct { const char *name, *text; } usage_table[] = {
         "must be unique (two lsass.exe), core binary names running from outside\n"
         "System32 (masquerading), svchost without a \"-k\" service group, core\n"
         "processes not running as SYSTEM, and boot-time processes (lsass, services,\n"
-        "wininit) that started long after boot. Rules come\n"
+        "wininit) that started long after boot, and system tools running under\n"
+        "another file name (the version resource still says cmd.exe / PsExec /\n"
+        "rundll32 ... while the file is called something else). Rules come\n"
         "from the public SANS \"Hunt Evil\" guidance. Read-only. Usage:\n"
         "  winspect hunt [--all] [--json | --csv]\n" },
     { "posture",
@@ -421,7 +438,10 @@ static const struct { const char *name, *text; } usage_table[] = {
         "SAM listing, Credential Guard, remote local-admin token filtering, SMBv1,\n"
         "SMB signing, RDP/NLA, LLMNR, Secure Boot, firewall profiles,\n"
         "AlwaysInstallElevated, AutoLogon password presence, PowerShell logging and\n"
-        "transcription, command lines in 4688 events. Each check prints OK / WARN / INFO\n"
+        "transcription, command lines in 4688 events, port-forwarding (portproxy)\n"
+        "rules, anonymously reachable pipes, accounts hidden from the sign-in screen,\n"
+        "a WSUS server over plain HTTP, RDP shadowing without consent, Sysmon\n"
+        "presence. Each check prints OK / WARN / INFO\n"
         "with a one-line reason. Secrets are never printed (only \"present\").\n"
         "Offline: the same rules on hive files from another machine.\n"
         "Read-only. Usage:\n"
@@ -454,14 +474,17 @@ static const struct { const char *name, *text; } usage_table[] = {
         "network logon from a public address, remote desktop from loopback (a\n"
         "tunnelled connection), cleartext network logon (type 8),\n"
         "new-credentials logon by seclogo (type 9: runas /netonly - and what\n"
-        "pass-the-hash tools produce), NTLMv1. Passwords are never in these events.\n"
+        "pass-the-hash tools produce), NTLMv1, and a success that follows ten or\n"
+        "more failures (4625) from the same source within the hour (password\n"
+        "guessing that worked). --failed lists the failed logons themselves, with\n"
+        "the reason Windows recorded (wrong password, no such user, locked out ...). Passwords are never in these events.\n"
         "--summary groups by account, logon type and source (count, first, last).\n"
         "--evtx <file> (repeatable) reads copied logs with winspect's own parser.\n"
         "--since <hours>, --user <text>, --type <n> and --flagged narrow the list;\n"
         "--max <n> bounds the events read per live channel (default 5000).\n"
         "The Security log needs elevation. Read-only. Usage:\n"
         "  winspect logons [--evtx <file> ...] [--since <hours>] [--user <text>] [--type <n>]\n"
-        "                  [--all] [--flagged] [--summary] [--max <n>] [--json | --csv]\n" },
+        "                  [--all] [--failed] [--flagged] [--summary] [--max <n>] [--json | --csv]\n" },
     { "boots",
         "winspect boots - when the machine was on: every boot and shutdown from the\n"
         "System log (the idea of `last -x` / `uptime` on Linux), with how long each\n"
@@ -530,6 +553,18 @@ static const struct { const char *name, *text; } usage_table[] = {
         "(DNS_QUERY_NO_WIRE_ONLY): no query leaves the machine. Needs the DNS Client\n"
         "service; an empty or unavailable cache is said so. Read-only. Usage:\n"
         "  winspect dns [--find <text>] [--json | --csv]\n" },
+    { "volumes",
+        "winspect volumes - the mounted volumes: drive letter, type (fixed,\n"
+        "removable, network, CD), label, file system, size and free space, the\n"
+        "volume GUID path and above all the volume SERIAL NUMBER. Shortcuts (lnk),\n"
+        "jump lists and Prefetch files record the serial of the volume a file was\n"
+        "on; this is the list to look those numbers up in - \"serial 1A2B-3C4D\" in a\n"
+        "shortcut is drive E: if it is here, and a drive that is no longer attached\n"
+        "(a USB stick: see `usb`) if it is not. The serial is shown in both forms\n"
+        "the other commands print (XXXX-XXXX and XXXXXXXX). --find keeps rows whose\n"
+        "letter, label or serial contains the text. For a network drive the remote\n"
+        "path is shown. Read-only. Usage:\n"
+        "  winspect volumes [--find <text>] [--json | --csv]\n" },
     { "arp",
         "winspect arp - the IPv4 neighbour (ARP) cache: which IP maps to which MAC on\n"
         "the local segment. Read-only. Usage: winspect arp [--json | --csv]\n" },
@@ -566,7 +601,15 @@ static const struct { const char *name, *text; } usage_table[] = {
         "IFEO Debugger, SilentProcessExit, AppInit_DLLs, BootExecute, LSA packages,\n"
         "print monitors, NetSh helpers, AppCertDlls, cmd.exe AutoRun, logon scripts,\n"
         "Active Setup, time providers, screensaver, exefile / ms-settings handler\n"
-        "hijacks, the \"Office test\" key and the Startup folders. Each flagged entry\n"
+        "hijacks, the \"Office test\" key and the Startup folders; plus the less-known\n"
+        "family: the legacy Load / Run values, Winlogon Notify DLLs, AeDebug / .NET /\n"
+        "WER debuggers, SetupExecute / PlatformExecute,\n"
+        "BootVerificationProgram, LSA extensions, Winlogon mpnotify, DNS\n"
+        "ServerLevelPluginDll, WinSock AutodialDLL, Group Policy extensions,\n"
+        "TelemetryController commands, search-indexer DLL overrides, service\n"
+        "FailureCommand, AMSI providers, .NET profiler / start-up hook variables,\n"
+        "custom shim databases and the programs they apply to, Setup's\n"
+        "ErrorHandler.cmd and PowerShell profiles. Each flagged entry\n"
         "carries a reason (user-writable path / non-default value / rare location).\n"
         "A transparent subset of what Sysinternals Autoruns inspects.\n"
         "--sig verifies the signature of what each entry runs (Autoruns' \"Verify\n"

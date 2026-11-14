@@ -1926,6 +1926,107 @@ int main(void)
 #undef SYS
     }
 
+    // --- autoruns: "lives in the Windows system folders" default -----------------
+    {
+        static const struct { const char *v; int def; } sd[] = {
+            { "rasadhlp.dll", 1 }, { "C:\\Windows\\System32\\rasadhlp.dll", 1 }, { "c:\\windows\\syswow64\\x.dll", 1 },
+            { "%SystemRoot%\\System32\\gptext.dll", 1 }, { "%windir%\\system32\\CompatTelRunner.exe -m:appraiser.dll -f:DoScheduledTelemetryRun", 1 },
+            { "\"C:\\Windows\\System32\\x.exe\" /arg C:\\Users\\bob\\file", 1 }, { "lsasrv.dll", 1 }, { "D:\\Windows\\System32\\a.dll", 1 },
+            { "C:\\Windows\\System32\\sub\\evil.dll", 0 }, { "C:\\Users\\bob\\AppData\\x.dll", 0 }, { "C:\\ProgramData\\x.dll", 0 },
+            { "C:\\Windows\\Temp\\x.dll", 0 }, { "\\\\10.0.0.5\\share\\x.dll", 0 }, { "C:\\Windows\\System32evil\\x.dll", 0 },
+            { "C:x.dll", 0 }, { "", 0 }, { "..\\x.dll", 0 }, { "C:\\Evil\\System32\\x.dll", 0 },
+            { "C:\\Users\\bob\\run.exe C:\\Windows\\System32\\x.dll", 0 } };
+        for (size_t i = 0; i < sizeof sd / sizeof sd[0]; i++) {
+            char label[48];
+            snprintf(label, sizeof label, "asep system dir %zu", i);
+            check_int(label, asep_system_dir_default(sd[i].v), sd[i].def);
+        }
+        check_int("amsi defender platform", asep_amsi_default("\"C:\\ProgramData\\Microsoft\\Windows Defender\\Platform\\4.18.2\\MpOav.dll\""), 1);
+        check_int("amsi defender program files", asep_amsi_default("C:\\Program Files\\Windows Defender\\MpOav.dll"), 1);
+        check_int("amsi look-alike folder", asep_amsi_default("C:\\Program Files\\Microsoft\\Windows Defender\\MpOav.dll"), 0);
+        check_int("amsi system32", asep_amsi_default("%windir%\\system32\\amsi.dll"), 1);
+        check_int("amsi elsewhere", asep_amsi_default("C:\\Users\\Public\\Microsoft\\Windows Defender\\x.dll"), 0);
+        check_int("amsi programdata other", asep_amsi_default("C:\\ProgramData\\evil\\amsi.dll"), 0);
+    }
+
+    // --- hunt: system tools under another name -----------------------------------
+    {
+        check_str("renamed cmd", asep_renamed_tool("Cmd.Exe", "svc_update.exe"), "cmd.exe");
+        check_int("cmd as cmd", asep_renamed_tool("Cmd.Exe", "CMD.EXE") == NULL, 1);
+        check_str("renamed psexec", asep_renamed_tool("psexec.c", "remote-admin.exe"), "PsExec");
+        check_int("psexec64", asep_renamed_tool("psexec.c", "PsExec64.exe") == NULL, 1);
+        check_str("renamed procdump", asep_renamed_tool("procdump", "dump.exe"), "ProcDump");
+        check_int("mui copy", asep_renamed_tool("cmd.exe", "cmd.exe.mui") == NULL, 1);
+        check_int("other software is not judged", asep_renamed_tool("setup.exe", "MyApp-1.2-installer.exe") == NULL, 1);
+        check_int("prefix is not a match", asep_renamed_tool("cmd.exe.bak", "x.exe") == NULL && asep_renamed_tool("cmd", "x.exe") == NULL, 1);
+        check_int("empty / null", asep_renamed_tool("", "x.exe") == NULL && asep_renamed_tool(NULL, "x.exe") == NULL && asep_renamed_tool("cmd.exe", "") == NULL, 1);
+        check_str("pwsh host", asep_renamed_tool("pwsh.dll", "updater.exe"), "pwsh");
+    }
+
+    // --- capability: ConsentStore entries -----------------------------------------
+    {
+        char ap[64];
+        cam_app_path("C:#Users#bob#AppData#Local#Temp#rat.exe", ap, sizeof ap);
+        check_str("cam path", ap, "C:\\Users\\bob\\AppData\\Local\\Temp\\rat.exe");
+        cam_app_path("C:#aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ap, 8);
+        check_str("cam path clipped", ap, "C:\\aaaa");
+        check_int("cam mic from temp", cam_reason("microphone", "C:\\Users\\bob\\AppData\\Local\\Temp\\rat.exe", 1) != NULL, 1);
+        check_int("cam webcam from temp", cam_reason("Webcam", "C:\\Users\\bob\\AppData\\Local\\Temp\\rat.exe", 1) != NULL, 1);
+        check_int("cam mic from program files", cam_reason("microphone", "C:\\Program Files\\Zoom\\bin\\Zoom.exe", 1) == NULL, 1);
+        check_int("cam location from temp (not a recording device)", cam_reason("location", "C:\\Users\\bob\\AppData\\Local\\Temp\\x.exe", 1) == NULL, 1);
+        check_int("cam packaged app", cam_reason("microphone", "Microsoft.WindowsCamera_8wekyb3d8bbwe", 0) == NULL, 1);
+        check_int("cam similar name", cam_reason("microphones", "C:\\Users\\bob\\AppData\\Local\\Temp\\x.exe", 1) == NULL, 1);
+    }
+
+    // --- logons: failures, and a success after many of them -----------------------
+    {
+#define EV(id, data) "<Event><System><EventID>" #id "</EventID><TimeCreated SystemTime='2024-05-01T12:34:56.1Z'/><Channel>Security</Channel></System><EventData>" data "</EventData></Event>"
+#define D(n, v) "<Data Name='" n "'>" v "</Data>"
+        logon_rec f;
+        check_int("failed 4625", logon_parse(EV(4625, D("TargetUserName", "admin") D("TargetDomainName", "CORP") D("Status", "0xc000006d")
+                  D("SubStatus", "0xc000006a") D("LogonType", "3") D("IpAddress", "203.0.113.7") D("WorkstationName", "KALI")), "Security", &f) == 1 && f.kind == LK_FAILED, 1);
+        check_str("failed reason", logon_failure_text(f.status), "wrong password");
+        check_str("failed source key", logon_source_key(&f), "203.0.113.7");
+        logon_parse(EV(4625, D("TargetUserName", "x") D("Status", "0xC0000234") D("SubStatus", "0x0") D("LogonType", "3") D("IpAddress", "-") D("WorkstationName", "WS9")), "Security", &f);
+        check_str("failed: status when substatus is 0", logon_failure_text(f.status), "account locked out");
+        check_str("failed: workstation as key when no address", logon_source_key(&f), "WS9");
+        check_str("failure unknown code", logon_failure_text("0xC0000001"), "");
+        check_str("kind name failed", logon_kind_name(LK_FAILED), "FAILED");
+#undef EV
+#undef D
+        // 12 failures from .7 (one every 4 minutes), 3 from .8, then successes.
+        static logon_rec rs[20];
+        const logon_rec *pp[20];
+        size_t n = 0;
+        for (int i = 0; i < 12; i++, n++) {
+            rs[n].kind = LK_FAILED;
+            snprintf(rs[n].time, sizeof rs[n].time, "2024-05-01 10:%02d:00", i * 4);
+            snprintf(rs[n].source, sizeof rs[n].source, "203.0.113.7");
+        }
+        for (int i = 0; i < 3; i++, n++) {
+            rs[n].kind = LK_FAILED;
+            snprintf(rs[n].time, sizeof rs[n].time, "2024-05-01 10:5%d:00", i);
+            snprintf(rs[n].source, sizeof rs[n].source, "203.0.113.8");
+        }
+        const char *who[] = { "203.0.113.7", "203.0.113.8", "127.0.0.1", "" };
+        for (int i = 0; i < 4; i++, n++) {
+            rs[n].kind = LK_LOGON;
+            snprintf(rs[n].time, sizeof rs[n].time, "2024-05-01 10:55:0%d", i);
+            snprintf(rs[n].source, sizeof rs[n].source, "%s", who[i]);
+        }
+        rs[n].kind = LK_LOGON;                                   // the guesser again: only the 10:44 failure is within the hour
+        snprintf(rs[n].time, sizeof rs[n].time, "2024-05-01 11:40:30");
+        snprintf(rs[n].source, sizeof rs[n].source, "203.0.113.7");
+        n++;
+        for (size_t i = 0; i < n; i++) pp[i] = &rs[i];
+        check_int("guess: 12 failures before the success", (int)logon_failures_before(pp, n, 15, 3600), 12);
+        check_int("guess: other source counted separately", (int)logon_failures_before(pp, n, 16, 3600), 3);
+        check_int("guess: loopback is never matched", (int)logon_failures_before(pp, n, 17, 3600), 0);
+        check_int("guess: no source", (int)logon_failures_before(pp, n, 18, 3600), 0);
+        check_int("guess: only failures inside the window", (int)logon_failures_before(pp, n, 19, 3600), 1);
+        check_int("guess: index out of range", (int)logon_failures_before(pp, n, 99, 3600), 0);
+    }
+
     fprintf(stderr, "\n%s (%d failure%s)\n",
             failures == 0 ? "ALL PASSED" : "FAILED", failures, failures == 1 ? "" : "s");
     return failures == 0 ? 0 : 1;
