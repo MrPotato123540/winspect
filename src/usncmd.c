@@ -173,7 +173,7 @@ static uint64_t del_key(uint64_t parent, const char *name)
     }
     return h ? h : 1;
 }
-typedef struct { uint64_t ref; char name[260]; int flagged; } oldname;
+typedef struct { uint64_t ref; char name[260]; char folder[1024]; int flagged; } oldname;
 
 int cmd_usn(int argc, char **argv)
 {
@@ -335,7 +335,24 @@ int cmd_usn(int argc, char **argv)
                 known = 0;
             }
         }
-        const char *reason = usn_flag(r.reason, r.name, old, is_prog);
+        // Deleted while still open: NTFS parks the file in \$Extend\$Deleted
+        // under a hex name (its own file reference). Show where it was and
+        // judge a later deletion by its real name and folder.
+        int parked = usn_posix_deleted_name(r.name, r.file_ref);
+        const char *judge_name = r.name;
+        if (parked) {
+            if (slot->ref == r.file_ref && slot->name[0]) {
+                snprintf(folder, sizeof folder, "\\$Extend\\$Deleted (deleted while still open; was %s%s%s)",
+                         slot->folder, slot->folder[0] && strcmp(slot->folder, "\\") ? "\\" : "", slot->name);
+                judge_name = slot->name;
+                known = slot->folder[0] && slot->folder[0] != '(';
+            } else {
+                snprintf(folder, sizeof folder, "\\$Extend\\$Deleted (deleted while still open)");
+                known = 0;
+            }
+        }
+        const char *reason = usn_flag(r.reason, judge_name, parked ? NULL : old, is_prog);
+        if (parked && (r.reason & 0x2000)) reason = NULL;      // the move into $Deleted is not a rename into a program
         if (reason && routine_name(r.name)) reason = NULL;
         if (reason && (r.reason & 0x2000) && old && staging_name(old)) reason = NULL;
         // With the folder known, only user-writable places count: deleting or
@@ -343,7 +360,8 @@ int cmd_usn(int argc, char **argv)
         // and servicing do every day, and needs admin anyway.
         if (reason && (live || nodes)) {
             char full[8192 + 300];
-            snprintf(full, sizeof full, "%s\\%s", folder, r.name);
+            if (parked && slot->ref == r.file_ref) snprintf(full, sizeof full, "%s\\%s", slot->folder, slot->name);
+            else snprintf(full, sizeof full, "%s\\%s", folder, r.name);
             if (!known || !ioc_user_writable(full)) reason = NULL;
         }
         // A reparse point is not a program's content: deleting one (the app
@@ -368,7 +386,12 @@ int cmd_usn(int argc, char **argv)
         }
         // A rename is logged twice (RENAME_NEW_NAME, then with CLOSE): judge it once.
         if (reason && (r.reason & 0x2000) && slot->ref == r.file_ref && slot->flagged) reason = NULL;
-        if (r.reason & 0x1000) { slot->ref = r.file_ref; snprintf(slot->name, sizeof slot->name, "%s", r.name); slot->flagged = 0; }
+        if (r.reason & 0x1000) {
+            slot->ref = r.file_ref;
+            snprintf(slot->name, sizeof slot->name, "%s", r.name);
+            snprintf(slot->folder, sizeof slot->folder, "%s", folder);
+            slot->flagged = 0;
+        }
         if (reason && (r.reason & 0x2000)) slot->flagged = 1;
         if (reason) flagged_all++;
         if (only_flagged && reason == NULL) continue;

@@ -108,3 +108,16 @@ const char *usn_flag(uint32_t reason, const char *name, const char *old_name, in
         return "renamed into a program or script";
     return NULL;
 }
+
+int usn_posix_deleted_name(const char *name, uint64_t file_ref)
+{
+    uint64_t v = 0;
+    size_t i;
+    for (i = 0; name[i]; i++) {
+        char c = name[i];
+        int d = (c >= '0' && c <= '9') ? c - '0' : (c >= 'A' && c <= 'F') ? c - 'A' + 10 : (c >= 'a' && c <= 'f') ? c - 'a' + 10 : -1;
+        if (d < 0 || i >= 24) return 0;
+        if (i < 16) v = (v << 4) | (uint64_t)d;
+    }
+    return i == 24 && v == file_ref;
+}

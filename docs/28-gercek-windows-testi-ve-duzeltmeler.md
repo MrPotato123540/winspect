@@ -197,6 +197,29 @@ satır "(2 report folders)", Defender'ın `mpengine.dll` satırı kayboldu.
   izliyor**: sonraki yeniden adlandırma ve silme, başka bir adla olsa da
   gösteriliyor.
 
+## Dördüncü tur
+
+- **triage explorer: SCORE 10 → LOW.** Satır artık sayıları da veriyor:
+  `10 region(s), 40 KB: 0 RWX, 0 with a PE header, 0 over 64 KB`.
+- **Kayıt yeniden kullanımı kanıtlandı.** `deneme3.txt`'nin kaydı 133966,
+  sıra numarası 28 idi. `mft --record 133966` şunu gösterdi:
+  `\Users\user\Desktop\winspect-test3.zip`, sıra numarası 30, oluşturulma
+  00:20:27. Yani deneme dosyası silindikten 22 saniye sonra aynı kayıt test
+  sonuçlarının zip'ine verilmiş. `mft --deleted`'in onu bulamamasının nedeni
+  buydu; değişiklik günlüğü (usn) tek tanık kaldı.
+- **"Yeniden adlandırma"nın asıl anlamı.** `deneme4.txt` izlenince ikinci
+  satır çıktı: `RENAME_NEW_NAME (folder no longer exists)\0072000000020F0F66AEDC71`.
+  Bu ad rastgele değil: ilk 16 onaltılık hane dosyanın kendi referansı
+  (`0072` = sıra 114, `000000020F0F` = kayıt 134927). Windows 10 1709'dan beri
+  NTFS, başka bir programın hâlâ açık tuttuğu bir dosyayı silerken
+  ("POSIX silme") dosyayı gizli `\$Extend\$Deleted` klasörüne bu adla taşır;
+  son tutamaç (handle) kapanınca dosya tamamen silinir. Araç bu adı artık
+  tanıyor (`usn_posix_deleted_name`), klasörü
+  `\$Extend\$Deleted (deleted while still open; was \Users\Public\deneme4.txt)`
+  diye gösteriyor ve orada silinen bir **programı** gerçek adı ve eski
+  klasörüyle değerlendiriyor. Bu bir açığı da kapattı: açıkken silinen bir
+  `.exe` önceden onaltılık adı yüzünden hiç işaretlenmiyordu.
+
 ## Gerçek bulgu: Excel'de VBAWarnings = 1
 
 `office` komutunun işaretlediği `VBAWarnings=1` bir yanlış alarm **değil**:

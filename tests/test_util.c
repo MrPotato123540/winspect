@@ -2129,6 +2129,15 @@ int main(void)
         check_int("privx large", privx_weight(2, 0, 0, 1, &why), 40);
     }
 
+    // --- usn_posix_deleted_name ------------------------------------------------
+    check_int("posix deleted (real sample)", usn_posix_deleted_name("0072000000020F0F66AEDC71", (114ULL << 48) | 134927ULL), 1);
+    check_int("posix deleted lower case", usn_posix_deleted_name("0072000000020f0f66aedc71", (114ULL << 48) | 134927ULL), 1);
+    check_int("posix other file", usn_posix_deleted_name("0072000000020F0F66AEDC71", (114ULL << 48) | 134928ULL), 0);
+    check_int("posix short", usn_posix_deleted_name("0072000000020F0F66AEDC7", (114ULL << 48) | 134927ULL), 0);
+    check_int("posix not hex", usn_posix_deleted_name("0072000000020F0F66AEDCZ1", (114ULL << 48) | 134927ULL), 0);
+    check_int("posix long", usn_posix_deleted_name("0072000000020F0F66AEDC71A", (114ULL << 48) | 134927ULL), 0);
+    check_int("posix ordinary name", usn_posix_deleted_name("deneme4.txt", 5), 0);
+
     fprintf(stderr, "\n%s (%d failure%s)\n",
             failures == 0 ? "ALL PASSED" : "FAILED", failures, failures == 1 ? "" : "s");
     return failures == 0 ? 0 : 1;
