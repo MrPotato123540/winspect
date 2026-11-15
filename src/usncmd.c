@@ -310,6 +310,8 @@ int cmd_usn(int argc, char **argv)
     size_t off = 0;
     usn_rec r;
     unsigned long count = 0, shown = 0, flagged = 0, flagged_all = 0;
+    static uint64_t track[1024];         // --find: file references already matched
+    unsigned ntrack = 0;
     int first = 1;
     static char folder[8192];
     while (usn_next(d, n, &off, &r)) {
@@ -371,7 +373,16 @@ int cmd_usn(int argc, char **argv)
         if (reason) flagged_all++;
         if (only_flagged && reason == NULL) continue;
         if (want && !(r.reason & want)) continue;
-        if (find && !ci_contains(r.name, find)) continue;
+        if (find) {
+            // Follow a matched file by its reference: a rename or delete that
+            // comes later under another name (deleted via a temporary name, or
+            // renamed away) is shown too, from the first matching record on.
+            int byname = ci_contains(r.name, find);
+            int tracked = 0;
+            for (unsigned k = 0; k < ntrack; k++) if (track[k] == r.file_ref) { tracked = 1; break; }
+            if (!byname && !tracked) continue;
+            if (byname && !tracked && ntrack < sizeof track / sizeof track[0]) track[ntrack++] = r.file_ref;
+        }
         if (reason) flagged++;
         char when[32], rs[512];
         filetime_utc_str(r.time, when, sizeof when);

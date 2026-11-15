@@ -172,6 +172,31 @@ Yeni bulunanlar ve düzeltmeleri:
   kullanılmıştır. Bu durumda değişiklik günlüğü (usn), silinen dosyanın tek
   tanığıdır.
 
+## Üçüncü tur
+
+Doğrulananlar: dns WMI üzerinden okundu, Türkçe karakterler `--out` ile
+düzgün ("Bu neden için bir başlık bulunamadı"), wer'de python çökmesi tek
+satır "(2 report folders)", Defender'ın `mpengine.dll` satırı kayboldu.
+
+- **explorer'daki 10 "private +x" bölgesi.** `regions` çıktısında hepsi
+  aynı şekildeydi: 64 KB'lık bir ayırmanın içinde bir okunur sayfa ve
+  hemen arkasında **4 KB'lık okunur + çalıştırılabilir** bir sayfa, on tane
+  art arda (`0x7FF5CB8F1000`, `...901000`, ... `...981000`). Yazılabilir değiller,
+  PE başlığı yok, hiçbir iş parçacığı orada başlamıyor. Bu, JIT kalıplarının
+  ve "thunk" havuzlarının (küçük atlama kodları) şekli. Diske bağlı olmayan
+  çalıştırılabilir bellek, JIT kullanan birçok süreçte zaten normaldir.
+  Puan artık bölgenin **şekline** göre veriliyor: PE başlığı, RWX ya da 64 KB'tan
+  büyük bölge varsa +40 (enjekte kodun şekli), yalnız küçük okunur-çalıştırılabilir
+  sayfalar varsa +10. Çıktıda sayılar da yazılıyor (kaç KB, kaçı RWX, kaçında
+  PE başlığı var). Hangi bileşenin bu sayfaları ayırdığını araç söylemiyor;
+  doğrulanmamış bir isim vermektense şekli raporluyor.
+- **`deneme3.txt` silinmedi, yeniden adlandırıldı.** usn'de son satır
+  `RENAME_OLD_NAME`'di: dosya önce başka bir ada taşınıp sonra silinmiş
+  (bazı programlar silmeyi böyle yapar). Yeni ad aramaya uymadığı için
+  görünmüyordu. Artık `usn --find`, eşleşen dosyayı **referans numarasıyla
+  izliyor**: sonraki yeniden adlandırma ve silme, başka bir adla olsa da
+  gösteriliyor.
+
 ## Gerçek bulgu: Excel'de VBAWarnings = 1
 
 `office` komutunun işaretlediği `VBAWarnings=1` bir yanlış alarm **değil**:

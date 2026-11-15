@@ -209,7 +209,10 @@ static const struct { const char *name, *text; } usage_table[] = {
         "name and reasons, oldest first. With --mft the folder of each entry is\n"
         "rebuilt from a copy of the same volume's $MFT. Flags deleted programs /\n"
         "scripts and files renamed into a program / script name (pdf -> exe).\n"
-        "--find filters by name, --reason by reason words (create, delete, rename,\n"
+        "--find filters by name and then follows each matched file by its reference,\n"
+        "so a later rename or delete under another name is shown too; each row then\n"
+        "carries its $MFT record and sequence (see mft --record). --reason filters\n"
+        "by reason words (create, delete, rename,\n"
         "data, security, close...). --live <drive> reads the running system's\n"
         "journal and folder names through the documented FSCTL_QUERY_USN_JOURNAL /\n"
         "FSCTL_READ_USN_JOURNAL / FSCTL_ENUM_USN_DATA (administrator). Read-only.\n"
@@ -224,7 +227,10 @@ static const struct { const char *name, *text; } usage_table[] = {
         "earlier than their $FN creation time - a timestomping CANDIDATE list, not\n"
         "a verdict: files from install media and archives look the same (on a real\n"
         "XP image a third of all files did). --find filters by path text,\n"
-        "--deleted keeps records that are no longer in use. --live <drive> reads\n"
+        "--deleted keeps records that are no longer in use. --record <n> shows one\n"
+        "record, whatever it holds now, with its sequence number; it also takes the\n"
+        "hex file reference usn prints, to tell whether a deleted file's record has\n"
+        "since been reused by another file. --live <drive> reads\n"
         "the running system's $MFT through a read-only volume handle (boot sector\n"
         "-> the $MFT's own record -> its data runs; administrator). --image <file>\n"
         "does the same on a raw image of one NTFS partition (dd / FTK \"raw\"), so no\n"
@@ -234,7 +240,7 @@ static const struct { const char *name, *text; } usage_table[] = {
         "seconds may never reach the on-disk $MFT at all (NTFS writes records\n"
         "lazily): cross-check with `usn`. Read-only. Usage:\n"
         "  winspect mft <$MFT file> | --live <drive> | --image <volume image>\n"
-        "               [--find <text>] [--deleted] [--timestomp] [--json | --csv]\n" },
+        "               [--find <text>] [--deleted] [--record <n>] [--timestomp] [--json | --csv]\n" },
     { "activities",
         "winspect activities - Windows 10 Timeline (ActivitiesCache.db under\n"
         "%LOCALAPPDATA%\\ConnectedDevicesPlatform\\<account>\\): which application was\n"
@@ -350,14 +356,14 @@ static const struct { const char *name, *text; } usage_table[] = {
         "plus the process mitigation policies in force (DEP, ASLR, CFG, signature\n"
         "policy, dynamic code). Read-only (PROCESS_QUERY_INFORMATION | VM_READ).\n"
         "Usage:\n"
-        "  winspect inspect <pid> [--json]\n" },
+        "  winspect inspect <pid | name> [--json]\n" },
     { "modules",
         "winspect modules - the modules (EXE + DLLs) loaded in a live process, with\n"
         "each one's load address, size and backing file, flagging modules whose file\n"
         "is missing from disk or sits in a user-writable location. --sig also checks\n"
         "each module's signature (embedded or catalog); --unsigned shows only the ones\n"
         "without a trusted signature (the ListDLLs -u idea). Read-only. Usage:\n"
-        "  winspect modules <pid> [--sig | --unsigned] [--json | --csv]\n" },
+        "  winspect modules <pid | name> [--sig | --unsigned] [--json | --csv]\n" },
     { "threads",
         "winspect threads - every thread of a process: priority, CPU time, state /\n"
         "wait reason, start address (resolved to module+offset) and a register\n"
@@ -365,7 +371,7 @@ static const struct { const char *name, *text; } usage_table[] = {
         "address lies outside every module is the classic shape of injected code.\n"
         "Read-only (threads are only briefly suspended to read their context).\n"
         "Usage:\n"
-        "  winspect threads <pid> [-s] [--json | --csv]\n" },
+        "  winspect threads <pid | name> [-s] [--json | --csv]\n" },
     { "handles",
         "winspect handles - the kernel object handles a process holds: type, name and\n"
         "granted access decoded per object type (File, Key, Process, Thread, Token,\n"
@@ -377,21 +383,21 @@ static const struct { const char *name, *text; } usage_table[] = {
         "values); file names are queried with a timeout so a blocking pipe cannot\n"
         "hang the tool. Read-only (handles are duplicated only to query them).\n"
         "Usage:\n"
-        "  winspect handles <pid> [--json | --csv]\n"
+        "  winspect handles <pid | name> [--json | --csv]\n"
         "  winspect handles --find <text> [--type <T>] [--json | --csv]\n" },
     { "regions",
         "winspect regions - the virtual memory map of a process (VirtualQueryEx):\n"
         "base, size, protection, type (image / mapped / private) and the backing\n"
         "file. Private executable regions - code with no file behind it - are\n"
         "flagged. Read-only. Usage:\n"
-        "  winspect regions <pid> [--json | --csv]\n" },
+        "  winspect regions <pid | name> [--json | --csv]\n" },
     { "token",
         "winspect token - a process's security context: user and groups (with\n"
         "attributes), integrity level, elevation, token type, logon session, the\n"
         "linked (UAC split) token and every privilege with its state - powerful ones\n"
         "(SeDebug, SeImpersonate, SeLoadDriver, ...) are highlighted, and marked when\n"
         "ENABLED. Read-only (TOKEN_QUERY). Usage:\n"
-        "  winspect token <pid> [--json]\n" },
+        "  winspect token <pid | name> [--json]\n" },
     { "launch",
         "winspect launch - start a program SUSPENDED, show where it is about to begin\n"
         "(image base after ASLR, entry point, the first bytes there), then resume it\n"
@@ -416,13 +422,13 @@ static const struct { const char *name, *text; } usage_table[] = {
         "modules), private executable memory, main image in memory vs on disk\n"
         "(tamper, relocation-aware), IAT targets, thread start addresses and section\n"
         "permissions. Read-only. Usage:\n"
-        "  winspect verify <pid> [--json]\n" },
+        "  winspect verify <pid | name> [--json]\n" },
     { "triage",
         "winspect triage - one-shot \"is this process suspicious?\" report.\n"
         "Combines the signals the individual commands expose (signature trust,\n"
         "PEB/kernel path masquerade, ntdll inline hooks, private executable memory,\n"
         "token integrity) into a weighted suspicion score and a list of reasons.\n"
-        "Usage: winspect triage <pid> [--json]\n" },
+        "Usage: winspect triage <pid | name> [--json]\n" },
     { "hunt",
         "winspect hunt - system-wide \"Hunt Evil\" checks over the live process list:\n"
         "core Windows processes with an unexpected parent (lsass not started by\n"
@@ -539,7 +545,7 @@ static const struct { const char *name, *text; } usage_table[] = {
         "listening on every interface (0.0.0.0 / ::). Flags (with a reason) script\n"
         "hosts or programs in user-writable dirs that talk to public addresses or\n"
         "listen on all interfaces; --flagged shows only those.\n"
-        "Usage: winspect net [pid] [--tcp] [--udp] [--listening] [--established]\n"
+        "Usage: winspect net [pid | name] [--tcp] [--udp] [--listening] [--established]\n"
         "                    [--external] [--exposed] [--flagged]\n"
         "                    [--json | --csv]\n"
         "With a pid, only that process's endpoints are shown; without one, all. Each\n"

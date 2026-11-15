@@ -6,7 +6,10 @@
 // name and reasons, oldest first. With --mft the folder of each entry is
 // rebuilt from a copy of the same volume's $MFT. Flags deleted programs /
 // scripts and files renamed into a program / script name (pdf -> exe).
-// --find filters by name, --reason by reason words (create, delete, rename,
+// --find filters by name and then follows each matched file by its reference,
+// so a later rename or delete under another name is shown too; each row then
+// carries its $MFT record and sequence (see mft --record). --reason filters
+// by reason words (create, delete, rename,
 // data, security, close...). --live <drive> reads the running system's
 // journal and folder names through the documented FSCTL_QUERY_USN_JOURNAL /
 // FSCTL_READ_USN_JOURNAL / FSCTL_ENUM_USN_DATA (administrator). Read-only.

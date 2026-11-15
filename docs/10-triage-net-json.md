@@ -50,7 +50,8 @@ Toplanan sinyaller ve ağırlıkları:
 
 | Sinyal | Ağırlık | Ne anlama gelir |
 | --- | --- | --- |
-| private + executable bellek | +40 | diske bağlı modülü olmayan çalıştırılabilir kod — enjekte kodun şekli |
+| private + executable bellek: PE başlığı, RWX ya da 64 KB'tan büyük bölge | +40 | diske bağlı modülü olmayan çalıştırılabilir kod — enjekte kodun şekli |
+| private + executable bellek: yalnız küçük, yazılamaz, PE başlıksız sayfalar | +10 | JIT kalıpları ve thunk havuzları böyle görünür (explorer'da 10 tane 4 KB sayfa görüldü); tek başına bir şey kanıtlamaz |
 | PEB yolu ≠ kernel yolu | +30 | process kendi kimliği hakkında yalan söylüyor olabilir (masquerade) |
 | imza güvenilir değil | +25 | ne geçerli embedded imza ne de catalog üyeliği var |
 | ntdll stub'ları inline-hook'lu | +15 | EDR olabilir, ama enjekte hook da olabilir |
