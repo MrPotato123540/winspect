@@ -10,6 +10,9 @@
 //   path masquerade    - does the PEB image path match the kernel's real path?
 //   ntdll inline hooks  - are the hot native stubs patched in this process?
 //   private executable - is there committed +X memory with no backing module?
+//                        weighed by shape: a PE header, RWX or a region over
+//                        64 KB is injected-code shape; small read-execute
+//                        pages alone (JIT stubs, thunk pools) count little
 //   token integrity    - is it elevated, and does that line up with trust?
 //
 // None of these alone is proof of anything (EDRs hook ntdll; installers run from
@@ -27,6 +30,7 @@
 #include "jsonutil.h"
 #include "artparse.h"
 #include "detect.h"     // shared image-tamper / IAT-hook detection
+#include "patchdec.h"   // privx_weight
 
 #include <windows.h>
 #include <tlhelp32.h>
@@ -127,10 +131,19 @@ static int count_hooked_stubs(HANDLE h)
 }
 
 // Counts committed, private, executable regions (code with no backing module).
-static int count_private_exec(HANDLE h)
+typedef struct { int regions, rwx, pe, large; unsigned long long bytes; } privx_stats;
+
+static int has_mz(HANDLE h, LPCVOID at)
 {
+    unsigned char m[2] = { 0, 0 };
+    SIZE_T got = 0;
+    return ReadProcessMemory(h, at, m, 2, &got) && got == 2 && m[0] == 'M' && m[1] == 'Z';
+}
+
+static void count_private_exec(HANDLE h, privx_stats *st)
+{
+    memset(st, 0, sizeof *st);
     uintptr_t addr = 0;
-    int flagged = 0;
     for (unsigned guard = 0; guard < 1000000; guard++) {
         MEMORY_BASIC_INFORMATION mbi;
         if (VirtualQueryEx(h, (LPCVOID)addr, &mbi, sizeof mbi) != sizeof mbi) {
@@ -145,11 +158,16 @@ static int count_private_exec(HANDLE h)
             DWORD base = mbi.Protect & 0xFF;
             if (base & (PAGE_EXECUTE | PAGE_EXECUTE_READ |
                         PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) {
-                flagged++;
+                st->regions++;
+                st->bytes += mbi.RegionSize;
+                if (base & (PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) st->rwx++;
+                if (mbi.RegionSize > 65536) st->large++;
+                // The header of a mapped PE sits at the allocation base, which
+                // may be a separate, non-executable page of the same allocation.
+                if (has_mz(h, mbi.BaseAddress) || (mbi.AllocationBase != mbi.BaseAddress && has_mz(h, mbi.AllocationBase))) st->pe++;
             }
         }
     }
-    return flagged;
 }
 
 // Is the file at wpath Authenticode-trusted, via an embedded signature or a
@@ -440,7 +458,11 @@ int cmd_triage(int argc, char **argv)
     int masquerade = (have_real && pebpath[0] && _stricmp(realpath, pebpath) != 0);
 
     int hooks = count_hooked_stubs(h);
-    int privx = count_private_exec(h);
+    privx_stats pxs;
+    count_private_exec(h, &pxs);
+    int privx = pxs.regions;
+    const char *privx_why = NULL;
+    int privx_w = privx_weight(pxs.regions, pxs.rwx, pxs.pe, pxs.large, &privx_why);
 
     // Deep checks shared with `verify`: does the main image in memory still match
     // its file on disk (hollowing / patch), and do its imports resolve into real
@@ -500,7 +522,7 @@ int cmd_triage(int argc, char **argv)
         } } while (0)
 
     ADD(tamper.modified_sections > 0, 45, "main image code in memory differs from the file on disk (hollowing / patch?)");
-    ADD(privx > 0, 40, "private executable memory present (no backing module - injected code?)");
+    ADD(privx_w > 0, privx_w, privx_why);
     // Softer weight than the disk/memory signals: JIT and some managed runtimes
     // legitimately start threads in unbacked memory, so this alone shouldn't
     // convict - it should contribute, not dominate.
@@ -531,7 +553,8 @@ int cmd_triage(int argc, char **argv)
         json_str(sig_source);
         printf(",\"masquerade\":%s", masquerade ? "true" : "false");
         fputs(",\"peb_path\":", stdout); json_str(pebpath);
-        printf(",\"hooked_stubs\":%d,\"private_exec_regions\":%d", hooks, privx);
+        printf(",\"hooked_stubs\":%d,\"private_exec_regions\":%d,\"private_exec_bytes\":%llu,\"private_exec_rwx\":%d,"
+               "\"private_exec_pe\":%d,\"private_exec_large\":%d", hooks, privx, pxs.bytes, pxs.rwx, pxs.pe, pxs.large);
         printf(",\"image_modified_sections\":%d,\"iat_hooked_entries\":%d",
                tamper.modified_sections, iat.hooked_entries);
         printf(",\"image_diff_bytes\":%u,\"image_patch_count\":%u,\"image_patches\":",
@@ -560,7 +583,9 @@ int cmd_triage(int argc, char **argv)
         printf("  integrity    %s%s\n", integrity, elevated ? " (elevated)" : "");
         printf("  parent       %s\n", have_parent ? parent : "(exited or unknown)");
         printf("  ntdll hooks  %d\n", hooks);
-        printf("  private +x   %d region(s)\n", privx);
+        printf("  private +x   %d region(s)", privx);
+        if (privx) printf(", %llu KB: %d RWX, %d with a PE header, %d over 64 KB", pxs.bytes / 1024, pxs.rwx, pxs.pe, pxs.large);
+        putchar('\n');
         printf("  image tamper %d section(s) differ from disk\n", tamper.modified_sections);
         if (tamper.modified_sections == 0 && tamper.skipped_sections) {
             printf("               not compared: %s (written by the Windows loader in every process)\n", tamper.skipped_section);

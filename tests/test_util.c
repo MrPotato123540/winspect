@@ -2118,6 +2118,17 @@ int main(void)
     check_int("programdata intel writable", ioc_user_writable("C:\\ProgramData\\Intel\\DSA\\Data\\rules-verify.dll"), 1);
     check_int("lookalike not locked", ioc_user_writable("C:\\ProgramData\\Microsoft\\Windows Defender2\\x.exe"), 1);
 
+    // --- privx_weight ----------------------------------------------------------
+    {
+        const char *why;
+        check_int("privx none", privx_weight(0, 0, 0, 0, &why), 0);
+        check_int("privx small pages (explorer: 10 x 4 KB)", privx_weight(10, 0, 0, 0, &why), 10);
+        check_int("privx small why", why != NULL && strstr(why, "thunk") != NULL, 1);
+        check_int("privx pe", privx_weight(1, 0, 1, 0, &why), 40);
+        check_int("privx rwx", privx_weight(3, 1, 0, 0, &why), 40);
+        check_int("privx large", privx_weight(2, 0, 0, 1, &why), 40);
+    }
+
     fprintf(stderr, "\n%s (%d failure%s)\n",
             failures == 0 ? "ALL PASSED" : "FAILED", failures, failures == 1 ? "" : "s");
     return failures == 0 ? 0 : 1;

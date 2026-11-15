@@ -114,3 +114,14 @@ int patch_loader_written_section(const char *name)
     n[8] = '\0';
     return strcmp(n, "fothk") == 0;
 }
+
+int privx_weight(int regions, int rwx, int pe, int large, const char **why)
+{
+    *why = NULL;
+    if (regions <= 0) return 0;
+    if (pe > 0)    { *why = "private executable memory holds a PE header (manually / reflectively loaded module?)"; return 40; }
+    if (rwx > 0)   { *why = "private memory both writable and executable (shellcode staging?)"; return 40; }
+    if (large > 0) { *why = "large private executable region(s) with no backing module (injected code?)"; return 40; }
+    *why = "small private executable pages only (each 64 KB or less, none writable, no PE header) - JIT stubs and thunk pools look like this";
+    return 10;
+}

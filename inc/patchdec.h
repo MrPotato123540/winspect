@@ -49,4 +49,14 @@ int patch_loader_written_section(const char *name);
 // Short lowercase name for a kind ("jmp", "call", "jmp [mem]", ...).
 const char *patch_kind_name(enum patch_kind k);
 
+// Weight of "private executable memory" in a triage score, from its shape:
+//   regions  committed private executable regions
+//   rwx      of those, writable and executable at once
+//   pe       of those, with "MZ" at the region or its allocation base
+//   large    of those, bigger than 64 KB
+// A PE header, RWX or a large region is the shape of injected code: 40. Only
+// small read-execute pages (JIT stubs and thunk pools, common in explorer and
+// other shell hosts) weigh 10. 0 when there are none. *why gets the reason.
+int privx_weight(int regions, int rwx, int pe, int large, const char **why);
+
 #endif

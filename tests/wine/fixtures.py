@@ -973,11 +973,12 @@ except Exception as e:
 rc, out, err = wine([exe, 'mft', r'C:\ntfs\MFT', '--record', '0x0002000000000032'])
 rc2, out2, err2 = wine([exe, 'mft', r'C:\ntfs\MFT', '--record', '60'])
 rc3, out3, err3 = wine([exe, 'usn', r'C:\ntfs\J', '--find', 'tool.ps1'])
+rc4, out4, err4 = wine([exe, 'usn', r'C:\ntfs\J', '--find', 'invoice.pdf'])
 if 'invoice.exe' not in out or 'sequence 2' not in out or 'no file name in this record' not in out2 or \
-        '[record 51 seq 1]' not in out3:
+        '[record 51 seq 1]' not in out3 or 'invoice.exe' not in out4:
     print(f'FAIL mft --record / usn --find record: {out[:300]!r} {out2[:200]!r} {out3[:300]!r}'); fails += 1
 else:
-    print('checked mft --record (hex file reference and free record) and usn --find record column')
+    print('checked mft --record (hex file reference and free record), usn --find record column and rename followed')
 
 # --out: the output goes to a new file as UTF-8; an existing file is refused
 outp = os.path.join(pfx, 'drive_c', 'out1.json')
@@ -1069,8 +1070,15 @@ if cc:
             else:
                 ok = ok and ps[0]['target_module'] == '' and ps[0]['final_module'].lower() == 'selfpatch.exe'
             rc, out2, err = wine([exe, 'triage', str(pid), '--json'])
-            tj = json.loads(out2)['signals']
+            tjall = json.loads(out2)
+            tj = tjall['signals']
             ok = ok and tj['image_patch_count'] == 1 and len(tj['image_patches']) == 1
+            if mode == 'tramp':
+                # one 4 KB read-execute trampoline page: private exec, but the
+                # small-page shape (weight 10), not the injected-code shape (40)
+                pr = [r for r in tjall.get('reasons', []) if 'private' in r['text']]
+                ok = ok and tj['private_exec_regions'] >= 1 and tj['private_exec_rwx'] == 0 and tj['private_exec_pe'] == 0 \
+                     and len(pr) == 1 and pr[0]['weight'] == 10
             rc, txt, err = wine([exe, 'triage', str(pid)])
             ok = ok and 'disk:' in txt and 'mem :' in txt and 'selfpatch.exe' in txt.split('image tamper')[1]
             if not ok:
