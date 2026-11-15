@@ -557,7 +557,10 @@ static const struct { const char *name, *text; } usage_table[] = {
         "name or data contains the text. The cache is answered from memory\n"
         "(DNS_QUERY_NO_WIRE_ONLY): no query leaves the machine. Needs the DNS Client\n"
         "service; recent Windows 11 builds also need administrator (as ipconfig\n"
-        "/displaydns does). An empty or unreadable cache is said so. Read-only. Usage:\n"
+        "/displaydns does). When DnsGetCacheDataTable refuses (some 24H2 builds do,\n"
+        "even to an administrator) the cache is read through WMI\n"
+        "(ROOT\\StandardCimv2 MSFT_DNSClientCache, as Get-DnsClientCache does).\n"
+        "An empty or unreadable cache is said so. Read-only. Usage:\n"
         "  winspect dns [--find <text>] [--json | --csv]\n" },
     { "volumes",
         "winspect volumes - the mounted volumes: drive letter, type (fixed,\n"

@@ -87,6 +87,16 @@ static void scan(wlist *l, const char *dir, const char *user, int depth)
     FindClose(h);
 }
 
+// Two report folders for one crash (WER often writes more than one, e.g. a
+// queued and an archived copy) carry the same time, event, program, fault
+// module and exception code; the text view shows them as one line.
+static int same_event(const wrow *a, const wrow *b)
+{
+    return strcmp(a->time, b->time) == 0 && strcmp(a->r.event_type, b->r.event_type) == 0 &&
+           strcmp(a->r.app_path, b->r.app_path) == 0 && strcmp(a->r.app_name, b->r.app_name) == 0 &&
+           strcmp(a->r.fault_module, b->r.fault_module) == 0 && strcmp(a->r.exc_code, b->r.exc_code) == 0;
+}
+
 static int newest_first(const void *a, const void *b)
 {
     return -strcmp(((const wrow *)a)->time, ((const wrow *)b)->time);
@@ -161,12 +171,25 @@ int cmd_wer(int argc, char **argv)
         if (only_flagged && w->reason == NULL) continue;
         if (find && !ioc_contains_ci(r->app_path, find) && !ioc_contains_ci(r->app_name, find) &&
                 !ioc_contains_ci(r->fault_module, find) && !ioc_contains_ci(r->event_type, find)) continue;
+        unsigned copies = 1;
+        if (mode == 0) {
+            // Same-time rows are adjacent after the sort: print the first of a
+            // set of identical ones, with how many report folders it stands for.
+            int dup = 0;
+            for (size_t k = i; k-- > 0 && strcmp(l.v[k].time, w->time) == 0;)
+                if (same_event(&l.v[k], w)) { dup = 1; break; }
+            if (dup) continue;
+            for (size_t k = i + 1; k < l.n && strcmp(l.v[k].time, w->time) == 0; k++)
+                if (same_event(&l.v[k], w)) copies++;
+        }
         shown++;
         if (w->reason) flagged++;
         if (mode == 0) {
-            printf("%s %-19s  %-14s %-28s %-24s %-11s %s\n", w->reason ? "[!]" : "   ", w->time[0] ? w->time : "-",
+            printf("%s %-19s  %-14s %-28s %-24s %-11s %s", w->reason ? "[!]" : "   ", w->time[0] ? w->time : "-",
                    r->event_type, r->app_name, r->fault_module[0] ? r->fault_module : "-",
                    r->exc_code[0] ? r->exc_code : "-", r->app_path);
+            if (copies > 1) printf("  (%u report folders)", copies);
+            putchar('\n');
             if (w->reason) printf("        <- %s\n", w->reason);
             if (modules && r->modules_writable)
                 printf("        %u of %u module(s) from user-writable folders, first: %s\n", r->modules_writable, r->modules,
@@ -200,7 +223,7 @@ int cmd_wer(int argc, char **argv)
         }
     }
     if (mode == 1) puts("]");
-    else if (mode == 0) printf("\n%u report(s), %u flagged\n", shown, flagged);
+    else if (mode == 0) printf("\n%u crash / hang event(s), %u flagged\n", shown, flagged);
     free(l.v);
     return 0;
 }

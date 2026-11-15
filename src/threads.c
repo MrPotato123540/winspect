@@ -16,6 +16,7 @@
 // "ntdll!NtWaitForSingleObject+0x14". That needs symbols, so it is opt-in (it
 // can be slow and may consult a symbol server); the default stays fast.
 
+#include "pidarg.h"
 #include "threads.h"
 #include "jsonutil.h"
 
@@ -160,10 +161,8 @@ int cmd_threads(int argc, char **argv)
     if (mode != OUT_TEXT) {
         want_stack = 0;
     }
-    char *end = NULL;
-    unsigned long pid = strtoul(pid_arg, &end, 10);
-    if (end == pid_arg || *end != '\0' || pid == 0) {
-        fprintf(stderr, "threads: '%s' is not a valid pid\n", pid_arg);
+    unsigned long pid = 0;
+    if (!pid_from_arg("threads", pid_arg, &pid)) {
         return 1;
     }
 

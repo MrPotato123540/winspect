@@ -13,6 +13,7 @@
 // mapped or injected code. We flag those. (This is also what a stronger verify
 // check would scan; see docs/07-verify.md.)
 
+#include "pidarg.h"
 #include "regions.h"
 #include "jsonutil.h"
 
@@ -82,10 +83,8 @@ int cmd_regions(int argc, char **argv)
         fputs("usage: winspect regions <pid> [--json | --csv]\n", stderr);
         return 1;
     }
-    char *end = NULL;
-    unsigned long pid = strtoul(pid_arg, &end, 10);
-    if (end == pid_arg || *end != '\0' || pid == 0) {
-        fprintf(stderr, "regions: '%s' is not a valid pid\n", pid_arg);
+    unsigned long pid = 0;
+    if (!pid_from_arg("regions", pid_arg, &pid)) {
         return 1;
     }
 

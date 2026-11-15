@@ -31,6 +31,7 @@
 // None of this needs a kernel driver; it is all user-mode reads. Where a check
 // cannot see the whole truth (noted inline) it says so rather than over-claiming.
 
+#include "pidarg.h"
 #include "verify.h"
 #include "jsonutil.h"
 #include "detect.h"     // shared image-tamper / IAT-hook detection
@@ -552,10 +553,8 @@ int cmd_verify(int argc, char **argv)
         fputs("usage: winspect verify <pid> [--json]\n", stderr);
         return 1;
     }
-    char *end = NULL;
-    unsigned long pid = strtoul(pid_arg, &end, 10);
-    if (end == pid_arg || *end != '\0' || pid == 0) {
-        fprintf(stderr, "verify: '%s' is not a valid pid\n", pid_arg);
+    unsigned long pid = 0;
+    if (!pid_from_arg("verify", pid_arg, &pid)) {
         return 1;
     }
 

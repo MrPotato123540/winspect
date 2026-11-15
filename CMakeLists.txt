@@ -19,6 +19,7 @@ add_executable(winspect
     src/regions.c
     src/net.c
     src/triage.c
+    src/pidarg.c
     src/detect.c
     src/patchdec.c
     src/strings.c

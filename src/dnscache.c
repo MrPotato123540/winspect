@@ -10,8 +10,13 @@
 //                         answers from the cache only - the documented way
 //                         to read a cached record set without causing any
 //                         network traffic.
+// Some Windows 11 builds (seen on 24H2, build 26100) return FALSE from
+// DnsGetCacheDataTable with no error even to an administrator while ipconfig
+// still shows the cache. Then the cache is read through WMI instead:
+//   ROOT\StandardCimv2  MSFT_DNSClientCache   (what Get-DnsClientCache uses)
 // Read-only: nothing is added to or flushed from the cache.
 
+#define COBJMACROS
 #include "dnscache.h"
 #include "ioc.h"
 #include "jsonutil.h"
@@ -20,6 +25,8 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <windns.h>
+#include <objbase.h>
+#include <wbemcli.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -145,6 +152,94 @@ static void emit(dctx *c, const char *name, const char *type, const char *data, 
     }
 }
 
+// --- WMI fallback ----------------------------------------------------------
+
+// Property as text ("" when absent or NULL); numbers are converted.
+static void wprop(IWbemClassObject *o, const WCHAR *name, char *out, size_t n)
+{
+    out[0] = '\0';
+    VARIANT v;
+    VariantInit(&v);
+    if (FAILED(IWbemClassObject_Get(o, name, 0, &v, NULL, NULL))) return;
+    if (v.vt != VT_NULL && v.vt != VT_EMPTY && SUCCEEDED(VariantChangeType(&v, &v, 0, VT_BSTR)) && v.bstrVal)
+        utf8(v.bstrVal, out, n);
+    VariantClear(&v);
+}
+
+// Returns the number of cache objects read, or -1 if WMI could not be queried.
+static long dns_from_wmi(dctx *c)
+{
+    HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+    if (FAILED(hr) && hr != RPC_E_CHANGED_MODE) return -1;
+    int uninit = SUCCEEDED(hr);
+    CoInitializeSecurity(NULL, -1, NULL, NULL, RPC_C_AUTHN_LEVEL_DEFAULT, RPC_C_IMP_LEVEL_IMPERSONATE, NULL, EOAC_NONE, NULL);
+    IWbemLocator *loc = NULL;
+    IWbemServices *svc = NULL;
+    IEnumWbemClassObject *en = NULL;
+    long got_objs = -1;
+    hr = CoCreateInstance(&CLSID_WbemLocator, NULL, CLSCTX_INPROC_SERVER, &IID_IWbemLocator, (void **)&loc);
+    if (SUCCEEDED(hr)) {
+        BSTR ns = SysAllocString(L"ROOT\\StandardCimv2");
+        hr = IWbemLocator_ConnectServer(loc, ns, NULL, NULL, NULL, 0, NULL, NULL, &svc);
+        SysFreeString(ns);
+    }
+    if (SUCCEEDED(hr) && svc) {
+        CoSetProxyBlanket((IUnknown *)svc, RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE, NULL,
+                          RPC_C_AUTHN_LEVEL_CALL, RPC_C_IMP_LEVEL_IMPERSONATE, NULL, EOAC_NONE);
+        BSTR lang = SysAllocString(L"WQL");
+        BSTR q = SysAllocString(L"SELECT Entry, Name, Type, Status, Section, TimeToLive, Data FROM MSFT_DNSClientCache");
+        hr = IWbemServices_ExecQuery(svc, lang, q, WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY, NULL, &en);
+        SysFreeString(lang);
+        SysFreeString(q);
+    }
+    if (SUCCEEDED(hr) && en) {
+        got_objs = 0;
+        for (;;) {
+            IWbemClassObject *o = NULL;
+            ULONG got = 0;
+            hr = IEnumWbemClassObject_Next(en, 10000, 1, &o, &got);
+            if (hr != WBEM_S_NO_ERROR || got == 0 || o == NULL) break;
+            got_objs++;
+            char entry[512], name[512], type[16], status[16], section[8], ttl[16], data[1024], tb[16];
+            wprop(o, L"Entry", entry, sizeof entry);
+            wprop(o, L"Name", name, sizeof name);
+            wprop(o, L"Type", type, sizeof type);
+            wprop(o, L"Status", status, sizeof status);
+            wprop(o, L"Section", section, sizeof section);
+            wprop(o, L"TimeToLive", ttl, sizeof ttl);
+            wprop(o, L"Data", data, sizeof data);
+            IWbemClassObject_Release(o);
+            unsigned long st = strtoul(status, NULL, 10);
+            const char *tn = type_name((WORD)strtoul(type, NULL, 10), tb, sizeof tb);
+            const char *owner = name[0] ? name : entry;
+            if (st == DNS_ERROR_RCODE_NAME_ERROR || st == DNS_INFO_NO_RECORDS) {
+                emit(c, owner, tn, st == DNS_ERROR_RCODE_NAME_ERROR ? "(cached: name does not exist)" : "(cached: no record of this type)", 0, 0, "");
+                continue;
+            }
+            int sec = atoi(section);
+            emit(c, owner, tn, data, (DWORD)strtoul(ttl, NULL, 10), ttl[0] != '\0',
+                 sec == 1 ? "answer" : sec == 2 ? "authority" : sec == 3 ? "additional" : "");
+        }
+        IEnumWbemClassObject_Release(en);
+    }
+    if (svc) IWbemServices_Release(svc);
+    if (loc) IWbemLocator_Release(loc);
+    if (uninit) CoUninitialize();
+    return got_objs;
+}
+
+static void dns_header(const dctx *c, const char *source)
+{
+    if (c->mode == 0) {
+        printf("dns  (resolver cache%s; TTL = seconds left)\n\n", source);
+        printf("    %-45s %-6s %7s  %s\n", "name", "type", "ttl", "data");
+    } else if (c->mode == 2) {
+        puts("name,type,data,ttl,section");
+    } else {
+        putchar('[');
+    }
+}
+
 int cmd_dns(int argc, char **argv)
 {
     dctx c;
@@ -165,33 +260,26 @@ int cmd_dns(int argc, char **argv)
     SetLastError(0);
     if (get_table == NULL || !get_table(&head)) {
         DWORD err = GetLastError();
-        // FALSE with no error is what an empty cache returns. Recent Windows 11
-        // builds also refuse the cache to non-administrators (ipconfig
-        // /displaydns then says "The requested operation requires elevation").
-        if (c.mode == 1) puts("[]");
-        else if (c.mode == 2) puts("name,type,data,ttl,section");
-        int rc = 0;
-        if (get_table == NULL) {
-            fputs("dns: this system does not expose the resolver cache (DnsGetCacheDataTable missing)\n", stderr);
-            rc = 1;
-        } else if (err == ERROR_ACCESS_DENIED || err == ERROR_ELEVATION_REQUIRED) {
-            fputs("dns: access to the resolver cache denied - run as administrator\n", stderr);
-            rc = 1;
-        } else {
-            fprintf(stderr, "dns: the resolver cache could not be read (error %lu): it is empty, the DNS Client service is not running, "
-                            "or this Windows requires elevation - try again as administrator\n", (unsigned long)err);
-        }
         if (dnsapi) FreeLibrary(dnsapi);
-        return rc;
+        // The export is missing or refuses (some 24H2 builds return FALSE with
+        // no error even to an administrator): read the same cache through WMI.
+        dns_header(&c, ", read through WMI MSFT_DNSClientCache");
+        long n = dns_from_wmi(&c);
+        if (n >= 0) {
+            if (c.mode == 1) puts("]");
+            else if (c.mode == 0) printf("\n%u record(s)%s\n", c.rows, n == 0 ? " - the cache is empty" : "");
+            return 0;
+        }
+        if (c.mode == 1) puts("]");
+        if (err == ERROR_ACCESS_DENIED || err == ERROR_ELEVATION_REQUIRED) {
+            fputs("dns: access to the resolver cache denied - run as administrator\n", stderr);
+        } else {
+            fprintf(stderr, "dns: the resolver cache could not be read (DnsGetCacheDataTable %s, WMI MSFT_DNSClientCache unavailable); "
+                            "is the DNS Client service running?\n", get_table ? "failed" : "missing");
+        }
+        return 1;
     }
-    if (c.mode == 0) {
-        puts("dns  (resolver cache; TTL = seconds left)\n");
-        printf("    %-45s %-6s %7s  %s\n", "name", "type", "ttl", "data");
-    } else if (c.mode == 2) {
-        puts("name,type,data,ttl,section");
-    } else {
-        putchar('[');
-    }
+    dns_header(&c, "");
     for (ws_dns_cache_entry *e = head; e != NULL;) {
         char name[512], tb[16];
         utf8(e->name, name, sizeof name);

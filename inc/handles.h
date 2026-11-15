@@ -11,7 +11,7 @@
 // values); file names are queried with a timeout so a blocking pipe cannot
 // hang the tool. Read-only (handles are duplicated only to query them).
 // Usage:
-//   winspect handles <pid> [--json | --csv]
+//   winspect handles <pid | name> [--json | --csv]
 //   winspect handles --find <text> [--type <T>] [--json | --csv]
 int cmd_handles(int argc, char **argv);
 

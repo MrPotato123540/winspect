@@ -23,6 +23,7 @@
 // thread with a short timeout; a stuck worker is abandoned (never terminated)
 // and after a few of those, file names are no longer queried at all.
 
+#include "pidarg.h"
 #include "handles.h"
 #include "jsonutil.h"
 #include "rights.h"
@@ -366,10 +367,8 @@ int cmd_handles(int argc, char **argv)
             fputs("usage: winspect handles <pid> | --find <text> [--type <T>] [--json | --csv]\n", stderr);
             return 1;
         }
-        char *end = NULL;
-        pid = strtoul(pid_arg, &end, 10);
-        if (end == pid_arg || *end != '\0' || pid == 0) {
-            fprintf(stderr, "handles: '%s' is not a valid pid\n", pid_arg);
+        pid = 0;
+        if (!pid_from_arg("handles", pid_arg, &pid)) {
             return 1;
         }
     } else if (pid_arg != NULL) {

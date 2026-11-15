@@ -7,7 +7,7 @@
 // modules), private executable memory, main image in memory vs on disk
 // (tamper, relocation-aware), IAT targets, thread start addresses and section
 // permissions. Read-only. Usage:
-//   winspect verify <pid> [--json]
+//   winspect verify <pid | name> [--json]
 int cmd_verify(int argc, char **argv);
 
 #endif

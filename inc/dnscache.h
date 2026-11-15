@@ -12,7 +12,10 @@
 // name or data contains the text. The cache is answered from memory
 // (DNS_QUERY_NO_WIRE_ONLY): no query leaves the machine. Needs the DNS Client
 // service; recent Windows 11 builds also need administrator (as ipconfig
-// /displaydns does). An empty or unreadable cache is said so. Read-only. Usage:
+// /displaydns does). When DnsGetCacheDataTable refuses (some 24H2 builds do,
+// even to an administrator) the cache is read through WMI
+// (ROOT\StandardCimv2 MSFT_DNSClientCache, as Get-DnsClientCache does).
+// An empty or unreadable cache is said so. Read-only. Usage:
 //   winspect dns [--find <text>] [--json | --csv]
 int cmd_dns(int argc, char **argv);
 

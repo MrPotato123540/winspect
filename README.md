@@ -41,6 +41,11 @@ winspect prefetch --flagged --json | jq '.[].path'
 `winspect help <command>` shows what a command reads and every option it
 takes. The tables below are a map, not the full reference.
 
+`--out <file>` after any command writes its output to a new file as UTF-8
+(an existing file is never overwritten). Prefer it to `>` in Windows
+PowerShell 5.1, which re-encodes redirected output through the console code
+page and garbles non-ASCII text such as localized event strings.
+
 ### Whole machine
 
 | Command | What it does |
@@ -101,6 +106,8 @@ takes. The tables below are a map, not the full reference.
 | `events` | A short list of high-signal event IDs (service installs, log clearing, failed logons, new accounts, Defender detections...). `--summary` groups failed logons by source and flags guessing and spraying. `--evtx <file>` reads copied `.evtx` files with a built-in parser. |
 
 ### Processes
+
+Every `<pid>` below also takes an image name (`explorer` or `explorer.exe`); when several processes share the name, their PIDs are listed to pick from.
 
 | Command | What it does |
 | --- | --- |

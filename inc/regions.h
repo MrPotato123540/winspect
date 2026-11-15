@@ -5,7 +5,7 @@
 // base, size, protection, type (image / mapped / private) and the backing
 // file. Private executable regions - code with no file behind it - are
 // flagged. Read-only. Usage:
-//   winspect regions <pid> [--json | --csv]
+//   winspect regions <pid | name> [--json | --csv]
 int cmd_regions(int argc, char **argv);
 
 #endif

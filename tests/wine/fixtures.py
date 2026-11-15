@@ -969,6 +969,31 @@ try:
 except Exception as e:
     print('FAIL mft synthetic check:', e, out[:200]); fails += 1
 
+# mft --record: one record whatever it holds now; usn --find names the record
+rc, out, err = wine([exe, 'mft', r'C:\ntfs\MFT', '--record', '0x0002000000000032'])
+rc2, out2, err2 = wine([exe, 'mft', r'C:\ntfs\MFT', '--record', '60'])
+rc3, out3, err3 = wine([exe, 'usn', r'C:\ntfs\J', '--find', 'tool.ps1'])
+if 'invoice.exe' not in out or 'sequence 2' not in out or 'no file name in this record' not in out2 or \
+        '[record 51 seq 1]' not in out3:
+    print(f'FAIL mft --record / usn --find record: {out[:300]!r} {out2[:200]!r} {out3[:300]!r}'); fails += 1
+else:
+    print('checked mft --record (hex file reference and free record) and usn --find record column')
+
+# --out: the output goes to a new file as UTF-8; an existing file is refused
+outp = os.path.join(pfx, 'drive_c', 'out1.json')
+if os.path.exists(outp): os.remove(outp)
+rc, out, err = wine([exe, 'volumes', '--json', '--out', r'C:\out1.json'])
+rc2, out2, err2 = wine([exe, 'volumes', '--out', r'C:\out1.json'])
+try:
+    with open(outp, encoding='utf-8') as fh:
+        json.load(fh)
+    if rc != 0 or out.strip() or rc2 == 0 or 'already exists' not in err2:
+        print(f'FAIL --out: rc={rc} stdout={out[:80]!r} second rc={rc2} {err2[:120]!r}'); fails += 1
+    else:
+        print('checked --out (JSON written to the file, stdout empty, existing file refused)')
+except Exception as e:
+    print('FAIL --out check:', e); fails += 1
+
 # sweep: one valid JSON document with every check as a key; checks that
 # cannot run under wine (WMI, event logs) must be null or empty, not broken.
 rc, out, err = wine([exe, 'sweep', '--json'], timeout=600)

@@ -6,7 +6,7 @@
 // linked (UAC split) token and every privilege with its state - powerful ones
 // (SeDebug, SeImpersonate, SeLoadDriver, ...) are highlighted, and marked when
 // ENABLED. Read-only (TOKEN_QUERY). Usage:
-//   winspect token <pid> [--json]
+//   winspect token <pid | name> [--json]
 int cmd_token(int argc, char **argv);
 
 #endif
