@@ -12,6 +12,7 @@
 // The GetTokenInformation calls all follow the same two-step dance: call once
 // with a NULL buffer to learn the required size, allocate, then call again.
 
+#include "pidarg.h"
 #include "token.h"
 #include "jsonutil.h"
 
@@ -265,10 +266,8 @@ int cmd_token(int argc, char **argv)
         fputs("usage: winspect token <pid> [--json]\n", stderr);
         return 1;
     }
-    char *end = NULL;
-    unsigned long pid = strtoul(pid_arg, &end, 10);
-    if (end == pid_arg || *end != '\0' || pid == 0) {
-        fprintf(stderr, "token: '%s' is not a valid pid\n", pid_arg);
+    unsigned long pid = 0;
+    if (!pid_from_arg("token", pid_arg, &pid)) {
         return 1;
     }
 

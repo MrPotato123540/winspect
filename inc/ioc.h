@@ -19,7 +19,9 @@ int ioc_is_ipv4(const char *s);
 // 1 if a path or command line points into a directory an ordinary user can
 // write to (Temp, AppData, Downloads, Users\Public, ProgramData) - a common
 // home for dropped tools, so worth a second look. Case-insensitive; also
-// matches the %TEMP%-style environment-variable forms. A hint, not a verdict.
+// matches the %TEMP%-style environment-variable forms. Defender's folders
+// under ProgramData are locked to SYSTEM / administrators and do not count.
+// A hint, not a verdict.
 int ioc_user_writable(const char *path);
 
 // 1 if a command starts a script host / common "living off the land" launcher

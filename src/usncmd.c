@@ -309,7 +309,7 @@ int cmd_usn(int argc, char **argv)
     static char recur[160];
     size_t off = 0;
     usn_rec r;
-    unsigned long count = 0, shown = 0, flagged = 0;
+    unsigned long count = 0, shown = 0, flagged = 0, flagged_all = 0;
     int first = 1;
     static char folder[8192];
     while (usn_next(d, n, &off, &r)) {
@@ -368,16 +368,21 @@ int cmd_usn(int argc, char **argv)
         if (reason && (r.reason & 0x2000) && slot->ref == r.file_ref && slot->flagged) reason = NULL;
         if (r.reason & 0x1000) { slot->ref = r.file_ref; snprintf(slot->name, sizeof slot->name, "%s", r.name); slot->flagged = 0; }
         if (reason && (r.reason & 0x2000)) slot->flagged = 1;
-        if (reason) flagged++;
+        if (reason) flagged_all++;
         if (only_flagged && reason == NULL) continue;
         if (want && !(r.reason & want)) continue;
         if (find && !ci_contains(r.name, find)) continue;
+        if (reason) flagged++;
         char when[32], rs[512];
         filetime_utc_str(r.time, when, sizeof when);
         usn_reason_str(r.reason, rs, sizeof rs);
         shown++;
         if (mode == 0) {
-            printf("%s %-19s %-40s %s%s%s\n", reason ? "[!]" : "   ", when, rs, folder, folder[0] && strcmp(folder, "\\") ? "\\" : "", r.name);
+            printf("%s %-19s %-40s %s%s%s", reason ? "[!]" : "   ", when, rs, folder, folder[0] && strcmp(folder, "\\") ? "\\" : "", r.name);
+            // With --find the rows are few: show which $MFT record (and
+            // sequence) held the file, for "mft --record" to compare with.
+            if (find) printf("   [record %llu seq %u]", (unsigned long long)(r.file_ref & 0xFFFFFFFFFFFFULL), (unsigned)(r.file_ref >> 48));
+            putchar('\n');
             if (reason) printf("        <- %s%s%s\n", reason, old && (r.reason & 0x2000) ? ", was " : "", old && (r.reason & 0x2000) ? old : "");
         } else if (mode == 2) {
             printf("%llu,%s,0x%llx,0x%llx,%s,", (unsigned long long)r.usn, when, (unsigned long long)r.file_ref,
@@ -401,7 +406,12 @@ int cmd_usn(int argc, char **argv)
         }
     }
     if (mode == 1) puts("]");
-    else if (mode == 0) printf("\n%lu record(s), %lu shown, %lu flagged\n", count, shown, flagged);
+    else if (mode == 0) {
+        // flagged = among the rows shown; with a filter the journal may hold more.
+        printf("\n%lu record(s), %lu shown, %lu of them flagged", count, shown, flagged);
+        if (flagged_all != flagged) printf(" (%lu flagged in the whole journal)", flagged_all);
+        putchar('\n');
+    }
     for (size_t i = 0; i < lt.n; i++) free(lt.v[i].name);
     free(lt.v);
     lt.v = NULL; lt.n = lt.cap = 0;

@@ -22,6 +22,7 @@
 #define _WIN32_WINNT 0x0A00
 #endif
 
+#include "pidarg.h"
 #include "triage.h"
 #include "jsonutil.h"
 #include "artparse.h"
@@ -400,10 +401,8 @@ int cmd_triage(int argc, char **argv)
         fputs("usage: winspect triage <pid> [--json]\n", stderr);
         return 1;
     }
-    char *end = NULL;
-    unsigned long pid = strtoul(pid_arg, &end, 10);
-    if (end == pid_arg || *end != '\0' || pid == 0) {
-        fprintf(stderr, "triage: '%s' is not a valid pid\n", pid_arg);
+    unsigned long pid = 0;
+    if (!pid_from_arg("triage", pid_arg, &pid)) {
         return 1;
     }
 

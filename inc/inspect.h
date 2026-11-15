@@ -6,7 +6,7 @@
 // plus the process mitigation policies in force (DEP, ASLR, CFG, signature
 // policy, dynamic code). Read-only (PROCESS_QUERY_INFORMATION | VM_READ).
 // Usage:
-//   winspect inspect <pid> [--json]
+//   winspect inspect <pid | name> [--json]
 int cmd_inspect(int argc, char **argv);
 
 #endif

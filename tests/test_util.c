@@ -2112,6 +2112,12 @@ int main(void)
         check_str("wer praid -> basename", wr.app_name, "Game.exe");
     }
 
+    // --- ioc_user_writable: Defender's locked ProgramData folders ----------------
+    check_int("defender folder locked", ioc_user_writable("C:\\ProgramData\\Microsoft\\Windows Defender\\Definition Updates\\Backup\\mpengine.dll"), 0);
+    check_int("defender atp locked", ioc_user_writable("C:\\ProgramData\\Microsoft\\Windows Defender Advanced Threat Protection\\x.exe"), 0);
+    check_int("programdata intel writable", ioc_user_writable("C:\\ProgramData\\Intel\\DSA\\Data\\rules-verify.dll"), 1);
+    check_int("lookalike not locked", ioc_user_writable("C:\\ProgramData\\Microsoft\\Windows Defender2\\x.exe"), 1);
+
     fprintf(stderr, "\n%s (%d failure%s)\n",
             failures == 0 ? "ALL PASSED" : "FAILED", failures, failures == 1 ? "" : "s");
     return failures == 0 ? 0 : 1;

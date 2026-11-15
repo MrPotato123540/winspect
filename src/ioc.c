@@ -121,6 +121,17 @@ const char *ioc_classify(const char *s)
 
 int ioc_user_writable(const char *p)
 {
+    // ProgramData sub-trees that Windows locks to SYSTEM / administrators
+    // (Defender keeps its engine, signatures and their backups there).
+    static const char *const locked[] = {
+        "\\ProgramData\\Microsoft\\Windows Defender\\",
+        "\\ProgramData\\Microsoft\\Windows Defender Advanced Threat Protection\\",
+    };
+    for (size_t i = 0; i < sizeof locked / sizeof locked[0]; i++) {
+        if (contains_ci(p, locked[i])) {
+            return 0;
+        }
+    }
     static const char *const dirs[] = {
         "\\Temp\\", "\\AppData\\", "\\Downloads\\", "\\Users\\Public\\",
         "\\ProgramData\\", "%TEMP%", "%TMP%", "%APPDATA%", "%LOCALAPPDATA%",

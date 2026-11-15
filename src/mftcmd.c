@@ -283,6 +283,7 @@ static int ci_contains(const char *h, const char *n)
 int cmd_mft(int argc, char **argv)
 {
     int mode = 0, deleted = 0, only_hint = 0;
+    long long want_rec = -1;          // --record N: only that record, whatever it holds now
     const char *file = NULL, *find = NULL, *live = NULL, *image = NULL;
     for (int a = 0; a < argc; a++) {
         if (strcmp(argv[a], "--json") == 0)                     mode = 1;
@@ -290,6 +291,15 @@ int cmd_mft(int argc, char **argv)
         else if (strcmp(argv[a], "--deleted") == 0)             deleted = 1;
         else if (strcmp(argv[a], "--timestomp") == 0)           only_hint = 1;
         else if (strcmp(argv[a], "--find") == 0 && a + 1 < argc) find = argv[++a];
+        else if (strcmp(argv[a], "--record") == 0 && a + 1 < argc) {
+            char *end = NULL;
+            const char *v = argv[++a];
+            // decimal, or the hex file reference usn prints (0x...): the low
+            // 48 bits are the record number, the top 16 its sequence
+            unsigned long long x = strtoull(v, &end, 0);
+            if (end == v || *end != '\0') { fprintf(stderr, "mft: --record needs a record number\n"); return 1; }
+            want_rec = (long long)(x & 0xFFFFFFFFFFFFULL);
+        }
         else if (strcmp(argv[a], "--live") == 0 && a + 1 < argc) live = argv[++a];
         else if (strcmp(argv[a], "--image") == 0 && a + 1 < argc) image = argv[++a];
         else if (file == NULL && argv[a][0] != '-')             file = argv[a];
@@ -369,7 +379,12 @@ int cmd_mft(int argc, char **argv)
     for (size_t i = 0; i < rec; i++) {
         const mft_node *nd = &nodes[i];
         const rowinfo *ri = &info[i];
-        if (!nd->valid || !ri->has_fn || ri->extension || nd->name == NULL) continue;
+        if (want_rec >= 0 && (long long)i != want_rec) continue;
+        if (!nd->valid || !ri->has_fn || ri->extension || nd->name == NULL) {
+            if (want_rec >= 0 && mode == 0)
+                printf("    %8zu (no file name in this record now: free, never used, or an extension record)\n", i);
+            continue;
+        }
         if (deleted && nd->in_use) continue;
         mft_path(nodes, rec, (uint32_t)i, path, sizeof path);
         if (find && !ci_contains(path, find)) continue;
@@ -392,6 +407,7 @@ int cmd_mft(int argc, char **argv)
                    strcmp(t[0], t[4]) ? "  | $FN created " : "", strcmp(t[0], t[4]) ? t[4] : "");
             if (oc[0]) printf("             object id created %s on %s\n", oc, mac[0] ? mac : "?");
             if (hint) printf("             note: %s\n", hint);
+            if (want_rec >= 0) printf("             sequence %u (a journal reference with another sequence meant an earlier file in this record)\n", (unsigned)nd->seq);
         } else if (mode == 2) {
             printf("%zu,", i);
             csv_str(path);
@@ -411,6 +427,7 @@ int cmd_mft(int argc, char **argv)
             firstrow = 0;
         }
     }
+    if (want_rec >= 0 && (size_t)want_rec >= rec && mode == 0) printf("    record %lld is past the end of this $MFT\n", want_rec);
     if (mode == 1) puts("]");
     else if (mode == 0) printf("\n%u file(s) listed, %u with a timestomp hint%s\n", shown, hinted,
                                bad ? " (some records failed their fixup check)" : "");

@@ -14,6 +14,7 @@
 // Ports therefore need a byte swap to read as a number; IPv4 addresses are laid
 // out as four bytes we can print in order; IPv6 we hand to RtlIpv6AddressToStringA.
 
+#include "pidarg.h"
 #include "net.h"
 #include "jsonutil.h"
 #include "ioc.h"
@@ -466,10 +467,8 @@ int cmd_net(int argc, char **argv)
 
     DWORD filter = 0;
     if (pid_arg != NULL) {
-        char *end = NULL;
-        unsigned long pid = strtoul(pid_arg, &end, 10);
-        if (end == pid_arg || *end != '\0' || pid == 0) {
-            fprintf(stderr, "net: '%s' is not a valid pid\n", pid_arg);
+        unsigned long pid = 0;
+        if (!pid_from_arg("net", pid_arg, &pid)) {
             return 1;
         }
         filter = (DWORD)pid;

@@ -7,7 +7,7 @@
 // address lies outside every module is the classic shape of injected code.
 // Read-only (threads are only briefly suspended to read their context).
 // Usage:
-//   winspect threads <pid> [-s] [--json | --csv]
+//   winspect threads <pid | name> [-s] [--json | --csv]
 int cmd_threads(int argc, char **argv);
 
 #endif

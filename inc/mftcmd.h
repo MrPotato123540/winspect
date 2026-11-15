@@ -9,7 +9,10 @@
 // earlier than their $FN creation time - a timestomping CANDIDATE list, not
 // a verdict: files from install media and archives look the same (on a real
 // XP image a third of all files did). --find filters by path text,
-// --deleted keeps records that are no longer in use. --live <drive> reads
+// --deleted keeps records that are no longer in use. --record <n> shows one
+// record, whatever it holds now, with its sequence number; it also takes the
+// hex file reference usn prints, to tell whether a deleted file's record has
+// since been reused by another file. --live <drive> reads
 // the running system's $MFT through a read-only volume handle (boot sector
 // -> the $MFT's own record -> its data runs; administrator). --image <file>
 // does the same on a raw image of one NTFS partition (dd / FTK "raw"), so no
@@ -19,7 +22,7 @@
 // seconds may never reach the on-disk $MFT at all (NTFS writes records
 // lazily): cross-check with `usn`. Read-only. Usage:
 //   winspect mft <$MFT file> | --live <drive> | --image <volume image>
-//                [--find <text>] [--deleted] [--timestomp] [--json | --csv]
+//                [--find <text>] [--deleted] [--record <n>] [--timestomp] [--json | --csv]
 int cmd_mft(int argc, char **argv);
 
 #endif

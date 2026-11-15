@@ -125,6 +125,53 @@ Mağaza uygulamalarının çökme raporları program adı olarak paket içi bir
 kimlik (`praid:App`) yazar. Artık bunun yerine program yolunun dosya adı
 gösteriliyor.
 
+## İkinci tur: tekrar testten çıkanlar
+
+Düzeltilmiş sürüm aynı makinede yeniden çalıştırıldı. Sonuç: triage'da
+`fothk` atlandı (puan 85 → 40), hunt 0 bulgu, capability 0 işaret
+(23 imzalı, 82 silinmiş program), boots'ta süreç / hesap doğru ve 209 saat
+ayarı gizlendi, usn'de `rules-verify.dll` tek satır "(4 times ...)" oldu.
+Yeni bulunanlar ve düzeltmeleri:
+
+- **dns yönetici olarak da okunamadı.** `DnsGetCacheDataTable` bu Windows
+  11 sürümünde (24H2, build 26100) yöneticiye bile hata kodu vermeden
+  FALSE döndürüyor; `ipconfig /displaydns` ise önbelleği gösteriyor. Artık
+  bu durumda önbellek WMI üzerinden okunuyor:
+  `ROOT\StandardCimv2` → `MSFT_DNSClientCache` sınıfı. Bu, PowerShell'in
+  `Get-DnsClientCache` komutunun kullandığı kaynaktır. Başlık satırı hangi
+  yolun kullanıldığını söyler.
+- **`triage explorer` çalışmadı**, çünkü komut yalnız PID alıyordu. Artık
+  tek bir süreçle çalışan bütün komutlar (`triage`, `verify`, `inspect`,
+  `modules`, `threads`, `regions`, `token`, `handles`, `net`) süreç **adı**
+  da alıyor: `explorer` ya da `explorer.exe`. Aynı adla birden fazla süreç
+  varsa araç tahmin etmez; PID'leri listeler ve birini seçmeni ister.
+- **Türkçe karakterler bozuk çıktı** ("ba┼şlat"). Bu araçtan değil,
+  Windows PowerShell 5.1'in `>` yönlendirmesinden kaynaklanıyor: PowerShell
+  programın UTF-8 çıktısını konsolun eski kod sayfasıyla (Türkçe'de 857)
+  okuyup yeniden kodluyor. Yeni genel seçenek `--out <dosya>` çıktıyı
+  dosyaya doğrudan UTF-8 olarak yazar. Var olan bir dosyanın üzerine
+  yazmaz (önceki bir sonuç kaybolmasın diye).
+- **Defender'ın kendi klasörü.** `ProgramData\Microsoft\Windows Defender`
+  altı yalnız SYSTEM ve yöneticilere yazılabilir; orada silinen
+  `mpengine.dll` yedeği Defender'ın güncellemesidir. Bu klasörler artık
+  "kullanıcı-yazılabilir" sayılmıyor.
+- **usn özetinde sayılar.** `--find` ile 8 satır gösterilirken "3
+  flagged" yazıyordu: sayı bütün günlüğe aitti. Artık sayı gösterilen
+  satırlar içindendir; günlüğün tamamındaki sayı farklıysa ayrıca yazılır.
+- **wer'de aynı çökme iki kez.** Windows bir çökme için birden fazla rapor
+  klasörü yazabiliyor. Metin görünümünde zamanı, programı, hata modülü ve
+  kodu aynı olan raporlar tek satırda, "(2 report folders)" notuyla
+  gösteriliyor. JSON ve CSV her klasörü ayrı tutar.
+- **Silinen dosya $MFT'de bulunamadı, usn'de bulundu.** `deneme_sil.txt`
+  silindikten birkaç saniye sonra `mft --deleted` onu göstermedi. NTFS boşalan
+  kayıt numarasını hemen başka bir dosyaya verebilir; dosya adı da o zaman
+  kaybolur. Bunu kanıtlamak için iki yardım eklendi: `usn --find` her satıra
+  dosyanın **kayıt numarası ve sıra numarasını** (sequence) ekliyor;
+  `mft --record <n>` da o kaydın **şu an** ne tuttuğunu gösteriyor. Kayıtta
+  başka bir ad ya da daha büyük bir sıra numarası varsa kayıt yeniden
+  kullanılmıştır. Bu durumda değişiklik günlüğü (usn), silinen dosyanın tek
+  tanığıdır.
+
 ## Gerçek bulgu: Excel'de VBAWarnings = 1
 
 `office` komutunun işaretlediği `VBAWarnings=1` bir yanlış alarm **değil**:

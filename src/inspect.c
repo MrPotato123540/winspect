@@ -21,6 +21,7 @@
 #define _WIN32_WINNT 0x0A00
 #endif
 
+#include "pidarg.h"
 #include "inspect.h"
 #include "jsonutil.h"
 
@@ -339,10 +340,8 @@ int cmd_inspect(int argc, char **argv)
 
     // Parse the PID. strtoul reports the first non-digit via endptr, so we can
     // reject "12ab" instead of silently treating it as 12.
-    char *end = NULL;
-    unsigned long pid = strtoul(pid_arg, &end, 10);
-    if (end == pid_arg || *end != '\0' || pid == 0) {
-        fprintf(stderr, "inspect: '%s' is not a valid pid\n", pid_arg);
+    unsigned long pid = 0;
+    if (!pid_from_arg("inspect", pid_arg, &pid)) {
         return 1;
     }
 

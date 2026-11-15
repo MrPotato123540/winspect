@@ -7,6 +7,7 @@
 // hollowing / anti-forensics tell) and a module loaded from a user-writable or
 // temporary directory (unusual for a legitimate DLL). Read-only.
 
+#include "pidarg.h"
 #include "modules.h"
 #include "jsonutil.h"
 #include "ioc.h"
@@ -42,10 +43,8 @@ int cmd_modules(int argc, char **argv)
         fputs("usage: winspect modules <pid> [--sig | --unsigned] [--json | --csv]\n", stderr);
         return 1;
     }
-    char *end = NULL;
-    unsigned long pid = strtoul(pid_arg, &end, 10);
-    if (end == pid_arg || *end != '\0' || pid == 0) {
-        fprintf(stderr, "modules: '%s' is not a valid pid\n", pid_arg);
+    unsigned long pid = 0;
+    if (!pid_from_arg("modules", pid_arg, &pid)) {
         return 1;
     }
 

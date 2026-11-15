@@ -345,6 +345,7 @@ static void usage(void) {
     }
     puts("Most commands accept --json; tabular ones also accept --csv.");
     puts("Details for one command: winspect help <command>   (or: winspect <command> --help)");
+    puts("Output to a file: add --out <file> to any command (UTF-8; safer than > in PowerShell 5.1)");
 }
 
 // Was the program launched by double-clicking it (so Windows spawned a fresh
@@ -481,6 +482,32 @@ int main(int argc, char** argv) {
     int dbl = launched_by_doubleclick();
 
     int rc;
+
+    // "--out <file>" anywhere after the command: write the output to that file
+    // as UTF-8 bytes. Redirecting with ">" in Windows PowerShell 5.1 decodes
+    // our UTF-8 with the console's legacy code page and re-encodes it, which
+    // garbles non-ASCII text (Turkish event strings, for example); writing the
+    // file ourselves avoids that. Removed from argv before dispatch.
+    for (int a = 2; a < argc; a++) {
+        if (strcmp(argv[a], "--out") != 0) continue;
+        if (a + 1 >= argc) {
+            fputs("--out needs a file name\n", stderr);
+            return 1;
+        }
+        // Never overwrite an existing file: winspect stays read-only on the
+        // evidence; an earlier result is not silently replaced either.
+        if (GetFileAttributesA(argv[a + 1]) != INVALID_FILE_ATTRIBUTES) {
+            fprintf(stderr, "--out: '%s' already exists; choose another name\n", argv[a + 1]);
+            return 1;
+        }
+        if (freopen(argv[a + 1], "wb", stdout) == NULL) {
+            fprintf(stderr, "--out: cannot create '%s'\n", argv[a + 1]);
+            return 1;
+        }
+        for (int b = a; b + 2 <= argc; b++) argv[b] = argv[b + 2];   // argv[argc] (NULL) moves too
+        argc -= 2;
+        break;
+    }
 
     // argv[0] is the program path, argv[1] is the subcommand
     // No subcommand means the user does not know what to type, show help
