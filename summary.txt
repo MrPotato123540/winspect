@@ -1,0 +1,5 @@
+success	unit
+success	wine
+success	build (msvc)
+success	build (mingw)
+in_progress	report
