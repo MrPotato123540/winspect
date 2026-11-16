@@ -16,7 +16,8 @@ pfx = os.path.abspath(os.environ.get('WINEPREFIX', 'wpfx'))
 # UTF-8 unix locale: wine maps non-ASCII file names through it.
 env = dict(os.environ, WINEPREFIX=pfx, WINEDEBUG='-all', LC_ALL='C.UTF-8')
 WINE = os.environ.get('WINE') or shutil.which('wine64') or shutil.which('wine') or '/usr/lib/wine/wine64'
-WINESERVER = shutil.which('wineserver') or os.path.join(os.path.dirname(WINE), 'wineserver')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from winepaths import WINESERVER  # noqa: E402
 
 def wine(args, timeout=120):
     with tempfile.TemporaryFile() as o, tempfile.TemporaryFile() as e:
