@@ -92,7 +92,13 @@ typedef struct { WS_USTR TypeName; } OBJ_TYPE_INFO;
 // FILE_GENERIC_WRITE, i.e. EVERY file opened for read+write, so the skip hid
 // the names of ordinary files too. The timeout below protects us instead.
 #define NAME_TIMEOUT_MS    200
-#define MAX_STUCK          4
+// A process with one stuck query usually has several (a service waiting on
+// many pipes): after MAX_STUCK_PROC in one process its remaining file names
+// are skipped. MAX_STUCK bounds the abandoned threads for the whole run. A
+// single global limit of 4 used to be spent on the first few system services,
+// after which no file name in any later process was read at all.
+#define MAX_STUCK_PROC     3
+#define MAX_STUCK          64
 
 // One handle, independent of which information class produced it.
 typedef struct {
@@ -198,6 +204,8 @@ static DWORD WINAPI name_worker(LPVOID p)
 typedef struct {
     NtQueryObject_t NtQO;
     unsigned stuck;         // abandoned workers so far
+    unsigned stuck_proc;    // ... in the current process (reset by the caller)
+    unsigned skipped;       // file names not queried because of the limits
 } resolver;
 
 // Fills type and name for a duplicated handle. Returns 0 normally, or 1 when
@@ -215,7 +223,8 @@ static int describe_dup(resolver *r, HANDLE dup, char *type, size_t tn, char *na
         }
         return 0;
     }
-    if (r->stuck >= MAX_STUCK) {
+    if (r->stuck >= MAX_STUCK || r->stuck_proc >= MAX_STUCK_PROC) {
+        r->skipped++;
         return 0;
     }
     name_job *j = (name_job *)malloc(sizeof *j);
@@ -231,6 +240,7 @@ static int describe_dup(resolver *r, HANDLE dup, char *type, size_t tn, char *na
     if (WaitForSingleObject(th, NAME_TIMEOUT_MS) != WAIT_OBJECT_0) {
         CloseHandle(th);        // the thread keeps running; j and dup stay alive
         r->stuck++;
+        r->stuck_proc++;
         return 1;
     }
     CloseHandle(th);
@@ -265,7 +275,7 @@ static int contains_ci(const char *s, const char *needle)
 static int find_mode(NtQueryObject_t NtQO, const hentry *h, size_t n, const char *needle,
                      const char *want_type, enum out_mode mode)
 {
-    resolver r = { NtQO, 0 };
+    resolver r = { NtQO, 0, 0, 0 };
     if (mode == OUT_TEXT) {
         printf("handles --find \"%s\"%s%s\n\n", needle, want_type ? "  type " : "",
                want_type ? want_type : "");
@@ -286,6 +296,7 @@ static int find_mode(NtQueryObject_t NtQO, const hentry *h, size_t n, const char
             cur = h[i].pid;
             proc = NULL;
             pname[0] = '\0';
+            r.stuck_proc = 0;
             if (cur == self || cur == 0 || cur == 4) continue;
             proc = OpenProcess(PROCESS_DUP_HANDLE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
                                (DWORD)cur);
@@ -340,8 +351,11 @@ static int find_mode(NtQueryObject_t NtQO, const hentry *h, size_t n, const char
         printf("\n%u match(es)", hits);
         if (denied) printf(", %u process(es) not openable (run elevated to search them)", denied);
         if (r.stuck) printf(", %u file name(s) timed out", r.stuck);
+        if (r.skipped) printf(", %u file name(s) not read (too many stuck queries in their process)", r.skipped);
         putchar('\n');
     }
+    if (mode != OUT_TEXT && (r.stuck || r.skipped))
+        fprintf(stderr, "handles: %u file name(s) timed out, %u not read\n", r.stuck, r.skipped);
     return 0;
 }
 
@@ -407,7 +421,7 @@ int cmd_handles(int argc, char **argv)
     // process with DuplicateHandle, which needs PROCESS_DUP_HANDLE on the target.
     // If we can't get it (access denied), we still print the raw type index.
     HANDLE htgt = OpenProcess(PROCESS_DUP_HANDLE, FALSE, (DWORD)pid);
-    resolver r = { NtQO, 0 };
+    resolver r = { NtQO, 0, 0, 0 };
     // The legacy table only has the low 16 bits of the PID.
     ULONG_PTR want = legacy ? (ULONG_PTR)(USHORT)pid : (ULONG_PTR)pid;
 
@@ -507,7 +521,9 @@ int cmd_handles(int argc, char **argv)
     free(h);
 
     if (mode == OUT_TEXT) {
-        printf("\n%u handles%s\n", count, r.stuck ? " (some file names timed out)" : "");
+        printf("\n%u handles%s", count, r.stuck ? " (some file names timed out)" : "");
+        if (r.skipped) printf(", %u file name(s) not read after repeated timeouts", r.skipped);
+        putchar('\n');
     } else if (mode == OUT_JSON) {
         puts("]");
     }

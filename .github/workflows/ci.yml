@@ -565,7 +565,14 @@ jobs:
           cat out/summary.txt
           jq -r '.jobs[] | select(.conclusion == "failure") | "\(.id) \(.name)"' jobs.json | while read -r id name; do
             f="out/$(printf '%s' "$name" | tr -c 'A-Za-z0-9' '_').log"
-            gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$id/logs" > full.log || echo "(log not available)" > full.log
+            # The log may not be served the moment a job ends: retry a few
+            # times, and keep the error text if it still fails.
+            for try in 1 2 3 4 5 6; do
+              curl -sSfL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/jobs/$id/logs" -o full.log 2> curl.err && break
+              sleep 20
+            done
+            [ -s full.log ] || { echo "(log not available: $(cat curl.err))"; } > full.log
             jq -r --argjson id "$id" '.jobs[] | select(.id == $id) | .steps[] | "\(.conclusion // .status)\t\(.name)"' jobs.json > "$f"
             { echo; echo "==== lines that look like errors"; grep -n -i -E "error|fatal|fail|traceback|not found|cannot|undefined" full.log | head -300 || true; } >> "$f"
             { echo; echo "==== last 500 lines"; tail -500 full.log; } >> "$f"
