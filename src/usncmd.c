@@ -81,7 +81,7 @@ static int lnode_cmp(const void *a, const void *b)
     return x < y ? -1 : x > y;
 }
 
-static const lnode *lfind(const ltab *t, uint64_t frn)
+static const lnode *ltab_find(const ltab *t, uint64_t frn)
 {
     lnode key = { frn & 0xFFFFFFFFFFFFULL, 0, 0, NULL };
     return (const lnode *)bsearch(&key, t->v, t->n, sizeof *t->v, lnode_cmp);
@@ -126,13 +126,13 @@ static int live_path(const ltab *t, char drive, uint64_t ref, char *out, size_t 
     int np = 0;
     uint64_t cur = ref & 0xFFFFFFFFFFFFULL;
     out[0] = 0;
-    const lnode *e = lfind(t, cur);
+    const lnode *e = ltab_find(t, cur);
     if (e == NULL || e->seq != (uint16_t)(ref >> 48)) return 0;
     for (int d = 0; d < 64 && e != NULL; d++) {
         if (e->parent == cur) break;                       // the root's parent is itself
         parts[np++] = e->name;
         cur = e->parent;
-        e = lfind(t, cur);
+        e = ltab_find(t, cur);
     }
     size_t o = (size_t)snprintf(out, n, "%c:", drive);
     for (int k = np - 1; k >= 0 && o + 2 < n; k--) {

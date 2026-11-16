@@ -103,6 +103,9 @@ static char *string(jp *j)
             } else if (cp >= 0xDC00 && cp <= 0xDFFF) {
                 cp = '?';
             }
+            // NUL cannot live inside a C string: everything after it would be
+            // lost. It becomes '?', like a lone surrogate.
+            if (cp == 0) cp = '?';
             // "\uXXXX" is 6 input bytes for at most 3 output bytes (4 for a pair of 12).
             o += put_utf8(out + o, cp);
             break;

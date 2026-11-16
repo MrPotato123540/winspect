@@ -4,7 +4,8 @@
 #     numbers) must parse to the same value;
 #  2. random corruptions must be rejected exactly when Python rejects them
 #     (Python is lenient about NaN/Infinity and lone surrogates; those inputs
-#     are skipped).
+#     are skipped, and so are documents holding \u0000, which jsonmini
+#     turns into '?' because a C string cannot carry NUL).
 # Usage: jm_diff.py <jm_dump> [iterations]
 import json, random, subprocess, sys
 
@@ -32,6 +33,13 @@ def norm(v):
     if isinstance(v, list): return [norm(x) for x in v]
     return {k: norm(x) for k, x in v.items()}
 
+def has_nul(v):
+    # json.dumps writes NUL as \u0000 even with ensure_ascii=False: walk the value.
+    if isinstance(v, str): return '\x00' in v
+    if isinstance(v, list): return any(has_nul(x) for x in v)
+    if isinstance(v, dict): return any('\x00' in k or has_nul(x) for k, x in v.items())
+    return False
+
 def run(text):
     return subprocess.run([dump], input=text.encode('utf-8', 'surrogatepass'), capture_output=True).stdout.decode()
 
@@ -58,6 +66,10 @@ for i in range(iters):
     if any(w in bad for w in ('NaN', 'Infinity')):
         continue
     if ok and any(0xD800 <= ord(ch) <= 0xDFFF for ch in json.dumps(ref, ensure_ascii=False)):
+        continue
+    # A decoded NUL (\u0000) cannot be held in a C string; jsonmini turns it
+    # into '?' on purpose, so such documents are not compared.
+    if ok and has_nul(ref):
         continue
     out = run(bad).strip()
     if (out == 'INVALID') == ok:

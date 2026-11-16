@@ -532,7 +532,9 @@ jobs:
           exe=./build/winspect.exe
           f=/c/Windows/System32/notepad.exe
           p=$$
-          smoke() { "$exe" "$@" >/dev/null 2>&1; rc=$?; if [ $rc -gt 1 ]; then echo "crash: $* => $rc"; exit 1; fi; }
+          # the msys2 shell runs bash with -e: catch the status with "||" so an
+          # ordinary exit code 1 (usage, nothing found) does not end the step
+          smoke() { rc=0; "$exe" "$@" >/dev/null 2>&1 || rc=$?; if [ $rc -gt 1 ]; then echo "crash: $* => $rc"; exit 1; fi; }
           smoke
           smoke pe "$f"; smoke pe "$f" --json; smoke sign "$f"; smoke hash "$f"; smoke strings "$f" --ioc
           for c in list services drivers autoruns pipes hosts net arp routes sessions shares certstore tasks objects defender usb prefetch shimcache bam firewall taskcache wmi lnk hunt posture events hidden sweep userassist mru jumplist rdp sysinfo programs shellbags pshistory recyclebin bits comhijack users timeline browser pca activities; do smoke $c; smoke $c --json; done
