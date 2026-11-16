@@ -176,9 +176,12 @@ static void put_value(rctx *r, sbuf *b, uint8_t type, const unsigned char *v, si
             sb_fmt(b, "{%08lx-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}", (unsigned long)rd32(v),
                    rd16(v + 4), rd16(v + 6), v[8], v[9], v[10], v[11], v[12], v[13], v[14], v[15]);
         break;
+    // Hex types are written the way Windows' own renderer (EvtRender) writes
+    // them: no zero padding ("0x3e7", not "0x00000000000003e7"), so a value
+    // read from an exported .evtx equals the one the live API returns.
     case 0x10:                                                      // size_t (hex)
-        if (n >= 8) sb_fmt(b, "0x%016llx", (unsigned long long)rd64(v));
-        else if (n >= 4) sb_fmt(b, "0x%08lx", (unsigned long)rd32(v));
+        if (n >= 8) sb_fmt(b, "0x%llx", (unsigned long long)rd64(v));
+        else if (n >= 4) sb_fmt(b, "0x%lx", (unsigned long)rd32(v));
         break;
     case 0x11: if (n >= 8) put_filetime(b, rd64(v)); break;
     case 0x12:                                                      // SYSTEMTIME
@@ -194,8 +197,8 @@ static void put_value(rctx *r, sbuf *b, uint8_t type, const unsigned char *v, si
             for (unsigned i = 0; i < v[1]; i++) sb_fmt(b, "-%lu", (unsigned long)rd32(v + 8 + 4 * i));
         }
         break;
-    case 0x14: if (n >= 4) sb_fmt(b, "0x%08lx", (unsigned long)rd32(v)); break;
-    case 0x15: if (n >= 8) sb_fmt(b, "0x%016llx", (unsigned long long)rd64(v)); break;
+    case 0x14: if (n >= 4) sb_fmt(b, "0x%lx", (unsigned long)rd32(v)); break;
+    case 0x15: if (n >= 8) sb_fmt(b, "0x%llx", (unsigned long long)rd64(v)); break;
     case 0x21:                                                      // embedded binary XML
         if (depth < MAX_DEPTH) render(r, b, v, v + n, NULL, 0, depth + 1);
         break;

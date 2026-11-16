@@ -387,7 +387,10 @@ jobs:
           $lo = @(& $exe logons --all --evtx $sev --json | ConvertFrom-Json | Where-Object { $_.id -eq 4624 -and $_.time -lt $lcut })
           $a = ($ll | ForEach-Object { "$($_.time)|$($_.account)|$($_.logon_type)|$($_.logon_id)" } | Sort-Object) -join "`n"
           $b = ($lo | ForEach-Object { "$($_.time)|$($_.account)|$($_.logon_type)|$($_.logon_id)" } | Sort-Object) -join "`n"
-          if ($a -ne $b) { throw "logons --evtx differs from live: $($ll.Count) live vs $($lo.Count) offline" }
+          if ($a -ne $b) {
+            $d = Compare-Object ($a -split "`n") ($b -split "`n") | Select-Object -First 6 | ForEach-Object { "$($_.SideIndicator) $($_.InputObject)" }
+            throw "logons --evtx differs from live: $($ll.Count) live vs $($lo.Count) offline (<= live only, => offline only):`n$($d -join "`n")"
+          }
           # boots: same boots live and from an exported System log. Classic
           # events (1074 shutdown requests) carry their strings as repeated
           # <Data> elements; the offline reader must split them like the API.
