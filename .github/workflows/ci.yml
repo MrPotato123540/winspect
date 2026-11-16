@@ -289,244 +289,315 @@ jobs:
         # Things wine cannot emulate: alternate data streams, event logs.
         run: |
           $exe = "build\Release\winspect.exe"
-          $d = Join-Path $env:RUNNER_TEMP "adstest"
-          New-Item -ItemType Directory -Force -Path $d | Out-Null
-          Copy-Item C:\Windows\System32\notepad.exe (Join-Path $d "dl.exe")
-          $motw = "[ZoneTransfer]`r`nZoneId=3`r`nHostUrl=https://downloads.example/dl.exe`r`n"
-          Set-Content -Path (Join-Path $d "dl.exe") -Stream Zone.Identifier -Value $motw
-          Set-Content -Path (Join-Path $d "dl.exe") -Stream hidden -Value "secret payload"
-          $j = & $exe streams $d --json | ConvertFrom-Json
-          $z = $j | Where-Object { $_.stream -like "*Zone.Identifier*" }
-          if (-not $z -or $z.host_url -ne "https://downloads.example/dl.exe" -or -not $z.suspicious) { throw "streams: MOTW not decoded/flagged: $($j | ConvertTo-Json -Compress)" }
-          $h = $j | Where-Object { $_.stream -like "*:hidden:*" }
-          if (-not $h -or -not $h.suspicious) { throw "streams: unusual ADS not flagged" }
-          # events must return valid JSON (the System log is readable without elevation)
-          $e = & $exe events --max 5 --json | ConvertFrom-Json
-          $e = & $exe events --since 24 --json | ConvertFrom-Json
-          # events --summary: failed logons with 6 different account names from
-          # this host must group into one source flagged as password spraying.
-          # Only checked when the audit policy records logon failures.
-          $audit = auditpol /get /subcategory:"Logon" 2>$null | Out-String
-          foreach ($u in "wsa1","wsa2","wsa3","wsa4","wsa5","wsa6") {
-            net use \\127.0.0.1\IPC$ /user:$u "wrong-$u" 2>$null | Out-Null
+          # Every check runs on its own: a failure is recorded and the next check still
+          # runs, so one CI run reports all failing checks, not only the first.
+          $fails = [System.Collections.Generic.List[string]]::new()
+          function Check([string]$name, [scriptblock]$body) {
+            try { & $body; Write-Host "ok   $name" }
+            catch { $fails.Add("${name}: $($_.Exception.Message)"); Write-Host "FAIL ${name}: $($_.Exception.Message)" }
           }
-          $sum = & $exe events --summary --since 1 --json | ConvertFrom-Json
-          if ($audit -match "Failure") {
-            $spray = $sum | Where-Object { $_.distinct_users -ge 5 -and $_.reason -like "*spraying*" }
-            if (-not $spray) { throw "events --summary: spraying not flagged: $($sum | ConvertTo-Json -Compress)" }
-          } else { Write-Host "logon-failure auditing is off: spraying check skipped" }
-          # net: a program from a user-writable dir listening on all interfaces
-          # must be flagged with the owning process path (wine reports pid 0
-          # for every socket, so this can only be checked here).
-          $src = Join-Path $env:TEMP "lst.c"
-          Set-Content -Path $src -Value '#include <winsock2.h>
-          #include <windows.h>
-          #pragma comment(lib, "ws2_32.lib")
-          int main(void){WSADATA w;WSAStartup(MAKEWORD(2,2),&w);SOCKET s=socket(AF_INET,SOCK_STREAM,0);
-          struct sockaddr_in a={0};a.sin_family=AF_INET;a.sin_port=htons(47123);a.sin_addr.s_addr=INADDR_ANY;
-          bind(s,(struct sockaddr*)&a,sizeof a);listen(s,1);Sleep(60000);return 0;}'
-          cl /nologo $src /Fe:(Join-Path $env:TEMP "lst.exe") /Fo:(Join-Path $env:TEMP "lst.obj") | Out-Null
-          $lp = Start-Process (Join-Path $env:TEMP "lst.exe") -PassThru
-          Start-Sleep 3
-          $n = & $exe net --flagged --json | ConvertFrom-Json
-          $hit = $n | Where-Object { $_.local -like "*:47123" -and $_.reason -like "*listens on all interfaces*" }
-          Stop-Process -Id $lp.Id -Force
-          if (-not $hit) { throw "net: user-writable listener not flagged: $($n | ConvertTo-Json -Compress)" }
-          # handles: a helper holds a read+write file open and blocks on a pipe
-          # read. --find must name the file with the helper's pid, and the
-          # per-pid listing must not hang on the pending pipe read.
-          cl /nologo tests\holder.c /Fe:(Join-Path $env:TEMP "holder.exe") /Fo:(Join-Path $env:TEMP "holder.obj") | Out-Null
-          $marker = Join-Path $env:TEMP "wsfind_marker.txt"
-          $hp = Start-Process (Join-Path $env:TEMP "holder.exe") -ArgumentList "`"$marker`"","block" -PassThru
-          Start-Sleep 3
-          $hf = & $exe handles --find wsfind_marker --json | ConvertFrom-Json
-          $mine = $hf | Where-Object { $_.pid -eq $hp.Id -and $_.type -eq "File" }
-          if (-not $mine) { Stop-Process -Id $hp.Id -Force; throw "handles --find: marker not found: $($hf | ConvertTo-Json -Compress)" }
-          $job = Start-Job { param($e, $p) & $e handles $p --json } -ArgumentList (Resolve-Path $exe).Path, $hp.Id
-          if (-not (Wait-Job $job -Timeout 60)) { Stop-Process -Id $hp.Id -Force; throw "handles <pid>: hung on a blocked pipe" }
-          $hl = Receive-Job $job | ConvertFrom-Json
-          Stop-Process -Id $hp.Id -Force
-          if (-not ($hl | Where-Object { $_.name -like "*wsfind_marker*" })) { throw "handles <pid>: read/write file handle not named" }
-          # verify: a helper overwrites the start of one of its own functions
-          # with a jump (what an inline hook is). The patch report must show
-          # the changed bytes, decode the jump and name the module it lands in.
-          cl /nologo /O1 tests\selfpatch.c /Fe:(Join-Path $env:TEMP "selfpatch.exe") /Fo:(Join-Path $env:TEMP "selfpatch.obj") | Out-Null
-          foreach ($mode in "direct","tramp") {
-            $sp = Start-Process (Join-Path $env:TEMP "selfpatch.exe") -ArgumentList $mode -PassThru -WindowStyle Hidden
-            Start-Sleep 3
-            $vj = & $exe verify $sp.Id --json | ConvertFrom-Json
-            Stop-Process -Id $sp.Id -Force
-            $t = $vj.checks.image_tamper
-            $pt = @($t.patches)
-            $dest = if ($mode -eq "direct") { $pt[0].target_module } else { $pt[0].final_module }
-            if ($t.modified_sections -lt 1 -or $pt.Count -lt 1 -or $pt[0].disk -eq $pt[0].memory -or $dest -ne "selfpatch.exe") {
-              throw "verify patch report ($mode): $($t | ConvertTo-Json -Compress -Depth 5)"
+
+          Check "streams" {
+            $d = Join-Path $env:RUNNER_TEMP "adstest"
+            New-Item -ItemType Directory -Force -Path $d | Out-Null
+            Copy-Item C:\Windows\System32\notepad.exe (Join-Path $d "dl.exe")
+            $motw = "[ZoneTransfer]`r`nZoneId=3`r`nHostUrl=https://downloads.example/dl.exe`r`n"
+            Set-Content -Path (Join-Path $d "dl.exe") -Stream Zone.Identifier -Value $motw
+            Set-Content -Path (Join-Path $d "dl.exe") -Stream hidden -Value "secret payload"
+            $j = & $exe streams $d --json | ConvertFrom-Json
+            $z = $j | Where-Object { $_.stream -like "*Zone.Identifier*" }
+            if (-not $z -or $z.host_url -ne "https://downloads.example/dl.exe" -or -not $z.suspicious) { throw "MOTW not decoded/flagged: $($j | ConvertTo-Json -Compress)" }
+            $h = $j | Where-Object { $_.stream -like "*:hidden:*" }
+            if (-not $h -or -not $h.suspicious) { throw "unusual ADS not flagged" }
+          }
+
+          Check "events (live JSON + password-spraying summary)" {
+            # the System log is readable without elevation
+            $e = & $exe events --max 5 --json | ConvertFrom-Json
+            $e = & $exe events --since 24 --json | ConvertFrom-Json
+            # failed logons with 6 different account names from this host must group
+            # into one source flagged as password spraying - only when the audit
+            # policy records logon failures.
+            $audit = auditpol /get /subcategory:"Logon" 2>$null | Out-String
+            foreach ($u in "wsa1","wsa2","wsa3","wsa4","wsa5","wsa6") {
+              net use \\127.0.0.1\IPC$ /user:$u "wrong-$u" 2>$null | Out-Null
+            }
+            $sum = & $exe events --summary --since 1 --json | ConvertFrom-Json
+            if ($audit -match "Failure") {
+              $spray = $sum | Where-Object { $_.distinct_users -ge 5 -and $_.reason -like "*spraying*" }
+              if (-not $spray) { throw "spraying not flagged: $($sum | ConvertTo-Json -Compress)" }
+            } else { Write-Host "     logon-failure auditing is off: spraying part skipped" }
+          }
+
+          Check "net (user-writable listener)" {
+            # wine reports pid 0 for every socket, so this can only be checked here
+            $src = Join-Path $env:TEMP "lst.c"
+            Set-Content -Path $src -Value '#include <winsock2.h>
+            #include <windows.h>
+            #pragma comment(lib, "ws2_32.lib")
+            int main(void){WSADATA w;WSAStartup(MAKEWORD(2,2),&w);SOCKET s=socket(AF_INET,SOCK_STREAM,0);
+            struct sockaddr_in a={0};a.sin_family=AF_INET;a.sin_port=htons(47123);a.sin_addr.s_addr=INADDR_ANY;
+            bind(s,(struct sockaddr*)&a,sizeof a);listen(s,1);Sleep(60000);return 0;}'
+            cl /nologo $src /Fe:(Join-Path $env:TEMP "lst.exe") /Fo:(Join-Path $env:TEMP "lst.obj") | Out-Null
+            $lp = Start-Process (Join-Path $env:TEMP "lst.exe") -PassThru
+            try {
+              Start-Sleep 3
+              $n = & $exe net --flagged --json | ConvertFrom-Json
+            } finally { Stop-Process -Id $lp.Id -Force -ErrorAction SilentlyContinue }
+            $hit = $n | Where-Object { $_.local -like "*:47123" -and $_.reason -like "*listens on all interfaces*" }
+            if (-not $hit) { throw "not flagged: $($n | ConvertTo-Json -Compress)" }
+          }
+
+          Check "handles (--find and a pid with a blocked pipe)" {
+            # a helper holds a read+write file open and blocks on a pipe read
+            cl /nologo tests\holder.c /Fe:(Join-Path $env:TEMP "holder.exe") /Fo:(Join-Path $env:TEMP "holder.obj") | Out-Null
+            $marker = Join-Path $env:TEMP "wsfind_marker.txt"
+            $hp = Start-Process (Join-Path $env:TEMP "holder.exe") -ArgumentList "`"$marker`"","block" -PassThru
+            try {
+              Start-Sleep 3
+              $hf = & $exe handles --find wsfind_marker --json | ConvertFrom-Json
+              $mine = $hf | Where-Object { $_.pid -eq $hp.Id -and $_.type -eq "File" }
+              if (-not $mine) { throw "--find: marker not found: $($hf | ConvertTo-Json -Compress)" }
+              $job = Start-Job { param($e, $p) & $e handles $p --json } -ArgumentList (Resolve-Path $exe).Path, $hp.Id
+              if (-not (Wait-Job $job -Timeout 60)) { throw "<pid>: hung on a blocked pipe" }
+              $hl = Receive-Job $job | ConvertFrom-Json
+              if (-not ($hl | Where-Object { $_.name -like "*wsfind_marker*" })) { throw "<pid>: read/write file handle not named" }
+            } finally { Stop-Process -Id $hp.Id -Force -ErrorAction SilentlyContinue }
+          }
+
+          Check "verify (inline-hook patch report)" {
+            # a helper overwrites the start of one of its own functions with a jump
+            cl /nologo /O1 tests\selfpatch.c /Fe:(Join-Path $env:TEMP "selfpatch.exe") /Fo:(Join-Path $env:TEMP "selfpatch.obj") | Out-Null
+            foreach ($mode in "direct","tramp") {
+              $sp = Start-Process (Join-Path $env:TEMP "selfpatch.exe") -ArgumentList $mode -PassThru -WindowStyle Hidden
+              try {
+                Start-Sleep 3
+                $vj = & $exe verify $sp.Id --json | ConvertFrom-Json
+              } finally { Stop-Process -Id $sp.Id -Force -ErrorAction SilentlyContinue }
+              $t = $vj.checks.image_tamper
+              $pt = @($t.patches)
+              $dest = if ($mode -eq "direct") { $pt[0].target_module } else { $pt[0].final_module }
+              if ($t.modified_sections -lt 1 -or $pt.Count -lt 1 -or $pt[0].disk -eq $pt[0].memory -or $dest -ne "selfpatch.exe") {
+                throw "($mode): $($t | ConvertTo-Json -Compress -Depth 5)"
+              }
             }
           }
-          # hunt: a copy of cmd.exe under another name is still cmd.exe by its
-          # version resource; the real cmd.exe is not reported for that.
-          $ren = Join-Path $env:TEMP "svc_update.exe"
-          Copy-Item C:\Windows\System32\cmd.exe $ren
-          $rp = Start-Process $ren -ArgumentList "/c","ping -n 20 127.0.0.1" -PassThru -WindowStyle Hidden
-          Start-Sleep 2
-          $hj = @(& $exe hunt --all --json | ConvertFrom-Json)
-          Stop-Process -Id $rp.Id -Force -ErrorAction SilentlyContinue
-          $hit = $hj | Where-Object { $_.name -eq "svc_update.exe" }
-          if (-not $hit -or $hit.finding -notlike "*is cmd.exe under another name*") { throw "hunt renamed tool: $($hit | ConvertTo-Json -Compress)" }
-          if ($hj | Where-Object { $_.name -eq "cmd.exe" -and $_.finding -like "*under another name*" }) { throw "hunt: the real cmd.exe reported as renamed" }
-          # logons: on an elevated runner the Security log is readable. If
-          # Get-WinEvent sees logon events, winspect must list logons too, and
-          # the offline reader must agree with the live API on an exported log.
-          $have = @(Get-WinEvent -FilterHashtable @{LogName="Security"; Id=4624} -MaxEvents 5 -ErrorAction SilentlyContinue).Count
-          $lg = @(& $exe logons --all --json | ConvertFrom-Json)
-          if ($have -gt 0 -and @($lg | Where-Object { $_.event -eq "logon" }).Count -eq 0) { throw "logons: Get-WinEvent sees 4624 events, winspect lists none" }
-          $sev = Join-Path $env:RUNNER_TEMP "security.evtx"
-          wevtutil epl Security $sev
-          $lcut = (Get-Date).ToUniversalTime().AddMinutes(-2).ToString("yyyy-MM-dd HH:mm:ss")
-          $ll = @(& $exe logons --all --max 100000 --json | ConvertFrom-Json | Where-Object { $_.id -eq 4624 -and $_.time -lt $lcut })
-          $lo = @(& $exe logons --all --evtx $sev --json | ConvertFrom-Json | Where-Object { $_.id -eq 4624 -and $_.time -lt $lcut })
-          $a = ($ll | ForEach-Object { "$($_.time)|$($_.account)|$($_.logon_type)|$($_.logon_id)" } | Sort-Object) -join "`n"
-          $b = ($lo | ForEach-Object { "$($_.time)|$($_.account)|$($_.logon_type)|$($_.logon_id)" } | Sort-Object) -join "`n"
-          if ($a -ne $b) {
-            $d = Compare-Object ($a -split "`n") ($b -split "`n") | Select-Object -First 6 | ForEach-Object { "$($_.SideIndicator) $($_.InputObject)" }
-            throw "logons --evtx differs from live: $($ll.Count) live vs $($lo.Count) offline (<= live only, => offline only):`n$($d -join "`n")"
+
+          Check "hunt (renamed system tool)" {
+            # a copy of cmd.exe under another name is still cmd.exe by its version resource
+            $ren = Join-Path $env:TEMP "svc_update.exe"
+            Copy-Item C:\Windows\System32\cmd.exe $ren -Force
+            $rp = Start-Process $ren -ArgumentList "/c","ping -n 20 127.0.0.1" -PassThru -WindowStyle Hidden
+            try {
+              Start-Sleep 2
+              $hj = @(& $exe hunt --all --json | ConvertFrom-Json)
+            } finally { Stop-Process -Id $rp.Id -Force -ErrorAction SilentlyContinue }
+            $hit = $hj | Where-Object { $_.name -eq "svc_update.exe" }
+            if (-not $hit -or $hit.finding -notlike "*is cmd.exe under another name*") { throw "not reported: $($hit | ConvertTo-Json -Compress)" }
+            if ($hj | Where-Object { $_.name -eq "cmd.exe" -and $_.finding -like "*under another name*" }) { throw "the real cmd.exe reported as renamed" }
           }
-          # boots: same boots live and from an exported System log. Classic
-          # events (1074 shutdown requests) carry their strings as repeated
-          # <Data> elements; the offline reader must split them like the API.
-          $bev = Join-Path $env:RUNNER_TEMP "system-boots.evtx"
-          wevtutil epl System $bev
-          $bcut = (Get-Date).ToUniversalTime().AddMinutes(-2).ToString("yyyy-MM-dd HH:mm:ss")
-          $bl = @(& $exe boots --max 100000 --json | ConvertFrom-Json | Where-Object { $_.time -lt $bcut })
-          $bo = @(& $exe boots --evtx $bev --json | ConvertFrom-Json | Where-Object { $_.time -lt $bcut })
-          $ba = ($bl | ForEach-Object { "$($_.time)|$($_.event)|$($_.detail)" }) -join "`n"
-          $bb = ($bo | ForEach-Object { "$($_.time)|$($_.event)|$($_.detail)" }) -join "`n"
-          if ($ba -ne $bb) { throw "boots --evtx differs from live: $($bl.Count) live vs $($bo.Count) offline" }
-          $kb = @(Get-WinEvent -FilterHashtable @{LogName="System"; ProviderName="Microsoft-Windows-Kernel-General"; Id=12} -MaxEvents 3 -ErrorAction SilentlyContinue).Count
-          if ($kb -gt 0 -and @($bl | Where-Object { $_.event -eq "boot" }).Count -eq 0) { throw "boots: Get-WinEvent sees boot events, winspect lists none" }
-          # volumes: the serial of C: is the one "vol" prints.
-          $vs = ((cmd /c vol C:) | Select-String -Pattern "[0-9A-F]{4}-[0-9A-F]{4}").Matches[0].Value
-          $vc = (& $exe volumes --json | ConvertFrom-Json) | Where-Object { $_.drive -eq "C:" }
-          if (-not $vc -or $vc.serial -ne $vs) { throw "volumes: C: serial '$($vc.serial)' but vol says '$vs'" }
-          # dns: a name that ipconfig shows in the resolver cache must be in
-          # winspect's list too (same cache, two readers).
-          Resolve-DnsName example.com -ErrorAction SilentlyContinue | Out-Null
-          $ipc = ipconfig /displaydns | Out-String
-          $dn = @(& $exe dns --json | ConvertFrom-Json)
-          if ($ipc -match "example\.com" -and -not ($dn | Where-Object { $_.name -like "*example.com*" })) { throw "dns: example.com is in ipconfig /displaydns but not in winspect dns" }
-          # magic: a program copied to a .jpg name is identified and flagged; a
-          # real text file is not. hash --match finds the same file by SHA-256.
-          $md = Join-Path $env:RUNNER_TEMP "magictest"
-          New-Item -ItemType Directory -Force -Path $md | Out-Null
-          Copy-Item C:\Windows\System32\notepad.exe (Join-Path $md "holiday.jpg")
-          Copy-Item C:\Windows\System32\drivers\etc\hosts (Join-Path $md "hosts.txt")
-          $mg = @(& $exe magic $md --json | ConvertFrom-Json)
-          $bad = $mg | Where-Object { $_.suspicious }
-          if (@($bad).Count -ne 1 -or $bad.path -notlike "*holiday.jpg" -or $bad.type -notlike "PE executable*") { throw "magic: $($mg | ConvertTo-Json -Compress)" }
-          $sha = (Get-FileHash C:\Windows\System32\notepad.exe -Algorithm SHA256).Hash
-          Set-Content -Path (Join-Path $env:RUNNER_TEMP "iocs.txt") -Value "$sha,notepad-copy"
-          $hm = @(& $exe hash $md --match (Join-Path $env:RUNNER_TEMP "iocs.txt") --json | ConvertFrom-Json)
-          if ($hm.Count -ne 1 -or $hm[0].label -ne "notepad-copy" -or $hm[0].sha256 -ne $sha.ToLower()) { throw "hash --match: $($hm | ConvertTo-Json -Compress)" }
-          # events --evtx: export the live System log, then the offline reader
-          # must give the same System rows (7045 / 104) as the live API for
-          # every event written before the export.
-          $ev = Join-Path $env:RUNNER_TEMP "system.evtx"
-          wevtutil epl System $ev
-          $cut = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss")
-          $live = & $exe events --max 1000 --json | ConvertFrom-Json | Where-Object { $_.channel -eq "System" -and $_.time -lt $cut }
-          $off  = & $exe events --evtx $ev --max 1000 --json | ConvertFrom-Json | Where-Object { $_.time -lt $cut }
-          $lk = ($live | ForEach-Object { "$($_.time)|$($_.id)|$($_.summary)" }) -join "`n"
-          $ok = ($off  | ForEach-Object { "$($_.time)|$($_.id)|$($_.summary)" }) -join "`n"
-          if ($lk -ne $ok) { throw "events --evtx differs from live: $(@($live).Count) live vs $(@($off).Count) offline" }
-          Write-Host "events --evtx matches live ($(@($live).Count) System rows)"
-          # usn --live: a file renamed from .txt to .exe and a deleted .ps1
-          # must show up flagged in the live change journal of C:.
-          $ud = Join-Path $env:TEMP "wsusn"
-          New-Item -ItemType Directory -Force -Path $ud | Out-Null
-          Set-Content (Join-Path $ud "wsusn_note.txt") "x"
-          Rename-Item (Join-Path $ud "wsusn_note.txt") "wsusn_note.exe"
-          Set-Content (Join-Path $ud "wsusn_tool.ps1") "x"
-          Remove-Item (Join-Path $ud "wsusn_tool.ps1")
-          $uj = & $exe usn --live C: --find wsusn_ --flagged --json | ConvertFrom-Json
-          Remove-Item -Recurse -Force $ud
-          if (-not ($uj | Where-Object { $_.name -eq "wsusn_note.exe" -and $_.reason -like "*renamed into*" -and $_.old_name -eq "wsusn_note.txt" })) {
-            throw "usn --live: rename into .exe not flagged: $($uj | ConvertTo-Json -Compress)" }
-          if (-not ($uj | Where-Object { $_.name -eq "wsusn_tool.ps1" -and $_.folder -like "*\wsusn" })) {
-            throw "usn --live: deleted .ps1 not flagged with its folder: $($uj | ConvertTo-Json -Compress)" }
-          # mft --live: a file created and then deleted must still be in the
-          # live $MFT as a not-in-use record with its full path; a kept file
-          # is listed as in use.
-          $md = Join-Path $env:TEMP "wsmft"
-          New-Item -ItemType Directory -Force -Path $md | Out-Null
-          Set-Content (Join-Path $md "wsmft_keep.txt") "x"
-          Set-Content (Join-Path $md "wsmft_gone.txt") "x"
-          Remove-Item (Join-Path $md "wsmft_gone.txt")
-          $mj = & $exe mft --live C: --deleted --find wsmft_ --json | ConvertFrom-Json
-          Remove-Item -Recurse -Force $md
-          if (-not ($mj | Where-Object { $_.path -like "*\wsmft\wsmft_gone.txt" -and -not $_.in_use })) {
-            throw "mft --live: deleted file not found: $($mj | ConvertTo-Json -Compress)" }
-          if (-not ($mj | Where-Object { $_.path -like "*\wsmft\wsmft_keep.txt" -and $_.in_use })) {
-            throw "mft --live: kept file not found: $($mj | ConvertTo-Json -Compress)" }
-          # bits: a helper creates a SUSPENDED job (bare-IP source, notify
-          # command line), never resumed, cancelled when it reads a line. The
-          # notify command must be the reason given.
-          cl /nologo tests\bitsjob.c /Fe:(Join-Path $env:TEMP "bitsjob.exe") /Fo:(Join-Path $env:TEMP "bitsjob.obj") ole32.lib bits.lib uuid.lib | Out-Null
-          $bp = New-Object System.Diagnostics.Process
-          $bp.StartInfo.FileName = Join-Path $env:TEMP "bitsjob.exe"
-          $bp.StartInfo.UseShellExecute = $false
-          $bp.StartInfo.RedirectStandardInput = $true
-          $bp.StartInfo.RedirectStandardOutput = $true
-          [void]$bp.Start()
-          do { $l = $bp.StandardOutput.ReadLine() } while ($l -ne $null -and $l -ne "ready")
-          $bj = & $exe bits --json | ConvertFrom-Json
-          $bp.StandardInput.WriteLine(""); $bp.WaitForExit(30000) | Out-Null
-          $t = $bj | Where-Object { $_.name -eq "winspect-test-job" }
-          if (-not $t) { throw "bits: test job not listed" }
-          if ($t.reason -notlike "*notify*" -and $t.reason -notlike "*runs a command*") { throw "bits: notify command not flagged: $($t | ConvertTo-Json -Compress)" }
-          if ($t.notify -notlike "*cmd.exe*") { throw "bits: notify command not read: $($t.notify)" }
-          # comhijack: re-register the Shortcut class per-user with a DLL in
-          # TEMP (never loaded: nothing creates the object meanwhile), expect
-          # it flagged, then remove the per-user key again.
-          $ck = "HKCU:\Software\Classes\CLSID\{00021401-0000-0000-C000-000000000046}\InprocServer32"
-          New-Item -Path $ck -Force | Out-Null
-          Set-Item -Path $ck -Value (Join-Path $env:TEMP "shellhook.dll")
-          $chj = & $exe comhijack --flagged --json | ConvertFrom-Json
-          Remove-Item -Path "HKCU:\Software\Classes\CLSID\{00021401-0000-0000-C000-000000000046}" -Recurse -Force
-          if (-not ($chj | Where-Object { $_.clsid -eq "{00021401-0000-0000-C000-000000000046}" -and $_.machine_server -like "*shell32.dll" })) {
-            throw "comhijack: per-user Shortcut override not flagged: $($chj | ConvertTo-Json -Compress)" }
-          # users: a throw-away local account whose name ends in '$' (hidden
-          # from "net user"), created disabled, must be flagged; then deleted.
-          net user 'wstest$' 'Wx-9f3!kq2-Lm' /add /active:no | Out-Null
-          $ua = & $exe users --json | ConvertFrom-Json
-          net user 'wstest$' /delete | Out-Null
-          $hid = $ua.accounts | Where-Object { $_.name -eq 'wstest$' }
-          if (-not $hid -or -not $hid.suspicious -or $hid.enabled) { throw "users: hidden-style account not flagged: $($hid | ConvertTo-Json -Compress)" }
-          if (-not ($ua.accounts | Where-Object { $_.admin -eq $true })) { throw "users: no Administrators member found" }
-          if ($ua.machine_sid -notlike "S-1-5-21-*") { throw "users: machine SID missing: $($ua.machine_sid)" }
-          # Offline hive reader vs the live registry on the SAME data: save
-          # HKLM\SYSTEM to a real regf file, then the shimcache / bam records
-          # read through --hive must equal the ones read through the live API.
-          $hv = Join-Path $env:RUNNER_TEMP "system.hiv"
-          reg save HKLM\SYSTEM $hv /y | Out-Null
-          foreach ($c in "shimcache","bam") {
-            $live = (& $exe $c --json | ConvertFrom-Json)
-            $off  = (& $exe $c --hive $hv --json | ConvertFrom-Json)
-            $lk = ($live | ForEach-Object { "$($_.path)|$($_.file_modified)$($_.last_run)" }) -join "`n"
-            $ok = ($off  | ForEach-Object { "$($_.path)|$($_.file_modified)$($_.last_run)" }) -join "`n"
-            if ($lk -ne $ok) { throw "$c --hive differs from live: $(@($live).Count) live vs $(@($off).Count) offline" }
-            Write-Host "$c --hive matches live ($(@($live).Count) records)"
+
+          Check "logons (live, and --evtx equal to live)" {
+            $have = @(Get-WinEvent -FilterHashtable @{LogName="Security"; Id=4624} -MaxEvents 5 -ErrorAction SilentlyContinue).Count
+            $lg = @(& $exe logons --all --json | ConvertFrom-Json)
+            if ($have -gt 0 -and @($lg | Where-Object { $_.event -eq "logon" }).Count -eq 0) { throw "Get-WinEvent sees 4624 events, winspect lists none" }
+            $sev = Join-Path $env:RUNNER_TEMP "security.evtx"
+            wevtutil epl Security $sev /ow:true
+            $lcut = (Get-Date).ToUniversalTime().AddMinutes(-2).ToString("yyyy-MM-dd HH:mm:ss")
+            $ll = @(& $exe logons --all --max 100000 --json | ConvertFrom-Json | Where-Object { $_.id -eq 4624 -and $_.time -lt $lcut })
+            $lo = @(& $exe logons --all --evtx $sev --json | ConvertFrom-Json | Where-Object { $_.id -eq 4624 -and $_.time -lt $lcut })
+            $a = @($ll | ForEach-Object { "$($_.time)|$($_.account)|$($_.logon_type)|$($_.logon_id)" } | Sort-Object)
+            $b = @($lo | ForEach-Object { "$($_.time)|$($_.account)|$($_.logon_type)|$($_.logon_id)" } | Sort-Object)
+            if (($a -join "`n") -ne ($b -join "`n")) {
+              $d = Compare-Object $a $b | Select-Object -First 6 | ForEach-Object { "$($_.SideIndicator) $($_.InputObject)" }
+              throw "--evtx differs: $($ll.Count) live vs $($lo.Count) offline (<= live only, => offline only):`n$($d -join "`n")"
+            }
           }
-          # amcache: the live Amcache.hve is locked; take a VSS copy (admin) and read it.
-          $am = Join-Path $env:RUNNER_TEMP "amcache.hve"
-          esentutl /y C:\Windows\AppCompat\Programs\Amcache.hve /vss /d $am 2>$null | Out-Null
-          if (Test-Path $am) {
-            $aj = & $exe amcache $am --json | ConvertFrom-Json
-            if (-not ($aj | Where-Object { $_.sha1 -match '^[0-9a-f]{40}$' })) { throw "amcache: no entry with a SHA-1 in a real Amcache.hve" }
-            Write-Host "amcache: $(@($aj).Count) entries from a VSS copy"
-          } else { Write-Host "amcache: VSS copy not possible here, check skipped" }
-          $hj = & $exe hive $hv "Select" --json | ConvertFrom-Json
-          if (-not $hj.checksum_ok) { throw "hive: checksum of a reg-saved hive must be valid" }
-          Write-Host "streams + events (+summary) + net + handles functional checks passed"
+
+          Check "boots (live, and --evtx equal to live)" {
+            $bev = Join-Path $env:RUNNER_TEMP "system-boots.evtx"
+            wevtutil epl System $bev /ow:true
+            $bcut = (Get-Date).ToUniversalTime().AddMinutes(-2).ToString("yyyy-MM-dd HH:mm:ss")
+            $bl = @(& $exe boots --max 100000 --json | ConvertFrom-Json | Where-Object { $_.time -lt $bcut })
+            $bo = @(& $exe boots --evtx $bev --json | ConvertFrom-Json | Where-Object { $_.time -lt $bcut })
+            $ba = @($bl | ForEach-Object { "$($_.time)|$($_.event)|$($_.detail)" })
+            $bb = @($bo | ForEach-Object { "$($_.time)|$($_.event)|$($_.detail)" })
+            if (($ba -join "`n") -ne ($bb -join "`n")) {
+              $d = Compare-Object $ba $bb | Select-Object -First 6 | ForEach-Object { "$($_.SideIndicator) $($_.InputObject)" }
+              throw "--evtx differs: $($bl.Count) live vs $($bo.Count) offline:`n$($d -join "`n")"
+            }
+            $kb = @(Get-WinEvent -FilterHashtable @{LogName="System"; ProviderName="Microsoft-Windows-Kernel-General"; Id=12} -MaxEvents 3 -ErrorAction SilentlyContinue).Count
+            if ($kb -gt 0 -and @($bl | Where-Object { $_.event -eq "boot" }).Count -eq 0) { throw "Get-WinEvent sees boot events, winspect lists none" }
+          }
+
+          Check "volumes (C: serial equals vol)" {
+            $vs = ((cmd /c vol C:) | Select-String -Pattern "[0-9A-F]{4}-[0-9A-F]{4}").Matches[0].Value
+            $vc = (& $exe volumes --json | ConvertFrom-Json) | Where-Object { $_.drive -eq "C:" }
+            if (-not $vc -or $vc.serial -ne $vs) { throw "C: serial '$($vc.serial)' but vol says '$vs'" }
+          }
+
+          Check "dns (same cache as ipconfig)" {
+            Resolve-DnsName example.com -ErrorAction SilentlyContinue | Out-Null
+            $ipc = ipconfig /displaydns | Out-String
+            $dn = @(& $exe dns --json | ConvertFrom-Json)
+            if ($ipc -match "example\.com" -and -not ($dn | Where-Object { $_.name -like "*example.com*" })) { throw "example.com is in ipconfig /displaydns but not in winspect dns" }
+          }
+
+          Check "magic + hash --match" {
+            $md = Join-Path $env:RUNNER_TEMP "magictest"
+            New-Item -ItemType Directory -Force -Path $md | Out-Null
+            Copy-Item C:\Windows\System32\notepad.exe (Join-Path $md "holiday.jpg") -Force
+            Copy-Item C:\Windows\System32\drivers\etc\hosts (Join-Path $md "hosts.txt") -Force
+            $mg = @(& $exe magic $md --json | ConvertFrom-Json)
+            $bad = $mg | Where-Object { $_.suspicious }
+            if (@($bad).Count -ne 1 -or $bad.path -notlike "*holiday.jpg" -or $bad.type -notlike "PE executable*") { throw "magic: $($mg | ConvertTo-Json -Compress)" }
+            $sha = (Get-FileHash C:\Windows\System32\notepad.exe -Algorithm SHA256).Hash
+            Set-Content -Path (Join-Path $env:RUNNER_TEMP "iocs.txt") -Value "$sha,notepad-copy"
+            $hm = @(& $exe hash $md --match (Join-Path $env:RUNNER_TEMP "iocs.txt") --json | ConvertFrom-Json)
+            if ($hm.Count -ne 1 -or $hm[0].label -ne "notepad-copy" -or $hm[0].sha256 -ne $sha.ToLower()) { throw "hash --match: $($hm | ConvertTo-Json -Compress)" }
+          }
+
+          Check "events --evtx equal to live" {
+            $ev = Join-Path $env:RUNNER_TEMP "system.evtx"
+            wevtutil epl System $ev /ow:true
+            $cut = (Get-Date).ToUniversalTime().AddMinutes(-2).ToString("yyyy-MM-dd HH:mm:ss")
+            $live = & $exe events --max 1000 --json | ConvertFrom-Json | Where-Object { $_.time -lt $cut }
+            $off  = & $exe events --evtx $ev --max 1000 --json | ConvertFrom-Json | Where-Object { $_.time -lt $cut }
+            $lk = @($live | ForEach-Object { "$($_.time)|$($_.id)|$($_.summary)" })
+            $ok = @($off  | ForEach-Object { "$($_.time)|$($_.id)|$($_.summary)" })
+            if (($lk -join "`n") -ne ($ok -join "`n")) {
+              $d = Compare-Object $lk $ok | Select-Object -First 6 | ForEach-Object { "$($_.SideIndicator) $($_.InputObject)" }
+              throw "differs: $(@($live).Count) live vs $(@($off).Count) offline:`n$($d -join "`n")"
+            }
+            Write-Host "     $(@($live).Count) System rows"
+          }
+
+          Check "usn --live (rename into .exe, deleted .ps1)" {
+            $ud = Join-Path $env:TEMP "wsusn"
+            New-Item -ItemType Directory -Force -Path $ud | Out-Null
+            try {
+              Set-Content (Join-Path $ud "wsusn_note.txt") "x"
+              Rename-Item (Join-Path $ud "wsusn_note.txt") "wsusn_note.exe"
+              Set-Content (Join-Path $ud "wsusn_tool.ps1") "x"
+              Remove-Item (Join-Path $ud "wsusn_tool.ps1")
+              $uj = & $exe usn --live C: --find wsusn_ --flagged --json | ConvertFrom-Json
+            } finally { Remove-Item -Recurse -Force $ud -ErrorAction SilentlyContinue }
+            if (-not ($uj | Where-Object { $_.name -eq "wsusn_note.exe" -and $_.reason -like "*renamed into*" -and $_.old_name -eq "wsusn_note.txt" })) {
+              throw "rename into .exe not flagged: $($uj | ConvertTo-Json -Compress)" }
+            if (-not ($uj | Where-Object { $_.name -eq "wsusn_tool.ps1" -and $_.folder -like "*\wsusn" })) {
+              throw "deleted .ps1 not flagged with its folder: $($uj | ConvertTo-Json -Compress)" }
+          }
+
+          Check "mft --live (kept file in use, deleted file still listed)" {
+            # --deleted lists only records no longer in use, so the kept file is looked
+            # up without it. NTFS may hand a freed record to a new file at once (the
+            # name is then gone), so five files are deleted and one must still be there.
+            $md = Join-Path $env:TEMP "wsmft"
+            New-Item -ItemType Directory -Force -Path $md | Out-Null
+            try {
+              Set-Content (Join-Path $md "wsmft_keep.txt") "x"
+              foreach ($i in 1..5) { Set-Content (Join-Path $md "wsmft_gone$i.txt") "x" }
+              foreach ($i in 1..5) { Remove-Item (Join-Path $md "wsmft_gone$i.txt") }
+              $mdel = @(& $exe mft --live C: --deleted --find wsmft_gone --json | ConvertFrom-Json)
+              $mall = @(& $exe mft --live C: --find wsmft_keep --json | ConvertFrom-Json)
+            } finally { Remove-Item -Recurse -Force $md -ErrorAction SilentlyContinue }
+            if (-not ($mdel | Where-Object { $_.path -like "*\wsmft\wsmft_gone*.txt" -and -not $_.in_use })) {
+              throw "no deleted file found: $($mdel | ConvertTo-Json -Compress)" }
+            if ($mdel | Where-Object { $_.in_use }) { throw "--deleted listed a record in use: $($mdel | ConvertTo-Json -Compress)" }
+            if (-not ($mall | Where-Object { $_.path -like "*\wsmft\wsmft_keep.txt" -and $_.in_use })) {
+              throw "kept file not found in use: $($mall | ConvertTo-Json -Compress)" }
+          }
+
+          Check "bits (suspended job with a notify command)" {
+            cl /nologo tests\bitsjob.c /Fe:(Join-Path $env:TEMP "bitsjob.exe") /Fo:(Join-Path $env:TEMP "bitsjob.obj") ole32.lib bits.lib uuid.lib | Out-Null
+            $bp = New-Object System.Diagnostics.Process
+            $bp.StartInfo.FileName = Join-Path $env:TEMP "bitsjob.exe"
+            $bp.StartInfo.UseShellExecute = $false
+            $bp.StartInfo.RedirectStandardInput = $true
+            $bp.StartInfo.RedirectStandardOutput = $true
+            [void]$bp.Start()
+            try {
+              $out = @()
+              do { $l = $bp.StandardOutput.ReadLine(); if ($l -ne $null) { $out += $l } } while ($l -ne $null -and $l -ne "ready")
+              $bj = & $exe bits --json | ConvertFrom-Json
+            } finally {
+              # the helper cancels its job when it reads a line
+              try { $bp.StandardInput.WriteLine(""); [void]$bp.WaitForExit(30000) } catch { }
+            }
+            $t = $bj | Where-Object { $_.name -eq "winspect-test-job" }
+            if (-not $t) { throw "test job not listed (helper said: $($out -join ' / '))" }
+            if ($t.reason -notlike "*runs a command*") { throw "notify command not the reason: $($t | ConvertTo-Json -Compress)" }
+            if ($t.notify -notlike "*cmd.exe*") { throw "notify command not read: $($t.notify)" }
+          }
+
+          Check "comhijack (per-user override of a machine class)" {
+            # re-register the Shortcut class per-user with a DLL in TEMP (never loaded:
+            # nothing creates the object meanwhile), then remove the per-user key. The
+            # machine server is not named here: it is shell32.dll on older Windows and
+            # windows.storage.dll on Windows 10 and later.
+            $root = "HKCU:\Software\Classes\CLSID\{00021401-0000-0000-C000-000000000046}"
+            New-Item -Path "$root\InprocServer32" -Force | Out-Null
+            try {
+              Set-Item -Path "$root\InprocServer32" -Value (Join-Path $env:TEMP "shellhook.dll")
+              $chj = & $exe comhijack --flagged --json | ConvertFrom-Json
+            } finally { Remove-Item -Path $root -Recurse -Force -ErrorAction SilentlyContinue }
+            $hit = $chj | Where-Object { $_.clsid -eq "{00021401-0000-0000-C000-000000000046}" }
+            if (-not $hit -or -not $hit.machine_server -or $hit.reason -notlike "*COM hijacking*") {
+              throw "per-user Shortcut override not flagged: $($chj | ConvertTo-Json -Compress)" }
+          }
+
+          Check "users (hidden-style account, admin, machine SID)" {
+            # a throw-away local account whose name ends in '$', created disabled
+            # a long mixed password, so any local password policy accepts it
+            $nu = net user 'wstest$' 'Wx-9f3!kq2-Lm-7Rt#pQ4z' /add /active:no 2>&1 | Out-String
+            if ($LASTEXITCODE -ne 0) { throw "net user /add failed: $nu" }
+            try { $ua = & $exe users --json | ConvertFrom-Json }
+            finally { net user 'wstest$' /delete 2>$null | Out-Null }
+            $hid = $ua.accounts | Where-Object { $_.name -eq 'wstest$' }
+            if (-not $hid -or -not $hid.suspicious -or $hid.enabled) { throw "hidden-style account not flagged: $($hid | ConvertTo-Json -Compress)" }
+            if (-not ($ua.accounts | Where-Object { $_.admin -eq $true })) { throw "no Administrators member found" }
+            if ($ua.machine_sid -notlike "S-1-5-21-*") { throw "machine SID missing: $($ua.machine_sid)" }
+          }
+
+          Check "offline hive equal to live (shimcache, bam) + hive checksum" {
+            # save HKLM\SYSTEM to a real regf file; records read through --hive must
+            # equal the live ones. BAM rows touched after the save (a program that
+            # ran since) are left out of the comparison.
+            $hv = Join-Path $env:RUNNER_TEMP "system.hiv"
+            $scut = (Get-Date).ToUniversalTime().AddMinutes(-1).ToString("yyyy-MM-dd HH:mm:ss")
+            reg save HKLM\SYSTEM $hv /y | Out-Null
+            foreach ($c in "shimcache","bam") {
+              $live = @(& $exe $c --json | ConvertFrom-Json)
+              $off  = @(& $exe $c --hive $hv --json | ConvertFrom-Json)
+              if ($c -eq "bam") {
+                $live = @($live | Where-Object { $_.last_run -lt $scut })
+                $off  = @($off  | Where-Object { $_.last_run -lt $scut })
+              }
+              $lk = @($live | ForEach-Object { "$($_.path)|$($_.file_modified)$($_.last_run)" } | Sort-Object)
+              $ok = @($off  | ForEach-Object { "$($_.path)|$($_.file_modified)$($_.last_run)" } | Sort-Object)
+              if (($lk -join "`n") -ne ($ok -join "`n")) {
+                $d = Compare-Object $lk $ok | Select-Object -First 6 | ForEach-Object { "$($_.SideIndicator) $($_.InputObject)" }
+                throw "$c --hive differs: $($live.Count) live vs $($off.Count) offline:`n$($d -join "`n")"
+              }
+              Write-Host "     $c --hive matches live ($($live.Count) records)"
+            }
+            $hj = & $exe hive $hv "Select" --json | ConvertFrom-Json
+            if (-not $hj.checksum_ok) { throw "hive: checksum of a reg-saved hive must be valid" }
+          }
+
+          Check "amcache (VSS copy of the live hive)" {
+            # the live Amcache.hve is locked; take a VSS copy (admin) and read it
+            $am = Join-Path $env:RUNNER_TEMP "amcache.hve"
+            esentutl /y C:\Windows\AppCompat\Programs\Amcache.hve /vss /d $am 2>$null | Out-Null
+            if (Test-Path $am) {
+              $aj = & $exe amcache $am --json | ConvertFrom-Json
+              if (-not ($aj | Where-Object { $_.sha1 -match '^[0-9a-f]{40}$' })) { throw "no entry with a SHA-1 in a real Amcache.hve" }
+              Write-Host "     $(@($aj).Count) entries"
+            } else { Write-Host "     VSS copy not possible here, check skipped" }
+          }
+
+          if ($fails.Count) { throw "$($fails.Count) real-Windows check(s) failed:`n$($fails -join "`n")" }
+          Write-Host "all real-Windows checks passed"
 
       - name: Smoke test (MinGW)
         if: matrix.toolchain == 'mingw'
