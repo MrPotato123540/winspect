@@ -539,3 +539,43 @@ jobs:
           for c in inspect threads handles regions token secinfo modules verify triage; do smoke $c "$p"; smoke $c "$p" --json; done
           smoke modules "$p" --unsigned; smoke firewall --inbound --allow --active --csv; smoke autoruns --csv; smoke objects --global --type Mutant; smoke drivers --sig; smoke services --flagged; smoke streams /c/Windows/System32/drivers/etc; smoke lnk --json; smoke autoruns --sig; smoke services --sig --flagged; smoke events --summary; smoke prefetch --flagged; smoke hunt --all; smoke handles --find ntdll --type File; smoke hive /c/Windows/System32/config/SYSTEM; smoke amcache; smoke usb --csv; smoke rdp; smoke rdp --json
           echo "all commands ran without crashing"
+
+  # Copies the logs of failed jobs to the ci-logs branch (one commit, replaced
+  # on every run), so a failure can be read with a plain "git fetch" - no
+  # browser or GitHub login needed. Each file holds the job's step results,
+  # the lines that look like errors, and the end of the log.
+  report:
+    if: always() && github.event_name == 'push'
+    needs: [unit, wine, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Collect the logs of failed jobs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir out
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" > jobs.json
+          echo "$GITHUB_SHA" > out/commit.txt
+          jq -r '.jobs[] | "\(.conclusion // .status)\t\(.name)"' jobs.json > out/summary.txt
+          cat out/summary.txt
+          jq -r '.jobs[] | select(.conclusion == "failure") | "\(.id) \(.name)"' jobs.json | while read -r id name; do
+            f="out/$(printf '%s' "$name" | tr -c 'A-Za-z0-9' '_').log"
+            gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$id/logs" > full.log || echo "(log not available)" > full.log
+            jq -r --argjson id "$id" '.jobs[] | select(.id == $id) | .steps[] | "\(.conclusion // .status)\t\(.name)"' jobs.json > "$f"
+            { echo; echo "==== lines that look like errors"; grep -n -i -E "error|fatal|fail|traceback|not found|cannot|undefined" full.log | head -300 || true; } >> "$f"
+            { echo; echo "==== last 500 lines"; tail -500 full.log; } >> "$f"
+          done
+      - name: Publish them on the ci-logs branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd out
+          git init -q -b ci-logs
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "CI logs for $GITHUB_SHA"
+          git push -q -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" ci-logs
