@@ -220,6 +220,21 @@ satır "(2 report folders)", Defender'ın `mpengine.dll` satırı kayboldu.
   klasörüyle değerlendiriyor. Bu bir açığı da kapattı: açıkken silinen bir
   `.exe` önceden onaltılık adı yüzünden hiç işaretlenmiyordu.
 
+## CI'ın gerçek Windows adımı
+
+GitHub'ın Windows makinesindeki testler iki gerçek hata daha buldu:
+
+- **`handles --find` çoğu dosyayı kaçırıyordu.** Donan ad sorguları için
+  bütün tarama boyunca toplam 4 hak vardı; ilk sistem servisleri bunu
+  tüketince sonraki süreçlerin dosya adları hiç sorulmuyordu. Sınır artık
+  süreç başına (3), toplamda 64; atlanan adlar sayılıp yazılıyor.
+- **`$Extend\$Deleted`'e taşınma silmedir.** Defender'ın taradığı bir
+  betik silinince NTFS onu bu gizli klasöre taşıyor; asıl `FILE_DELETE`
+  kaydı ancak tarama bitince, bazen günlük okunduktan sonra geliyor. Araç
+  taşımayı "yeniden adlandırma" sayıp işaretlemiyordu. Artık taşınma,
+  gerçek adla bir silme olarak değerlendiriliyor ("while another program
+  still had it open"); sonradan gelen `FILE_DELETE` ikinci kez işaretlenmiyor.
+
 ## Gerçek bulgu: Excel'de VBAWarnings = 1
 
 `office` komutunun işaretlediği `VBAWarnings=1` bir yanlış alarm **değil**:

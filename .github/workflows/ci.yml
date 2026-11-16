@@ -458,18 +458,24 @@ jobs:
           }
 
           Check "events --evtx equal to live" {
-            $ev = Join-Path $env:RUNNER_TEMP "system.evtx"
-            wevtutil epl System $ev /ow:true
+            # the live command reads six logs: export each one that exists here
+            $evf = @()
+            foreach ($ch in "System","Security","Microsoft-Windows-Windows Defender/Operational","Microsoft-Windows-TaskScheduler/Operational",
+                            "Microsoft-Windows-TerminalServices-RemoteConnectionManager/Operational","Microsoft-Windows-PowerShell/Operational") {
+              $f = Join-Path $env:RUNNER_TEMP ("ev-" + ($ch -replace '[^A-Za-z0-9]', '_') + ".evtx")
+              wevtutil epl $ch $f /ow:true 2>$null
+              if ($LASTEXITCODE -eq 0 -and (Test-Path $f)) { $evf += "--evtx"; $evf += $f }
+            }
             $cut = (Get-Date).ToUniversalTime().AddMinutes(-2).ToString("yyyy-MM-dd HH:mm:ss")
-            $live = & $exe events --max 1000 --json | ConvertFrom-Json | Where-Object { $_.time -lt $cut }
-            $off  = & $exe events --evtx $ev --max 1000 --json | ConvertFrom-Json | Where-Object { $_.time -lt $cut }
-            $lk = @($live | ForEach-Object { "$($_.time)|$($_.id)|$($_.summary)" })
-            $ok = @($off  | ForEach-Object { "$($_.time)|$($_.id)|$($_.summary)" })
+            $live = & $exe events --max 100000 --json | ConvertFrom-Json | Where-Object { $_.time -lt $cut }
+            $off  = & $exe events @evf --max 100000 --json | ConvertFrom-Json | Where-Object { $_.time -lt $cut }
+            $lk = @($live | ForEach-Object { "$($_.time)|$($_.id)|$($_.summary)" } | Sort-Object)
+            $ok = @($off  | ForEach-Object { "$($_.time)|$($_.id)|$($_.summary)" } | Sort-Object)
             if (($lk -join "`n") -ne ($ok -join "`n")) {
               $d = Compare-Object $lk $ok | Select-Object -First 6 | ForEach-Object { "$($_.SideIndicator) $($_.InputObject)" }
               throw "differs: $(@($live).Count) live vs $(@($off).Count) offline:`n$($d -join "`n")"
             }
-            Write-Host "     $(@($live).Count) System rows"
+            Write-Host "     $(@($live).Count) rows from $($evf.Count / 2) exported logs"
           }
 
           Check "usn --live (rename into .exe, deleted .ps1)" {
@@ -484,7 +490,9 @@ jobs:
             } finally { Remove-Item -Recurse -Force $ud -ErrorAction SilentlyContinue }
             if (-not ($uj | Where-Object { $_.name -eq "wsusn_note.exe" -and $_.reason -like "*renamed into*" -and $_.old_name -eq "wsusn_note.txt" })) {
               throw "rename into .exe not flagged: $($uj | ConvertTo-Json -Compress)" }
-            if (-not ($uj | Where-Object { $_.name -eq "wsusn_tool.ps1" -and $_.folder -like "*\wsusn" })) {
+            # deleted directly, or - when Defender still scans it - moved into
+            # $Extend\$Deleted, which the row names together with the old place
+            if (-not ($uj | Where-Object { ($_.name -eq "wsusn_tool.ps1" -and $_.folder -like "*\wsusn") -or $_.folder -like "*was *\wsusn\wsusn_tool.ps1)" })) {
               throw "deleted .ps1 not flagged with its folder: $($uj | ConvertTo-Json -Compress)" }
           }
 
@@ -548,8 +556,8 @@ jobs:
 
           Check "users (hidden-style account, admin, machine SID)" {
             # a throw-away local account whose name ends in '$', created disabled
-            # a long mixed password, so any local password policy accepts it
-            $nu = net user 'wstest$' 'Wx-9f3!kq2-Lm-7Rt#pQ4z' /add /active:no 2>&1 | Out-String
+            # 14 characters: a longer password makes net user stop and ask Y/N
+            $nu = net user 'wstest$' 'Wx-9f3!kq2-Lm7' /add /active:no 2>&1 | Out-String
             if ($LASTEXITCODE -ne 0) { throw "net user /add failed: $nu" }
             try { $ua = & $exe users --json | ConvertFrom-Json }
             finally { net user 'wstest$' /delete 2>$null | Out-Null }

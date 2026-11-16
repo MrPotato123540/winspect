@@ -352,7 +352,17 @@ int cmd_usn(int argc, char **argv)
             }
         }
         const char *reason = usn_flag(r.reason, judge_name, parked ? NULL : old, is_prog);
-        if (parked && (r.reason & 0x2000)) reason = NULL;      // the move into $Deleted is not a rename into a program
+        // The move into $Deleted IS the deletion: the name leaves the folder
+        // there, and the FILE_DELETE record only follows when the last handle
+        // closes - possibly after this journal was read, possibly never in it.
+        // So the move is judged as a deletion of the real name, and a later
+        // FILE_DELETE of the same file is not flagged a second time.
+        if (parked && (r.reason & 0x2000)) {
+            reason = usn_flag(0x00000200, judge_name, NULL, is_prog)
+                   ? "program or script deleted (while another program still had it open)" : NULL;
+        } else if (parked && (r.reason & 0x00000200) && slot->ref == r.file_ref && slot->flagged) {
+            reason = NULL;
+        }
         if (reason && routine_name(r.name)) reason = NULL;
         if (reason && (r.reason & 0x2000) && old && staging_name(old)) reason = NULL;
         // With the folder known, only user-writable places count: deleting or

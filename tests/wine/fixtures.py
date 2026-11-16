@@ -945,7 +945,11 @@ with open(os.path.join(ntd, 'J'), 'wb') as f:
                     # $Extend\$Deleted under its own reference in hex, then deleted
                     (58 | (1 << 48), dl, T0 + 90, 0x1000, 'evil.exe'),
                     (58 | (1 << 48), 70 | (1 << 48), T0 + 90, 0x2000, '000100000000003A0001A2B3'),
-                    (58 | (1 << 48), 70 | (1 << 48), T0 + 95, 0x80000200, '000100000000003A0001A2B3')]))
+                    (58 | (1 << 48), 70 | (1 << 48), T0 + 95, 0x80000200, '000100000000003A0001A2B3'),
+                    # run.ps1 deleted while open, journal read before the last handle closed:
+                    # only the move into $Deleted exists - that is the deletion
+                    (59 | (1 << 48), dl, T0 + 96, 0x1000, 'run.ps1'),
+                    (59 | (1 << 48), 70 | (1 << 48), T0 + 96, 0x2000, '000100000000003B0001A2B4')]))
 rc, out, err = wine([exe, 'usn', r'C:\ntfs\J', '--mft', r'C:\ntfs\MFT', '--json'])
 try:
     ur = json.loads(out)
@@ -957,10 +961,14 @@ try:
     fl.pop('rules-verify.dll', None)
     pk = [r for r in ur if r['name'] == '000100000000003A0001A2B3']
     pkf = [r for r in pk if r['suspicious']]
-    if len(pk) != 2 or len(pkf) != 1 or 'FILE_DELETE' not in pkf[0]['reasons'] or '$Deleted' not in pkf[0]['folder'] \
+    if len(pk) != 2 or len(pkf) != 1 or 'RENAME_NEW_NAME' not in pkf[0]['reasons'] or '$Deleted' not in pkf[0]['folder'] \
             or 'was \\Users\\bob\\Downloads\\evil.exe' not in pkf[0]['folder']:
         print(f'FAIL usn: POSIX-deleted program not judged by its real name: {pk}'); fails += 1
     fl.pop('000100000000003A0001A2B3', None)
+    op = [r for r in ur if r['name'] == '000100000000003B0001A2B4' and r['suspicious']]
+    if len(op) != 1 or 'still had it open' not in op[0]['reason'] or 'run.ps1' not in op[0]['folder']:
+        print(f'FAIL usn: program moved into $Deleted (no FILE_DELETE yet) not flagged: {op}'); fails += 1
+    fl.pop('000100000000003B0001A2B4', None)
     if fl != {'invoice.exe': 'renamed into a program or script', 'tool.ps1': 'program or script deleted'}:
         print(f'FAIL usn: flags {fl}'); fails += 1
     elif folders.get('notes.txt') != '\\Users\\bob\\Downloads' or 'reused or missing' not in folders.get('lost.txt', ''):
